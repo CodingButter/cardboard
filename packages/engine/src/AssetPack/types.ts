@@ -193,6 +193,31 @@ export type ShaderHookRole = "skyHooks" | "worldHooks" | "spriteHooks";
 /** Either of the two pack-supplied shader manifest keys. */
 export type ShaderEntry = ShaderRole | ShaderHookRole;
 
+/**
+ * One Mode-2 (post-process) fragment pass declared by a pack. The pack
+ * ships just the body of a fragment shader (helpers + `void main()`);
+ * the engine prepends an auto-injected post-pass header declaring the
+ * standard contract — `u_color` (previous pass output), `u_resolution`,
+ * `u_time`, `u_frame`, varying `v_uv`, output `outColor`.
+ *
+ * `name` is unique within the pack and surfaces in the conflict report
+ * when chains collide. `frag` is the path to the GLSL body inside the
+ * pack. Phase S4 of `docs/plans/ENGINE_PACK_SHADERS.md` §4.
+ */
+export interface PostPassDef {
+  /** Unique within the pack; used for chain reporting (§9 / §10.4). */
+  name: string;
+  /** Path inside the pack to the fragment-shader body. */
+  frag: string;
+}
+
+/**
+ * Auto-injected post-pass uniforms a pack body can read without
+ * redeclaration. Exposed for editor tooling that wants to surface the
+ * contract; the runtime header is built from these names verbatim.
+ */
+export const POST_PASS_UNIFORMS = ["u_color", "u_resolution", "u_time", "u_frame"] as const;
+
 /** Authoritative index of a pack's contents. */
 export interface PackManifest {
   name: string;
@@ -286,6 +311,16 @@ export interface PackManifest {
    *
    * WebGL2 backend only. On the canvas2d backend any entries here are
    * silently ignored.
+   *
+   * `postPasses` (Mode 2, S4) — an ordered array of full-screen
+   * fragment passes that run AFTER the world + sprite passes and
+   * BEFORE the HUD compositing step (per §4.4). Each pass receives
+   * the previous color buffer as `u_color`, runs against an FBO
+   * ping-pong, and the final pass writes to the default framebuffer.
+   * Passes apply in array order (index 0 first). Empty / missing is
+   * a no-op and renders byte-identically to a build without S4.
    */
-  shaders?: Partial<Record<ShaderEntry, string>>;
+  shaders?: Partial<Record<ShaderEntry, string>> & {
+    postPasses?: PostPassDef[];
+  };
 }

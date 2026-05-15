@@ -17,6 +17,7 @@ import {
   Textarea,
 } from "../components/ui";
 import { cn } from "../lib/cn";
+import { EditorViewport } from "./EditorViewport";
 
 /**
  * Read-only-ish project view for E1.
@@ -117,6 +118,11 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
     null,
   );
   const [selectedSceneLoading, setSelectedSceneLoading] = useState(false);
+
+  // Viewport state — which scene is the live engine pinned to. Falls
+  // back to the manifest's `startScene` when nothing is explicitly
+  // selected. Click a scene in the list → viewport remounts on it.
+  const [viewportScene, setViewportScene] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -234,6 +240,9 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
 
   const handleSelectScene = async (path: string) => {
     setSelectedScene(path);
+    // Pin the live viewport to whatever scene the user just clicked
+    // so the read-only JSON preview and the engine stay in sync.
+    setViewportScene(path);
     setSelectedSceneBody(null);
     setSelectedSceneLoading(true);
     try {
@@ -352,7 +361,37 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
         </div>
       ) : null}
 
-      <main className="grid grid-cols-1 lg:grid-cols-2 gap-6 px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-8 py-6 max-w-7xl mx-auto space-y-6">
+        {/* Viewport pane — live engine bound to the selected scene
+            (or manifest.startScene). Tab swaps Play / Edit. E3 will
+            replace the Edit-mode pass-through with the grid editor. */}
+        <Card className="overflow-hidden">
+          <CardHeader>
+            <CardTitle>Viewport</CardTitle>
+            <CardDescription>
+              Live engine on the active scene. Click the canvas to
+              capture pointer lock (Play mode). Press Tab to toggle
+              Play / Edit.
+            </CardDescription>
+          </CardHeader>
+          <div className="h-[480px] border-t border-zinc-800">
+            <EditorViewport
+              projectId={projectId}
+              sceneName={
+                viewportScene ?? form?.startScene ?? manifest?.startScene
+              }
+              onSceneResolved={(path) => {
+                // Sync the right-pane scene-list highlight when the
+                // viewport boots against `manifest.startScene` (no
+                // explicit click happened yet).
+                if (!viewportScene) setViewportScene(path);
+                if (!selectedScene) setSelectedScene(path);
+              }}
+            />
+          </div>
+        </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Manifest</CardTitle>
@@ -529,8 +568,16 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
                     )}
                     onClick={() => handleSelectScene(s.path)}
                   >
-                    <div className="text-sm text-zinc-100">
+                    <div className="text-sm text-zinc-100 flex items-center gap-2">
                       {s.path.replace(/^scenes\//, "")}
+                      {viewportScene === s.path ? (
+                        <span
+                          className="text-[10px] text-amber-400 uppercase tracking-wide"
+                          title="Pinned to viewport"
+                        >
+                          ▶ live
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-xs text-zinc-500">
                       {formatBytes(s.sizeBytes)}
@@ -576,6 +623,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
             ) : null}
           </CardContent>
         </Card>
+        </div>
       </main>
     </div>
   );

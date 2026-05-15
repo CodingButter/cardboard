@@ -10,6 +10,7 @@ import type { AssetPack, SheetEntry, ShaderRole } from "AssetPack";
 import { getShaderSource, SHADER_ROLES } from "./ShaderRoleRegistry";
 import { assembleSpriteSource, assembleWorldSource, buildFragmentSource } from "./ShaderInjection";
 import type { ShaderVariantSet, WorldShaderVariantSet } from "./ShaderVariants";
+import { PostPassChain } from "./PostPassChain";
 
 export interface WebGLRendererProps {
   canvas: HTMLCanvasElement;
@@ -826,6 +827,37 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly pack: AssetPack;
   private readonly shaderSources?: Partial<Record<ShaderRole, string>>;
 
+  // ── Post-process chain (Mode 2, S4) ───────────────────────────────────
+  /**
+   * Optional FBO chain of full-screen filter passes inserted between
+   * `drawSprites` and HUD compositing. `null` until `initPostPasses`
+   * resolves — the renderer falls through to the default framebuffer
+   * (byte-identical to pre-S4) while the chain is null.
+   *
+   * The boot path calls `initPostPasses()` once after the renderer
+   * constructor (it's async — fragment shaders are read via
+   * `pack.textBody()`). When the pack ships no `postPasses` field,
+   * `PostPassChain.create` returns `null` and the renderer never
+   * binds a non-default framebuffer.
+   */
+  private postPasses: PostPassChain | null = null;
+
+  /**
+   * Monotonic frame counter incremented in `beginFrame`. Wired to the
+   * post-pass `u_frame` uniform. Wraps at 2^31 — far past anyone's
+   * playtime, and `u_frame` is a `float` so a precision-bleed beyond
+   * 2^23 is the next ceiling (~46 days at 60 fps; we accept the drift
+   * for post-pass animations that wrap on the same period anyway).
+   */
+  private frameCount: number = 0;
+
+  /**
+   * Seconds since the renderer was constructed. Fed to the post-pass
+   * `u_time` uniform every frame so animated effects (CRT scroll,
+   * heat shimmer, vignette pulse) share a common clock.
+   */
+  private readonly startTimeMs: number = (typeof performance !== "undefined" ? performance.now() : Date.now());
+
   /**
    * Resolve every role's fragment source for a given pack, applying
    * any `manifest.shaders` overrides. Async because pack-shipped
@@ -1122,6 +1154,16 @@ export class WebGLRenderer implements SceneRenderer {
   beginFrame(): void {
     this.syncHud();
     this.ctx.clearRect(0, 0, this.hudCanvas.width, this.hudCanvas.height);
+    // S4: if a post-pass chain is active, redirect the sky / world /
+    // sprite passes to its source FBO. The chain's `apply()` in
+    // `endFrame()` walks every pass and the final one writes to the
+    // default framebuffer. When the chain is `null` (no `postPasses`
+    // in the manifest, or every pass failed to compile) we leave the
+    // default framebuffer bound — byte-identical to pre-S4.
+    if (this.postPasses) {
+      this.postPasses.bindSource();
+    }
+    this.frameCount++;
   }
 
   /**
@@ -1796,7 +1838,54 @@ export class WebGLRenderer implements SceneRenderer {
   }
 
   endFrame(): void {
-    // WebGL has implicit present on rAF; nothing to flush here.
+    // S4: run the post-pass chain. Last pass writes to the default
+    // framebuffer — HUD composites on top (its own stacked canvas).
+    // When the chain is null (no `manifest.shaders.postPasses` or
+    // every pass failed to compile), this is a no-op and we left the
+    // default framebuffer bound throughout — byte-identical to pre-S4.
+    if (this.postPasses) {
+      const time = this.elapsedSeconds();
+      this.postPasses.apply(time, this.frameCount);
+    }
+    // WebGL has implicit present on rAF; nothing else to flush here.
+  }
+
+  /**
+   * Seconds since the renderer was constructed. Stable across the
+   * session — `performance.now()` is monotonic and only resets on a
+   * full document reload. Used as the post-pass `u_time` source.
+   */
+  private elapsedSeconds(): number {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    return (now - this.startTimeMs) / 1000;
+  }
+
+  /**
+   * Compile + wire the optional Mode-2 post-pass chain (S4 of
+   * `docs/plans/ENGINE_PACK_SHADERS.md`). Reads every entry under
+   * `pack.manifest.shaders.postPasses`, compiles its fragment shader
+   * against the auto-injected post-pass header (§5.5), and stashes
+   * the chain so `beginFrame` / `endFrame` route through it.
+   *
+   * Async because pack-shipped fragment bodies are read via
+   * `pack.textBody`. Safe to call zero or one times; a second call
+   * is a no-op (the chain is built once per scene-load). The boot
+   * path calls this once after the constructor returns — see
+   * `Game.collectShaderVariants`.
+   *
+   * No-op fast path: when the manifest has no `postPasses` field
+   * (the default), `PostPassChain.create` returns `null` and the
+   * renderer never binds a non-default framebuffer — byte-identical
+   * to pre-S4.
+   */
+  async initPostPasses(): Promise<void> {
+    if (this.postPasses) return;
+    this.postPasses = await PostPassChain.create(
+      this.gl,
+      this.pack,
+      this.canvas.width,
+      this.canvas.height,
+    );
   }
 
   /**
@@ -1811,6 +1900,10 @@ export class WebGLRenderer implements SceneRenderer {
     this.hudCanvas.width = width;
     this.hudCanvas.height = height;
     this.gl.viewport(0, 0, width, height);
+    // S4: keep the post-pass FBOs sized to the on-screen canvas so
+    // their `u_resolution` matches what the world + sprite passes
+    // rendered into. Null-chain is a no-op.
+    if (this.postPasses) this.postPasses.resize(width, height);
     this.syncHud();
   }
 

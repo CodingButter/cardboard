@@ -12,8 +12,9 @@ export type {
   ShaderRole,
   ShaderHookRole,
   ShaderEntry,
+  PostPassDef,
 } from "./types";
-export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS } from "./types";
+export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS, POST_PASS_UNIFORMS } from "./types";
 export { discoverItemVariants } from "./discoverItemVariants";
 export { AssetPack } from "./AssetPack";
 export { ZipAssetPack } from "./ZipAssetPack";

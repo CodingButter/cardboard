@@ -31,9 +31,10 @@
  */
 
 import type { ShaderRole, ShaderHookRole, ShaderEntry } from "./ShaderRoleRegistry";
+import type { PostPassDef } from "../AssetPack/types";
 import { parseHookOverrides } from "./HookParser";
 import { hookPreludeFor, hookNamesFor } from "./HookPrelude";
-import { headerFor, helpersFor } from "./shaderHeaders";
+import { headerFor, helpersFor, headerForPostPass } from "./shaderHeaders";
 
 /* ────────────────────────────────────────────────────────────────────
  * Public types
@@ -51,9 +52,11 @@ export interface ShaderValidationOrigin {
   role: ShaderRole;
   /**
    * Pack manifest key that pointed at this file, e.g. `"worldHooks"`,
-   * `"spriteFrag"`. Used for the diagnostic header.
+   * `"spriteFrag"`. Used for the diagnostic header. Post-pass entries
+   * (S4) use the sentinel `"postPass"` and route through the post-
+   * pass header instead of a role header.
    */
-  manifestKey: ShaderEntry;
+  manifestKey: ShaderEntry | "postPass";
   /**
    * Optional human breadcrumb for nested references — preset id,
    * scene path, etc. Free-form; surfaces in error reports as the
@@ -329,7 +332,8 @@ export async function validateShaderSource(
 ): Promise<ShaderValidationResult> {
   const errors: ShaderValidationError[] = [];
   const role = origin.role;
-  const isHookFile = (origin.manifestKey as string).endsWith("Hooks");
+  const isPostPass = origin.manifestKey === "postPass";
+  const isHookFile = !isPostPass && (origin.manifestKey as string).endsWith("Hooks");
 
   // ── Path B — structural sanity ────────────────────────────────
   // Strip block comments before scanning for `#version` so a pack
@@ -349,10 +353,9 @@ export async function validateShaderSource(
   // ── Path B — duplicate engine-uniform redeclaration ──────────
   // We don't try to fully parse GLSL — we look for top-level
   // `uniform <type> u_NAME` declarations in the file and check
-  // whether the same name appears in the role's auto-injected
-  // header. This catches the most common copy-paste error of
-  // pasting an engine uniform into a hook file.
-  const engineHeader = headerFor(role);
+  // whether the same name appears in the auto-injected header for
+  // the role (or the post-pass header for S4 post-passes).
+  const engineHeader = isPostPass ? headerForPostPass() : headerFor(role);
   const engineUniforms = new Set<string>();
   for (const m of engineHeader.matchAll(/\buniform\s+[^;]*?\b(u_\w+)/g)) {
     engineUniforms.add(m[1]!);
@@ -608,6 +611,12 @@ function assembleForCompile(
   origin: ShaderValidationOrigin,
   engineBody?: string,
 ): string {
+  // S4: post-pass files compile against a separate header — no role
+  // helpers, no hook prelude. The file IS the body.
+  if (origin.manifestKey === "postPass") {
+    return headerForPostPass() + source;
+  }
+
   const header = headerFor(role);
   const helpers = helpersFor(role);
   const prelude = hookPreludeFor(role);
@@ -672,10 +681,19 @@ const PLACEHOLDER_BODY: Record<ShaderRole, string> = {
 export interface ShaderRefToValidate {
   /** Manifest-relative path. */
   path: string;
-  /** Role context — drives prelude + helper selection. */
+  /**
+   * Role context — drives prelude + helper selection. For post-pass
+   * references (S4) any role is acceptable; the `manifestKey ===
+   * "postPass"` sentinel takes priority and routes through the
+   * post-pass header which has no role dependency.
+   */
   role: ShaderRole;
-  /** Manifest key the path came from. */
-  manifestKey: ShaderEntry;
+  /**
+   * Manifest key the path came from. The sentinel `"postPass"` marks
+   * Mode-2 post-process passes (S4); every other value is a role-
+   * or hook-role manifest key from `ShaderEntry`.
+   */
+  manifestKey: ShaderEntry | "postPass";
   /** Free-form breadcrumb for diagnostics. */
   source?: string;
 }
@@ -688,18 +706,43 @@ export interface ShaderRefToValidate {
  * but every origin is reported in the error trail).
  */
 export function collectShaderReferences(
-  manifest: { shaders?: Partial<Record<ShaderEntry, string>> },
+  manifest: {
+    shaders?: Partial<Record<ShaderEntry, string>> & { postPasses?: PostPassDef[] };
+  },
   presets?: Iterable<{ id: string; file: string; shader?: Partial<Record<ShaderHookRole, string>> | string }>,
   scenes?: Iterable<{ path: string; shaders?: Partial<Record<ShaderHookRole, string>> }>,
 ): ShaderRefToValidate[] {
   const out: ShaderRefToValidate[] = [];
 
   // --- manifest.shaders --------------------------------------------
+  // S4: `shaders.postPasses` is a `PostPassDef[]`; every other key is
+  // a `string`. Filter on type before casting to keep iteration safe.
   const manShaders = manifest.shaders ?? {};
-  for (const [key, path] of Object.entries(manShaders) as [ShaderEntry, string][]) {
-    const role = roleForEntry(key);
+  for (const [key, value] of Object.entries(manShaders)) {
+    if (key === "postPasses") continue; // handled below
+    if (typeof value !== "string") continue;
+    const role = roleForEntry(key as ShaderEntry);
     if (!role) continue;
-    out.push({ path, role, manifestKey: key, source: `manifest.shaders.${key}` });
+    out.push({ path: value, role, manifestKey: key as ShaderEntry, source: `manifest.shaders.${key}` });
+  }
+
+  // --- manifest.shaders.postPasses (S4, Mode 2) -------------------
+  // Each entry validates against the post-pass header (§5.5) — a
+  // separate uniform contract from the world / sprite / sky roles.
+  // `role` is set to `worldFrag` defensively (validator ignores it
+  // for the `"postPass"` manifestKey path); the contract is enforced
+  // by `validateShaderSource` switching on the sentinel.
+  const postPasses = manShaders.postPasses;
+  if (postPasses && Array.isArray(postPasses)) {
+    for (const def of postPasses) {
+      if (!def || typeof def.frag !== "string" || typeof def.name !== "string") continue;
+      out.push({
+        path: def.frag,
+        role: "worldFrag",
+        manifestKey: "postPass",
+        source: `manifest.shaders.postPasses["${def.name}"]`,
+      });
+    }
   }
 
   // --- preset.shader -----------------------------------------------

@@ -204,4 +204,16 @@ export interface SceneRenderer {
    * next `beginFrame` / `drawWorld` via their existing length checks.
    */
   resize(width: number, height: number): void;
+
+  /**
+   * Compile the Mode-2 post-process pass chain (S4 of
+   * `docs/plans/ENGINE_PACK_SHADERS.md` §4). Reads
+   * `manifest.shaders.postPasses` and wires an FBO ping-pong chain
+   * between `drawSprites` and HUD compositing. Async because shader
+   * bodies are read via `pack.textBody`. Idempotent — calling twice
+   * does nothing on the second call. Canvas2D backend doesn't
+   * implement it (post-passes are GPU-only); WebGL backend always
+   * does and treats an empty / missing `postPasses` field as a no-op.
+   */
+  initPostPasses?(): Promise<void>;
 }

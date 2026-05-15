@@ -304,6 +304,16 @@ export class Game {
       const worldVariants = await collectWorldVariants(resolver, this.pack);
       await this.renderer.rebuildWorldProgram(worldVariants, sceneLayer?.worldHookBodies);
     }
+
+    // S4: compile the Mode-2 post-process chain (if the manifest
+    // declares any). Async; reads every fragment body via
+    // `pack.textBody`. WebGL2 only — `initPostPasses` is optional on
+    // the SceneRenderer interface and the canvas2d backend doesn't
+    // implement it, so this is a silent no-op there. No-op when the
+    // manifest has no `postPasses` field either (chain stays null).
+    if (this.renderer.initPostPasses !== undefined) {
+      await this.renderer.initPostPasses();
+    }
   }
 
   /** Begin the frame loop. */
