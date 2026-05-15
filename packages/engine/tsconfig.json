@@ -25,6 +25,7 @@
       "ModalRegistry": ["./src/ModalRegistry.ts"],
       "ModAPI": ["./src/ModAPI/index.ts"],
       "ModAPI/*": ["./src/ModAPI/*"],
+      "PreactRuntime": ["./src/PreactRuntime.ts"],
       "Renderers": ["./src/Renderers/index.ts"],
       "Renderers/*": ["./src/Renderers/*"],
       "Scene": ["./src/Scene.ts"],

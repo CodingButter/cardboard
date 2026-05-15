@@ -9,18 +9,23 @@ import {
   HOTBAR_SIZE,
   addItem,
   countItem,
+  defaultStackMax,
   emptyEquipment,
   getActiveItem,
+  quickTransfer,
   removeItem,
   seedInventory,
 } from "Libs/Inventory";
+import { EQUIP_SLOTS } from "AssetPack";
 import { castRayToWall } from "Libs/Raycast";
 import type KeyboardController from "Controllers/KeyboardController";
 import type MouseController from "Controllers/MouseController";
 import type ModalRegistry from "ModalRegistry";
 import type ItemImages from "ItemImages";
 import type { SceneRenderer } from "Renderers";
+import type { PartialGameConfig } from "Settings";
 import type {
+  BindingsAPI,
   BuiltInComponents,
   FrameFn,
   InputAPI,
@@ -32,6 +37,8 @@ import type {
   RaycastAPI,
   RendererSystemFn,
   RenderPhase,
+  SettingsAPI,
+  UIAPI,
 } from "./types";
 import { ComponentRegistry } from "./ComponentRegistry";
 import { SystemRegistry } from "./SystemRegistry";
@@ -39,6 +46,9 @@ import { PrefabRegistry } from "./PrefabRegistry";
 import { InputRegistry } from "./InputRegistry";
 import { ModalsRegistry } from "./ModalsRegistry";
 import { RendererSystemRegistry } from "./RendererSystemRegistry";
+import { UIRegistry } from "./UIRegistry";
+import { SettingsRegistry } from "./SettingsRegistry";
+import { BindingsRegistry } from "./BindingsRegistry";
 
 /**
  * Dependencies the engine wires into the ModAPI implementation. Kept
@@ -52,6 +62,13 @@ export interface ModAPIDeps {
   readonly mouse: MouseController;
   readonly modals: ModalRegistry;
   readonly itemImages: ItemImages;
+  /**
+   * Pack-supplied `config.json` overlay applied at boot. Threaded into
+   * the `SettingsRegistry` so `api.settings.save` re-layers pack +
+   * user when committing changes — without it, single-field edits
+   * through the UI would erase the pack's own tweaks.
+   */
+  readonly packConfig: PartialGameConfig;
 }
 
 /**
@@ -75,12 +92,15 @@ export class ModAPIImpl implements ModAPI {
   readonly inventory: InventoryAPI = {
     BAG_SIZE,
     HOTBAR_SIZE,
+    EQUIP_SLOTS,
     emptyEquipment,
     seedInventory,
     addItem,
     removeItem,
     countItem,
     getActiveItem,
+    defaultStackMax,
+    quickTransfer,
   };
 
   readonly raycast: RaycastAPI = {
@@ -93,6 +113,16 @@ export class ModAPIImpl implements ModAPI {
   readonly input: InputAPI;
   readonly modals: ModalsAPI;
   readonly itemImages: ItemImagesAPI;
+  readonly ui: UIAPI;
+  readonly settings: SettingsAPI;
+  readonly bindings: BindingsAPI;
+
+  /**
+   * Internal handle to the UI registry. The engine's `Game.update`
+   * calls `flush()` once per frame to reconcile registered modal
+   * components against the open-modal set.
+   */
+  private readonly uiRegistry: UIRegistry;
 
   /**
    * Queued onWorldReady callbacks. Fired once by
@@ -111,6 +141,19 @@ export class ModAPIImpl implements ModAPI {
     this.input = new InputRegistry(deps.keyboard, deps.mouse);
     this.modals = new ModalsRegistry(deps.modals);
     this.itemImages = deps.itemImages;
+    this.uiRegistry = new UIRegistry(deps.modals);
+    this.ui = this.uiRegistry;
+    this.settings = new SettingsRegistry(deps.packConfig);
+    this.bindings = new BindingsRegistry();
+  }
+
+  /**
+   * Reconcile pack-registered modal components against the engine's
+   * modal-open set. Called by `Game.update` every frame so components
+   * see fresh props (live CONFIG, inventory state).
+   */
+  flushUI(): void {
+    this.uiRegistry.flush();
   }
 
   /**

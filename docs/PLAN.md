@@ -16,17 +16,17 @@ in `docs/plans/*` per topic. Latest session-state snapshot lives at
 
 | File | Topic | State |
 |---|---|---|
-| `docs/plans/MONOREPO_PLAN.md` | Workspace restructure — `packages/*` + `apps/*`. Prerequisite for the engine/pack split. | In progress (R0). |
-| `docs/plans/ENGINE_PACK_SPLIT.md` | Long-term: `src/` becomes pure engine; all game content lives in packs. | Pending; phases R1–R5. |
+| `docs/plans/MONOREPO_PLAN.md` | Workspace restructure — `packages/*` + `apps/*`. Prerequisite for the engine/pack split. | ✅ Landed. |
+| `docs/plans/ENGINE_PACK_SPLIT.md` | Long-term: `src/` becomes pure engine; all game content lives in packs. | R0–R3 + R3-followup landed; R5 pending. R4 split off into ENGINE_PACK_SHADERS.md. |
 | `docs/plans/WALL_OVERHAUL.md` | Variable wall heights, partial walls, top/bottom caps. | Phase 1 + caps shipped; Phase 2 (per-cell floor/ceiling heights) + Phase 3 (partial-width walls) pending. |
 | `docs/plans/LIGHTING_OVERHAUL.md` | Bake-heavy emissive lighting model with dynamic-light overlay. | Phases 1, 2, 4, 5 shipped + split-lightmap polish + jittered LOS. Phase 3 (per-wall samples) pending. |
 | `docs/plans/LIGHTING_ENTITIES_REFACTOR.md` | Audit + plan for making static lights first-class entities, not scene-data records. | Designed, not yet started; folds into ENGINE_PACK_SPLIT R1. |
 | `docs/plans/MULTIPLAYER_PLAN.md` | Networked multiplayer as a drop-in pack. WebSocket-first → WebRTC when needed. Three-repo architecture. | Pending; phases M1–M6; depends on ENGINE_PACK_SPLIT R3. |
 | `docs/plans/PACK_CHAIN.md` | Multi-pack loading with declared dependencies, override semantics, optional community store, per-pack user controls in settings, untrusted-source trust modal. Subsumes ENGINE_PACK_SPLIT R5. | Designed; phases P1–P5. |
 | `docs/plans/EDITOR.md` | In-browser level + pack editor. Live-mode engine, IndexedDB-backed `EditorAssetPack`, manual bake, `.apg` import/export. | Designed; phases E1–E5. |
-| `docs/plans/TILE_PRESETS.md` | Preset-driven tile authoring + tiny scene files. JSONC format with extends + defaults, per-scene idMap + compact grid, build-merge dedupe via content hashes, `PresetResolver`, default-pack migration. | Designed; phases T1–T5. |
-| `docs/plans/ENGINE_PACK_SHADERS.md` | R4: optional pack-shipped shaders with auto-injected uniforms. Role replacement + post-process passes + build-time validation + pack-chain conflict resolution. | Designed; phases S1–S4. |
-| `docs/plans/STORE.md` | Hosted store website + iframe game runner + per-pack PWA + embed-anywhere widget. Save data namespaced by pack-id. | Designed; phases ST1–ST5. |
+| `docs/plans/TILE_PRESETS.md` | Preset-driven tile authoring + tiny scene files. JSONC format with extends + defaults, per-scene idMap + compact grid, build-merge dedupe via content hashes, `PresetResolver`, default-pack migration. | T1 + T2 shipped (resolver + migration + build-merge); T3–T5 pending. |
+| `docs/plans/ENGINE_PACK_SHADERS.md` | R4: optional pack-shipped shaders with auto-injected uniforms. Three modes — role replacement, shader hooks (38), post-process passes — build-time validation + pack-chain conflict resolution. | S1–S3 shipped (role replacement + helper promotion + 38-hook system); S4 (post-passes), S5 (validation), S6 (chain) pending. |
+| `docs/plans/STORE.md` | Hosted store website + iframe game runner + per-pack PWA + embed-anywhere widget. Save data namespaced by pack-id. | Designed; phases ST1–ST5. Game-embed iframe live on docs landing as a proof-of-concept (https://codingbutter.github.io/cardboard/). |
 
 When the user names a phase ("R3", "Phase 4 lighting", "M1") look up
 the corresponding doc before acting. When they reference "the plan"
@@ -34,17 +34,18 @@ generically, read this file first.
 
 ---
 
-## 2. Architecture summary (post-monorepo target)
+## 2. Architecture summary
 
 ```
-packages/engine        @two_5_d/engine — pure ECS + renderer + pack loader
-packages/default-pack  @two_5_d/default-pack — standard library content
-packages/shared        @two_5_d/shared — protocol/math types client+server agree on
-apps/game              the playable build — bootstraps engine + default-pack
-apps/pack-builder      build-time scripts (bake-lights, build-packs)
-apps/editor            future: in-browser level editor (React + shadcn-ui)
-apps/multiplayer-server future: WebSocket/WebRTC game server
-docs/                  all plans + session state
+packages/engine         @two_5_d/engine — pure ECS + renderer + pack loader
+packages/default-pack   @two_5_d/default-pack — standard library content
+packages/shared         @two_5_d/shared — protocol/math types client+server agree on
+apps/game               the playable build — bootstraps engine + default-pack
+apps/pack-builder       build-time scripts (bake-lights, build-packs, .tsx pack-script bundling)
+apps/editor             in-browser level editor (React + Tailwind + shadcn — scaffold)
+apps/docs               documentation site (Fumadocs + Next + MDX → GitHub Pages)
+apps/multiplayer-server (future) — WebSocket/WebRTC game server
+docs/                   all plans + session state
 ```
 
 **Engine concerns** (stay in `packages/engine/`): ECS world, frame
@@ -98,24 +99,61 @@ auto-register as sprite atlas entries.
 Pack scripts default-export `(api) => { ... }`:
 
 ```ts
+// World + scene + config
 api.world: World
-api.scene: Scene
+api.scene: { size, isWall, canPlayerPass, maxHeadroom, ... }
 api.config: GameConfig
+api.pack.manifest: PackManifest
+
+// Components + ECS
 api.components: { Position, Facing, Movement, PlayerInput, Aim,
                   Camera, MinimapMarker, Weapon, Inventory, Pickup,
                   Sprite, Light, ... }
-api.Vec2, api.Component
-
+api.Vec2
 api.defineComponent<T>(name): Component<T>
 api.getComponent(name): Component | undefined
+
+// Systems + prefabs
 api.registerSystem(fn): () => void
+api.registerRendererSystem(fn, phase): void   // phase = before-world|after-world|after-sprites|hud
 api.registerPrefab(name, factory): void
-api.spawn(name, ...args): Entity
+api.spawn(name, opts?): Entity
+api.onWorldReady(fn): void
+
+// Input
+api.input.keyboard            // KeyboardInputAPI — raw key state
+api.input.mouse               // MouseInputAPI — raw button/position
+api.input.isBindingPressed(action): boolean
+
+// Modal coordination
+api.modals.setOpen(name, open): void
+api.modals.isOpen(name): boolean
+api.modals.any(): boolean
+api.modals.anyOther(name): boolean
+
+// Pack-side UI (R3 follow-up)
+api.ui.registerModal(name, Component, propsFn?): void
+api.ui.unregisterModal(name): void
+
+// Inventory + items
+api.inventory.{ BAG_SIZE, HOTBAR_SIZE, EQUIP_SLOTS, defaultStackMax,
+                emptyEquipment, seedInventory, addItem, removeItem,
+                countItem, getActiveItem, quickTransfer }
+
+// Item-image cache
+api.itemImages.get(itemId, variant?)   // "icon" | "held" | "world"
+
+// Settings (live config + persistence + import/export)
+api.settings.{ load, save, export, import }
+api.bindings.label(code): string
+
+// Raycaster utilities (for pack-side minimap, AI sight checks, etc.)
+api.raycast.castRayToWall(origin, dir): WallHit | null
 ```
 
-Surfaces still pending (per `ENGINE_PACK_SPLIT.md` R3):
-`api.input`, `api.modals`, `api.onWorldReady`, `api.network`,
-`api.registerShader`, `api.findByName`.
+Pending (not yet implemented): `api.network` (multiplayer M1),
+`api.registerShader` (S4 post-passes — shader hooks already ship
+via manifest, not ModAPI).
 
 ---
 
@@ -123,11 +161,18 @@ Surfaces still pending (per `ENGINE_PACK_SPLIT.md` R3):
 
 ```sh
 bun install                     # workspace resolution
-bunx tsc -b                     # composite typecheck across all packages
+bun run typecheck               # workspace-wide typecheck
 bun run build-packs             # bake + zip → apps/game/public/packs/default.apg
-bun --cwd apps/game run dev     # dev server with HMR
-bun --cwd apps/game build       # production bundle
+bun run dev                     # dev server with HMR (game runner)
+bun run build                   # production bundle (game runner)
+bun run docs:dev                # docs site dev (next dev on apps/docs)
+bun run docs:build              # docs static export → out/ for GH Pages
+bun run build:game-for-docs     # stage built game into apps/docs/public/play/
 ```
+
+Note: `bun --cwd <dir> ...` has been historically flaky in this
+repo's Bun version — the root `bun run <script>` shorthands above
+all wrap `cd apps/<X> && bun run <script>` instead.
 
 **Do not** background the dev server from inside the agent shell —
 the user runs it in their own terminal. Lingering port-3000 processes
@@ -177,14 +222,18 @@ killer) to stop a stale dev server.
 | Wall overhaul Phase 3 (partial-width walls + true DDA) | ⏳ See `docs/plans/WALL_OVERHAUL.md` |
 | Lighting Phases 1, 2, 4, 5 + split-lightmap + K=4 N=4 jitter | ✅ Done |
 | Lighting Phase 3 (per-wall samples) | ⏳ See `docs/plans/LIGHTING_OVERHAUL.md` |
-| Monorepo restructure (R0) | 🔄 In progress |
-| Engine/pack split — R1: scene `entities[]` + named lookup + baked-light flag | ⏳ See `docs/plans/ENGINE_PACK_SPLIT.md` |
-| Engine/pack split — R2: prefabs move to pack | ⏳ |
-| Engine/pack split — R3: game-specific systems move to pack | ✅ Done — 9 systems moved to `packages/default-pack/scripts/systems/`; modal systems (InventoryScreen/SettingsScreen) deferred pending `api.ui` surface. |
-| Engine/pack split — R4: pack-shipped shaders with auto-injected uniforms | 🎨 Designed — see `docs/plans/ENGINE_PACK_SHADERS.md`; impl pending. |
+| Monorepo restructure (R0) | ✅ Done — `packages/*` + `apps/*` Bun workspaces |
+| Engine/pack split — R1: scene `entities[]` + named lookup + baked-light flag | ✅ Done |
+| Engine/pack split — R2: prefabs move to pack | ✅ Done — player prefab in `packages/default-pack/scripts/prefabs/` |
+| Engine/pack split — R3: game-specific systems move to pack | ✅ Done — all 11 systems (incl. modal screens via `api.ui`) in `packages/default-pack/scripts/systems/` |
+| Engine/pack split — R3 follow-up: `api.ui` + pack-script .tsx pipeline | ✅ Done — `Bun.build` compiles pack `.tsx`; Preact externalized via `installPreactRuntime` |
+| Engine/pack split — R4 (S1–S3): pack-shipped shaders w/ role replacement + 38 hooks | ✅ Done — see `docs/plans/ENGINE_PACK_SHADERS.md`; S4 (post-passes), S5 (validation), S6 (chain) pending |
 | Engine/pack split — R5: pack override semantics (default pack + URL override) | ⏳ |
+| Tile presets — T1+T2: PresetResolver + JSONC + idMap scenes + build-merge dedupe | ✅ Done — default-pack migrated; legacy bare-int scenes still parse via shim |
+| Tile presets — T3+: validation, editor authoring, preset-library packs | ⏳ See `docs/plans/TILE_PRESETS.md` |
 | Multiplayer M1: net primitives (NetworkId, Replicate, api.network) | ⏳ See `docs/plans/MULTIPLAYER_PLAN.md` |
-| Editor app (apps/editor — React + Tailwind + shadcn-ui) | ⏳ Scaffold-only after monorepo lands |
+| Editor app (apps/editor — React + Tailwind + shadcn) | ⏳ Scaffold landed; design in `docs/plans/EDITOR.md` |
+| Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
 
 ---
 

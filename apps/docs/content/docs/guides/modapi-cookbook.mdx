@@ -1,0 +1,584 @@
+---
+title: ModAPI cookbook
+description: Short, copy-pasteable recipes for common pack-scripting tasks.
+---
+
+A recipe-per-task tour through the ModAPI. Every snippet is
+self-contained — drop it into a script in your pack's
+`scripts/` directory, list the script in `manifest.scripts`,
+run `bun run build-packs`, reload.
+
+Patterns are pulled from the default pack's scripts under
+`packages/default-pack/scripts/`. When in doubt about the
+right shape for something, that directory is the
+authoritative example library.
+
+If you need the foundations first, see
+[Concepts](/docs/guides/concepts) for the ECS / prefabs /
+modals model and [Writing your first pack](/docs/guides/writing-your-first-pack)
+for the project layout.
+
+---
+
+## Spawn an entity at a fixed position
+
+The most basic operation. Three components is enough for a
+visible, pickup-able world object.
+
+```js
+export default (api) => {
+  const C = api.components;
+
+  api.onWorldReady(() => {
+    const e = api.world.spawn();
+    api.world
+      .add(e, C.Position, new api.Vec2(7.5, 4.5))
+      .add(e, C.Sprite, {
+        imageId: "ammo_pack",
+        worldHeight: 0.4,
+        yOffset: 0.3,
+      })
+      .add(e, C.MinimapMarker, {
+        color: "#ffcc00",
+        radius: 0.12,
+        drawForwardRay: false,
+      });
+  });
+};
+```
+
+`world.add` is chainable — it returns the world. The half-tile
+offsets (`7.5`, `4.5`) put the sprite in the center of cell
+`(7, 4)`. `onWorldReady` is the safe place to spawn entities
+because the scene's initial entities (the player) have been
+placed by then.
+
+---
+
+## Spawn N entities at random positions on world-ready
+
+Distill `hello.js`'s ammo scatter into a 12-line idiom.
+Iterates open cells, keeps a clearance around the player, and
+uses `Math.random` (use a seeded RNG if you want
+reproducibility — `hello.js` shows one).
+
+```js
+api.onWorldReady((api) => {
+  const C = api.components;
+  const scene = api.scene;
+  const player = api.world.first(C.PlayerInput, C.Position);
+  const playerPos = player ? C.Position.getOrThrow(player) : null;
+
+  for (let y = 1; y < scene.size.y - 1; y++) {
+    for (let x = 1; x < scene.size.x - 1; x++) {
+      if (scene.isWall(x, y)) continue;
+      if (playerPos) {
+        const dx = x + 0.5 - playerPos.x;
+        const dy = y + 0.5 - playerPos.y;
+        if (dx * dx + dy * dy < 9) continue;
+      }
+      if (Math.random() < 1 / 20) {
+        const e = api.world.spawn();
+        api.world
+          .add(e, C.Position, new api.Vec2(x + 0.5, y + 0.5))
+          .add(e, C.Sprite, { imageId: "ammo_pack", worldHeight: 0.4, yOffset: 0.3 });
+      }
+    }
+  }
+});
+```
+
+---
+
+## Make a custom item pickup that increments a counter
+
+The default pack's `pickup.js` already handles any entity with
+a `Pickup` component — but you don't always want "drop into
+the inventory" semantics. This recipe defines a custom counter
+and increments it on contact, bypassing the inventory entirely.
+
+```js
+export default (api) => {
+  const C = api.components;
+  const Coin = api.defineComponent("Coin");
+
+  let coinsCollected = 0;
+
+  // Spawn a coin somewhere.
+  api.onWorldReady(() => {
+    const e = api.world.spawn();
+    api.world
+      .add(e, C.Position, new api.Vec2(5.5, 5.5))
+      .add(e, C.Sprite, { imageId: "ammo_pack", worldHeight: 0.3 })
+      .add(e, Coin, {});
+  });
+
+  // System: check player proximity to any Coin entity.
+  api.registerSystem((world) => {
+    const player = world.first(C.PlayerInput, C.Position);
+    if (player === undefined) return;
+    const ppos = C.Position.getOrThrow(player);
+
+    world.each(C.Position, Coin, (entity, pos) => {
+      const dx = pos.x - ppos.x;
+      const dy = pos.y - ppos.y;
+      if (dx * dx + dy * dy < 0.25) {
+        coinsCollected++;
+        console.log(`coins: ${coinsCollected}`);
+        world.despawn(entity);
+      }
+    });
+  });
+};
+```
+
+The component holds no data — `defineComponent` returns a
+fully-typed component even when its value is `{}`. Use empty
+components as **tags** when you just need to mark a category
+of entity.
+
+---
+
+## Register a system that pauses when a modal is open
+
+You usually don't need to — the engine wraps every
+mod-registered update system in `if (!modals.any())` already.
+But render systems run regardless, so if you have a render
+system that should freeze its **internal** state when a modal
+opens, do it explicitly:
+
+```js
+api.registerRendererSystem((renderer, world) => {
+  if (api.modals.any()) return;  // freeze animation while paused
+
+  // Draw moving / animated content here.
+}, "hud");
+```
+
+For a render system that should draw the modal **only when its
+own modal is open**, check by name:
+
+```js
+api.registerRendererSystem((renderer, world) => {
+  if (!api.modals.isOpen("my-modal")) return;
+  // ... draw the modal UI
+}, "hud");
+```
+
+---
+
+## Read keyboard input via a custom binding
+
+Bindings are arrays of `KeyboardEvent.code` strings (and
+optionally `"Mouse0"`-style mouse strings). They live on
+`PlayerInput.bindings` for the standard movement actions, but
+you can also check a literal list:
+
+```js
+api.registerSystem(() => {
+  // Just my own action — no need to round-trip through PlayerInput.
+  if (api.input.isBindingPressed(["KeyF", "KeyE"])) {
+    // F or E is held
+  }
+
+  // The user's configured movement binding:
+  const player = api.world.first(api.components.PlayerInput);
+  if (player !== undefined) {
+    const input = api.components.PlayerInput.get(player);
+    if (api.input.isBindingPressed(input.bindings.forward)) {
+      // user is walking forward, whatever key they bound
+    }
+  }
+});
+```
+
+For edge-triggered "pressed this frame" semantics, hold the
+prior-frame state in a closure and check held-and-not-held:
+
+```js
+let wasHeld = false;
+api.registerSystem(() => {
+  const heldNow = api.input.keyboard.isKeyPressed("KeyE");
+  const pressedThisFrame = heldNow && !wasHeld;
+  wasHeld = heldNow;
+  if (pressedThisFrame) console.log("E just pressed");
+});
+```
+
+`player-input.js` uses this pattern for slot keys, jump, and
+reload.
+
+---
+
+## Read mouse position + buttons
+
+```js
+api.registerSystem(() => {
+  const m = api.input.mouse;
+
+  // Buttons:
+  if (m.isButtonPressed(0)) { /* left */ }
+  if (m.isButtonPressed(2)) { /* right */ }
+
+  // Cursor position (target-element coords; readonly):
+  const { x, y } = m.position;
+
+  // Motion delta since last call (resets after read!):
+  const delta = m.consumeMovement();
+  // delta.x, delta.y in pixels of movement this frame
+
+  // Wheel notches since last call (resets after read!):
+  const wheel = m.consumeWheel();
+  // signed integer: positive = scroll down on most platforms
+});
+```
+
+`consumeMovement` and `consumeWheel` **drain** the accumulator.
+Call them in exactly one place per frame; if two systems both
+call them, the second sees zero.
+
+---
+
+## Open/close a modal with a key press
+
+The minimum viable modal: edge-detect a toggle key, flip the
+modal state, and let other systems gate themselves on it.
+
+```js
+export default (api) => {
+  let wasHeld = false;
+
+  api.registerRendererSystem(() => {
+    const held = api.input.keyboard.isKeyPressed("KeyI");
+    if (held && !wasHeld) {
+      const open = api.modals.isOpen("inventory");
+      api.modals.setOpen("inventory", !open);
+    }
+    wasHeld = held;
+  }, "hud");
+
+  // Draw the modal contents when open.
+  api.registerRendererSystem((renderer) => {
+    if (!api.modals.isOpen("inventory")) return;
+    const ctx = renderer.ctx;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "24px sans-serif";
+    ctx.fillText("INVENTORY", 40, 60);
+  }, "hud");
+};
+```
+
+The toggle detection lives in a render system on purpose: update
+systems are gated on `!modals.any()`, so an inventory-toggle
+update system couldn't close the inventory once it was open.
+
+`stats-render.js` polls a Ctrl+\` toggle for the same reason.
+
+---
+
+## Draw something on the HUD
+
+`registerRendererSystem(fn, "hud")` runs after `endFrame` on the
+HUD canvas. The renderer passes you a `SceneRenderer` whose
+`.ctx` is a `CanvasRenderingContext2D` you can draw on
+directly.
+
+```js
+api.registerRendererSystem((renderer) => {
+  const ctx = renderer.ctx;
+  const { width, height } = ctx.canvas;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.fillRect(20, height - 60, 200, 40);
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "16px monospace";
+  ctx.textBaseline = "middle";
+  ctx.fillText("hello world", 30, height - 40);
+  ctx.restore();
+}, "hud");
+```
+
+Wrap in `ctx.save()` / `ctx.restore()` if you mutate global
+state (font, fillStyle, transforms) — sibling render systems
+share the same context. `inventory-bar-render.js` and
+`stats-render.js` both follow this discipline.
+
+---
+
+## Define a new component and use it in a system
+
+```js
+export default (api) => {
+  const C = api.components;
+  const Health = api.defineComponent("Health");
+
+  api.registerPrefab("imp", (x, y) => {
+    const e = api.world.spawn();
+    api.world
+      .add(e, C.Position, new api.Vec2(x, y))
+      .add(e, C.Sprite, { imageId: "ammo_pack", worldHeight: 0.6 })
+      .add(e, Health, { hp: 30, maxHp: 30 });
+    return e;
+  });
+
+  // Drain HP over time as a demo; despawn at zero.
+  api.registerSystem((world, dt) => {
+    world.each(Health, (entity, health) => {
+      health.hp -= dt * 5;
+      if (health.hp <= 0) world.despawn(entity);
+    });
+  });
+};
+```
+
+`defineComponent` throws if the name is already taken — two
+scripts can't define the same component name. If you want
+multiple scripts to **share** a component, define it in one
+script and `api.getComponent("Health")` from the others.
+
+---
+
+## Add an item to the player's inventory at spawn
+
+The default pack does this through `defaultInventory` in the
+manifest, which is the recommended path. If you want to do it
+**from a script** — e.g. award a starter weapon conditional on
+something — wait for world-ready, find the player, mutate the
+inventory:
+
+```js
+api.onWorldReady((api) => {
+  const C = api.components;
+  const inv = api.inventory;
+
+  const player = api.world.first(C.PlayerInput, C.Inventory);
+  if (player === undefined) return;
+  const inventory = C.Inventory.getOrThrow(player);
+
+  inv.addItem(inventory, api.pack.manifest, "rifle_ammo", 60);
+});
+```
+
+`addItem` respects per-item `stackMax`. The return value is
+**leftover** — what wouldn't fit. The default-pack `pickup.js`
+checks this so a partial pickup leaves the rest of the pile
+on the ground.
+
+---
+
+## Detect when the player is near an entity
+
+A "trigger zone" pattern. Use squared distance to avoid the
+square root.
+
+```js
+const TRIGGER_RADIUS = 1.5;
+const TRIGGER_RADIUS_SQ = TRIGGER_RADIUS * TRIGGER_RADIUS;
+
+const Trigger = api.defineComponent("Trigger");
+let triggered = false; // one-shot
+
+api.registerSystem((world) => {
+  const player = world.first(api.components.PlayerInput, api.components.Position);
+  if (player === undefined) return;
+  const ppos = api.components.Position.getOrThrow(player);
+
+  world.each(api.components.Position, Trigger, (entity, pos) => {
+    const dx = pos.x - ppos.x;
+    const dy = pos.y - ppos.y;
+    if (dx * dx + dy * dy < TRIGGER_RADIUS_SQ) {
+      if (!triggered) {
+        console.log("player entered trigger!");
+        triggered = true;
+        world.despawn(entity);
+      }
+    }
+  });
+});
+```
+
+The default pack's `pickup.js` uses this same shape:
+nested `world.each` (players → pickups), squared-distance
+gate, then act.
+
+---
+
+## Cast a ray against the world
+
+`api.raycast.castRayToWall(scene, origin, direction, maxDist)`
+returns either `null` (no hit) or a `WallHit` with
+`perpDistance`, `cell: Vec2`, `side`, `tile`, `wallU`, and
+`segment`. Used by `minimap-render.js` to draw the
+forward-direction line from the player marker.
+
+```js
+api.registerSystem((world) => {
+  const player = world.first(api.components.PlayerInput, api.components.Position, api.components.Facing);
+  if (player === undefined) return;
+
+  const pos = api.components.Position.getOrThrow(player);
+  const facing = api.components.Facing.getOrThrow(player);
+  const dir = api.Vec2.fromAngle(facing);
+
+  const hit = api.raycast.castRayToWall(api.scene, pos, dir, 50);
+  if (hit) {
+    // hit.perpDistance — how far the ray traveled (tiles).
+    // hit.cell        — Vec2 of the wall cell that was struck.
+    // hit.tile        — tile id at the hit cell.
+    // hit.wallU       — [0, 1) coordinate along the wall face.
+  }
+});
+```
+
+Direction must be a unit vector. `Vec2.fromAngle` returns one
+for a given facing angle.
+
+---
+
+## Look up an item definition from the manifest
+
+The manifest's `items` block is the source of truth for item
+metadata — display name, image path, stack limits, type, and
+type-specific data like weapon stats.
+
+```js
+api.registerSystem((world) => {
+  const player = world.first(api.components.PlayerInput, api.components.Inventory);
+  if (player === undefined) return;
+  const inventory = api.components.Inventory.getOrThrow(player);
+
+  const active = api.inventory.getActiveItem(inventory);
+  if (!active) return;
+  const def = api.pack.manifest.items?.[active.itemId];
+  if (!def) return;
+
+  // def.name, def.type, def.image, def.stackMax, def.weapon, ...
+  if (def.type === "weapon") {
+    const magSize = def.weapon?.magazineSize ?? 0;
+    const ammoId = def.weapon?.ammoItem;
+    // ...
+  }
+});
+```
+
+`gun-render.js` does this on every frame to look up fire rate,
+mag size, and reload time for the active weapon.
+
+---
+
+## Draw the active item's icon
+
+`api.itemImages` is a shared cache of decoded `HTMLImageElement`s
+keyed by item id. Both inventory-bar-render and gun-render
+blit from it; sharing the cache means every system reads from
+the same decoded image and the textures decode exactly once at
+boot.
+
+```js
+api.registerRendererSystem((renderer, world) => {
+  const C = api.components;
+  const player = world.first(C.PlayerInput, C.Inventory);
+  if (player === undefined) return;
+  const inventory = C.Inventory.getOrThrow(player);
+  const active = api.inventory.getActiveItem(inventory);
+  if (!active) return;
+
+  // Default variant (inventory icon):
+  const icon = api.itemImages.get(active.itemId);
+  // Held variant (viewmodel, larger / posed):
+  const held = api.itemImages.get(active.itemId, "held");
+
+  const ctx = renderer.ctx;
+  if (icon) {
+    ctx.drawImage(icon, 20, 20, 64, 64);
+  }
+}, "hud");
+```
+
+Variants come from the manifest's `items[id].variants` block;
+the default `"held"` variant is used by gun-render for the
+viewmodel pose.
+
+---
+
+## Drive the camera height from a custom component
+
+If you want to add new player verbs — lean, slide, mantle —
+the engine's `Camera.cameraZ` is the eye height in world units
+(0.5 is standing). Mutate it and the renderer picks up the new
+height on the next frame.
+
+```js
+const Lean = api.defineComponent("Lean");
+
+api.onWorldReady(() => {
+  const player = api.world.first(api.components.PlayerInput);
+  if (player !== undefined) api.world.add(player, Lean, { side: 0 });
+});
+
+api.registerSystem((world, dt) => {
+  world.each(api.components.Camera, Lean, (entity, cam, lean) => {
+    // Drift back to center when not leaning.
+    lean.side *= 1 - dt * 4;
+    // (real impl would read input and set lean.side here)
+
+    // Visual: tiny eye-height dip when leaning.
+    cam.cameraZ = 0.5 - Math.abs(lean.side) * 0.05;
+  });
+});
+```
+
+`player-input.js` does the same pattern for the crouch dip and
+jump arc — it mutates `Movement.z` and pushes the result into
+`Camera.cameraZ`.
+
+---
+
+## Despawn every entity matching a filter
+
+Useful for level-reset scripts, "clear all dropped items," or
+spawn-budget enforcement.
+
+```js
+api.registerSystem((world) => {
+  const C = api.components;
+
+  if (api.input.keyboard.isKeyPressed("KeyK")) {
+    const toRemove = [];
+    world.each(C.Pickup, (entity) => toRemove.push(entity));
+    for (const e of toRemove) world.despawn(e);
+  }
+});
+```
+
+Always collect into an array first — mutating the world
+mid-iteration (`world.despawn` inside the `each` callback)
+is supported, but pushing-then-draining is clearer when the
+condition is "everything matching."
+
+---
+
+## Patterns this cookbook doesn't cover
+
+Some things you might reach for don't yet exist in the ModAPI:
+
+- **Sound effects.** No audio API today. If you need
+  positional sound, ship it as a custom HTML5 `Audio` element
+  managed from your pack script; the engine doesn't help here
+  yet.
+- **Cross-script messaging.** No event bus. Scripts share state
+  through the ECS — define a component, write from one system,
+  read from another.
+- **Save/load.** No persistence API. `localStorage` works
+  from a pack script if you really need it; nothing's stopping
+  you.
+- **HTTP fetches at runtime.** Use `fetch()` directly. It's
+  on the global scope.
+
+If you hit a wall, check
+`packages/engine/src/ModAPI/types.ts` first — the full
+surface is documented there.

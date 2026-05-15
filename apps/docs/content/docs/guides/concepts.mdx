@@ -1,75 +1,392 @@
 ---
-title: "Concepts: packs, scenes, prefabs, ModAPI"
-description: The mental model — what the engine owns vs. what packs own.
+title: "Concepts: packs, ECS, prefabs, ModAPI"
+description: The mental model — entities, components, systems, prefabs, modals, input, and the pack contract.
 ---
 
-cardboard has a small set of moving parts. Once you have the mental
-model these four words convey, everything else is detail.
+cardboard has a small set of moving parts. Once these click,
+every default-pack script reads as a straightforward
+application of the same handful of patterns.
 
-## Packs
+## The pack model
 
 A **pack** is the unit of distribution. One `.apg` zip contains
-everything needed to run a game on top of the engine: a manifest,
-scenes, scripts, images, optional shaders.
+everything needed to run a game on top of the engine. A
+minimal pack ships:
 
-The engine ships zero gameplay content. Even the "default" game —
-player prefab, weapons, inventory UI, pickup systems — lives in
-`packages/default-pack/`, loaded the same way any third-party pack
-would be.
+```
+my-pack/
+├── manifest.json    declares scripts, scenes, items, ...
+├── scripts/*.js     ES modules — the gameplay code
+├── scenes/*.json    world geometry + entity placements
+└── images/*         textures, item icons, sprites
+```
 
-Packs can declare a `requires[]` list, which lets one pack extend
-another. The runner resolves the chain and merges overrides in
-declared order. See `PACK_CHAIN` for the rollout plan.
+The engine ships **zero** gameplay content. The default-pack
+player, weapons, pickups, minimap, hotbar — every visible
+behaviour — lives in `packages/default-pack/` and loads through
+the same ModAPI any third-party pack uses.
 
-## Scenes
+The manifest names which scripts run, which scene boots first,
+what items exist, and what the player starts with. Real
+example, condensed from the default pack:
 
-A **scene** is the running world's static geometry + initial
-entity placements. SceneJSON ships in `scenes/*.json` inside a
-pack. Each scene declares:
+```jsonc
+{
+  "name": "default",
+  "version": "0.2.0",
+  "engine": "two_5_d@0.1",
+  "startScene": "scenes/scene1.json",
+  "scripts": [
+    "scripts/prefabs/player.js",
+    "scripts/systems/player-input.js",
+    "scripts/systems/pickup.js",
+    "scripts/hello.js"
+  ],
+  "items": { "rifle": { /* ... */ } },
+  "defaultInventory": [{ "itemId": "rifle", "slot": "hotbar:0" }]
+}
+```
 
-- Walls (with variable heights, partial-cell shape, cap textures).
-- Floor + ceiling tiles.
-- Entities (positions + components — the prefab system attaches the
-  rest).
-- A baked lightmap.
+Packs can declare a `requires[]` array to depend on other packs.
+Override semantics + the resolution algorithm are designed in
+`docs/plans/PACK_CHAIN.md`; until that lands, packs ship
+standalone.
 
-The engine loads one scene at a time. Scene swaps reset the ECS
-world but keep the asset cache.
+## ECS — entities, components, systems
 
-## Prefabs
+cardboard is an ECS (entity-component-system). It's worth ten
+minutes of getting comfortable with even if you've never used
+one before — every gameplay primitive in the engine is shaped
+by it.
 
-A **prefab** is a named factory function: `(api, ...args) => Entity`.
-The engine has zero built-in prefabs. The default pack registers
-the player, weapons, projectiles, pickups, and so on.
+### Entities are just IDs
+
+An entity is a number. It has no behaviour and no data of its
+own. `world.spawn()` returns one; `world.despawn(e)` returns it
+to the pool.
 
 ```js
-// inside a pack script
-api.registerPrefab('player', (x, y) => {
-  const e = api.world.spawn();
-  api.world.add(e, api.components.Position, new api.Vec2(x, y));
-  api.world.add(e, api.components.PlayerInput, {});
-  return e;
+const entity = api.world.spawn();
+```
+
+### Components are data attached to entities
+
+A component is a typed bag of fields. You attach a value of a
+component type to an entity to give that entity that piece of
+data.
+
+```js
+const e = api.world.spawn();
+api.world.add(e, api.components.Position, new api.Vec2(3.5, 7.5));
+api.world.add(e, api.components.Sprite, { imageId: "ammo_pack" });
+```
+
+The engine ships these built-ins via `api.components`. The ones
+you'll touch most:
+
+| Component | What it carries |
+|---|---|
+| `Position` | A `Vec2` (x, y) in world units (tiles). |
+| `Facing` | A radian angle — which direction the entity looks. |
+| `Movement` | Speed, run multiplier, jump state, crouch state, z velocity. |
+| `PlayerInput` | Tags an entity as player-controlled. Holds the active key bindings. |
+| `Aim` | Vertical aim — `screenY` offset. Independent of body facing. |
+| `Camera` | FOV, ceiling height, fog distance, eye height. |
+| `Inventory` | Bag + hotbar + equipment slots. |
+| `Weapon` | Per-weapon state: walk-bob phase, fire timing, reload state. |
+| `Sprite` | Billboard image with `imageId`, `worldHeight`, `yOffset`. |
+| `Pickup` | Item ID + count granted to the player on contact. |
+| `MinimapMarker` | Colour + radius + optional forward-direction ray. |
+| `Light` | Coloured dynamic light: `color`, `intensity`, `radius`, `z`. |
+
+You can also define your own. `api.defineComponent("name")`
+returns a new component type that behaves identically to the
+built-ins.
+
+### Systems run every frame
+
+A system is a function. It queries the world for entities that
+have a particular combination of components and does something
+with them.
+
+```js
+api.registerSystem((world, deltaTime) => {
+  world.each(api.components.Position, api.components.Sprite, (e, pos, sprite) => {
+    // Runs once per entity that has BOTH Position and Sprite.
+  });
 });
 ```
 
-Scene entity records reference prefabs by name; the engine looks
-each one up at load time.
+`world.each(...components, fn)` iterates every entity that has
+all the listed components, passing the entity ID and each
+component's value in order. `world.first(...)` returns the
+first match (or `undefined`) — useful for "there is exactly one
+player" queries.
 
-## ModAPI
-
-The **ModAPI** is the surface a pack script sees. It's
-intentionally small: registry hooks for components, prefabs,
-systems, and renderer systems; read-only views of input and
-modals; the live world + scene + config + pack manifest.
-
-A pack script is an ES module:
+That's it. Three primitives: entities, components, systems. The
+default-pack ammo-scatter in `hello.js` is just `spawn() +
+add(Position) + add(Sprite) + add(Pickup) + add(MinimapMarker)`,
+and the pickup system from `pickup.js` is:
 
 ```js
-export default (api) => {
-  // register components, prefabs, systems...
-};
+world.each(C.PlayerInput, C.Position, C.Inventory, (_p, _i, ppos, inventory) => {
+  world.each(C.Position, C.Pickup, (entity, pos, pickup) => {
+    // distance check, add to inventory, despawn
+  });
+});
 ```
 
-The runner loads each script in `manifest.scripts` as a Blob URL,
-imports its default export, and calls it with a `ModAPI` instance.
-The full surface is documented in the [API reference](/docs/api).
+## Prefabs
+
+A **prefab** is a named factory function — a recipe for spawning
+configured entities.
+
+```js
+api.registerPrefab("ammo_pack", (x, y) => {
+  const e = api.world.spawn();
+  api.world
+    .add(e, api.components.Position, new api.Vec2(x, y))
+    .add(e, api.components.Sprite, {
+      imageId: "ammo_pack",
+      worldHeight: 0.4,
+      yOffset: 0.3,
+    })
+    .add(e, api.components.Pickup, { itemId: "rifle_ammo", count: 30 });
+  return e;
+});
+
+// elsewhere:
+const e = api.spawn("ammo_pack", 7.5, 4.5);
+```
+
+Scenes can also reference prefabs by name in their entity
+placements — the engine looks each one up at scene load time
+and calls the factory.
+
+The default pack's `player` prefab is the canonical example:
+`packages/default-pack/scripts/prefabs/player.js` builds
+`Position + Facing + Movement + PlayerInput + Aim + Camera +
+Weapon + Inventory + MinimapMarker` and seeds the inventory
+from the manifest's `defaultInventory`. The engine has no
+hardcoded "player" — it just calls
+`api.spawn("player", { x, y, facing })` after the scene loads.
+
+## Update vs render systems
+
+There are two flavours of system.
+
+### `registerSystem` — logic per frame
+
+```js
+api.registerSystem((world, deltaTime) => {
+  // mutate components, spawn/despawn, read input
+});
+```
+
+Runs once per frame in the engine's update loop. **Paused
+automatically when any modal is open** (the engine wraps
+mod-registered update systems in `if (!modals.any())`). Use
+for: movement, AI, collision, state machines, anything that
+shouldn't run while the inventory screen is up.
+
+### `registerRendererSystem` — drawing per frame
+
+```js
+api.registerRendererSystem((renderer, world) => {
+  const ctx = renderer.ctx;
+  // draw on the canvas
+}, "hud");
+```
+
+Runs every frame regardless of modal state. The second argument
+is the **phase** — when in the draw flow it fires:
+
+| Phase | Fires |
+|---|---|
+| `"before-world"` | Before sky + world. Sky overlays. |
+| `"after-world"` | After walls/floors, before sprites. Viewmodels. |
+| `"after-sprites"` | After billboard sprites. World-space overlays. |
+| `"hud"` | After the world frame ends. Minimap, reticle, inventory. |
+
+The default pack's gun viewmodel is on `"after-world"`; the
+minimap, reticle, hotbar, and stats overlay are all `"hud"`.
+Picking the right phase is mostly about layering — `"hud"`
+draws over everything, `"after-world"` sits between walls and
+billboards.
+
+Use a render system when the output is **pixels**. Use an
+update system when the output is **changed component values**.
+
+## Modals
+
+Modals coordinate which gameplay code pauses when an
+overlay is open.
+
+```js
+// Open the inventory modal:
+api.modals.setOpen("inventory", true);
+
+// Check (e.g. in a render system that draws the inventory):
+if (!api.modals.isOpen("inventory")) return;
+
+// Gate something on "any modal open":
+if (api.modals.any()) return;
+
+// Gate on "any OTHER modal open" (e.g. don't toggle inventory
+// while the pause menu is up):
+if (api.modals.anyOther("inventory")) return;
+```
+
+The engine already pauses update systems while `modals.any()`,
+so you only reach for these helpers in render systems and in
+toggle-key handlers.
+
+## Input
+
+Pack scripts read input through `api.input`. The engine wraps
+its keyboard/mouse controllers so scripts can't grab raw event
+streams.
+
+```js
+// Raw keys (KeyboardEvent.code values):
+if (api.input.keyboard.isKeyPressed("KeyR")) { /* ... */ }
+if (api.input.keyboard.isAnyKeyPressed(["ControlLeft", "ControlRight"])) { /* ... */ }
+
+// Mouse:
+const moved = api.input.mouse.consumeMovement(); // Vec2; resets after read
+const wheel = api.input.mouse.consumeWheel();    // signed int; resets
+if (api.input.mouse.isButtonPressed(0)) { /* left-click */ }
+const pos = api.input.mouse.position;            // current cursor xy
+```
+
+For movement-style input, **prefer bindings** — they respect
+the user's keymap from settings:
+
+```js
+const input = api.components.PlayerInput.get(playerEntity);
+if (api.input.isBindingPressed(input.bindings.forward)) { /* ... */ }
+```
+
+`bindings.forward`, `bindings.backward`, `bindings.strafeLeft`,
+`bindings.strafeRight`, `bindings.run`, `bindings.jump`,
+`bindings.crouch` are populated by the engine from config.
+`isBindingPressed` accepts arrays of either keycodes or
+`"Mouse0"`/`"Mouse1"`-style strings, so a binding can be a key
+or a mouse button without your script caring.
+
+## Inventory + items
+
+Items are declared in the manifest:
+
+```jsonc
+"items": {
+  "rifle_ammo": {
+    "name": "5.56mm Rounds",
+    "image": "images/items/ammo_pack.png",
+    "type": "ammo",
+    "stackMax": 120
+  }
+}
+```
+
+The pack-side inventory helpers live on `api.inventory`:
+
+```js
+const inv = api.inventory;
+
+// Layout sizes (so you can size your hotbar UI):
+inv.BAG_SIZE;     // const
+inv.HOTBAR_SIZE;  // const
+
+// Build a fresh, empty inventory shape:
+const inventory = {
+  bag: new Array(inv.BAG_SIZE).fill(null),
+  hotbar: new Array(inv.HOTBAR_SIZE).fill(null),
+  equipment: inv.emptyEquipment(),
+  activeHotbarIndex: 0,
+};
+
+// Seed from a manifest's defaultInventory entries:
+inv.seedInventory(inventory, api.pack.manifest, api.pack.manifest.defaultInventory ?? []);
+
+// Mutate during gameplay:
+const leftover = inv.addItem(inventory, api.pack.manifest, "rifle_ammo", 30);
+inv.removeItem(inventory, "rifle_ammo", 30);
+const count = inv.countItem(inventory, "rifle_ammo");
+const active = inv.getActiveItem(inventory); // current hotbar stack, or null
+```
+
+`addItem` returns leftover — items it couldn't fit. The default
+pack's `pickup.js` uses this to leave a partial pile behind when
+the bag is full.
+
+## Scenes
+
+A scene is the static world: walls (with variable heights and
+partial-cell shapes), floor/ceiling tiles, baked lightmap, and
+entity placements. Pack ships them in `scenes/*.json`. The
+engine loads one at a time.
+
+You don't usually generate scenes from a script — the editor
++ pack-builder pipeline produces them. From a script you read
+the loaded scene through `api.scene`:
+
+```js
+api.scene.size;                     // Vec2 — grid dimensions
+api.scene.isWall(x, y);             // boolean
+api.scene.canPlayerPass(x, y, z);   // boolean — used by player-input
+api.scene.maxHeadroom(x, y);        // float — ceiling clearance
+```
+
+The default pack's `hello.js` iterates `scene.size` and calls
+`scene.isWall` to scatter ammo packs only in open cells.
+
+## Lifecycle: `onWorldReady`
+
+Script execution order is: every script in `manifest.scripts`
+runs (so `registerPrefab` calls land) **before** the engine
+spawns the scene's initial entities. If your script needs to
+find an entity the scene placed — typically the player — wait
+for `onWorldReady`:
+
+```js
+api.onWorldReady((api) => {
+  const player = api.world.first(api.components.PlayerInput);
+  if (player !== undefined) {
+    // attach extra components, set initial state, etc.
+  }
+});
+```
+
+Callbacks fire in registration order, exactly once per
+world-load. Re-registering after the world is already ready
+fires the callback synchronously on the next tick — safe to use
+in HMR'd scripts.
+
+## ModAPI surface — the cheat sheet
+
+Everything a pack script sees lives on the `api` argument:
+
+| Field | What |
+|---|---|
+| `api.world` | The ECS world. `spawn`, `despawn`, `each`, `first`, `add`. |
+| `api.scene` | Static world data — walls, dimensions, queries. |
+| `api.config` | Merged engine + pack config. Live; reads see overrides. |
+| `api.pack` | The active `AssetPack`. `.manifest` for items, default inventory, etc. |
+| `api.components` | Built-in component types, by name. |
+| `api.inventory` | Inventory helpers — `addItem`, `countItem`, `getActiveItem`. |
+| `api.raycast` | `castRayToWall(scene, origin, dir, maxDist)`. |
+| `api.itemImages` | Shared decoded item-image cache. `.get(itemId, "held"?)`. |
+| `api.input` | `keyboard`, `mouse`, `isBindingPressed`. |
+| `api.modals` | `setOpen`, `isOpen`, `any`, `anyOther`. |
+| `api.Vec2` | Vec2 constructor. |
+| `api.defineComponent(name)` | Register a custom component. |
+| `api.getComponent(name)` | Look up a component by name. |
+| `api.registerSystem(fn)` | Per-frame logic system. |
+| `api.registerRendererSystem(fn, phase)` | Per-frame draw system. |
+| `api.registerPrefab(name, factory)` | Register a spawn recipe. |
+| `api.spawn(name, ...args)` | Invoke a prefab. |
+| `api.onWorldReady(fn)` | One-shot init after scene loads. |
+
+Everything else is detail. The [ModAPI cookbook](/docs/guides/modapi-cookbook)
+is a recipe-per-task tour through the surface.

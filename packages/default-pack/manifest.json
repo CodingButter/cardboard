@@ -13,6 +13,8 @@
     "scripts/systems/reticle-render.js",
     "scripts/systems/stats-render.js",
     "scripts/systems/inventory-bar-render.js",
+    "scripts/systems/inventory-screen.tsx",
+    "scripts/systems/settings-screen.tsx",
     "scripts/hello.js"
   ],
   "tileTextures": {

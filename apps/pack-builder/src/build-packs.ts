@@ -37,6 +37,11 @@ import { join, relative } from "node:path";
 import JSZip from "jszip";
 import { bakeScene, type BakeOpts } from "./bake-lights";
 import {
+  buildPackScript,
+  compiledPackScriptPath,
+  isCompilablePackScript,
+} from "./build-pack-script";
+import {
   PresetResolver,
   type SceneJSON,
   type PackManifest,
@@ -406,12 +411,79 @@ async function buildPack(
     console.log(`    build-merge: ${collapsedCount} preset(s) collapsed across ${scenePaths.length} scene(s)`);
   }
 
+  // ── Pack-script TSX compile step ─────────────────────────────────
+  // Discover which scripts in `manifest.scripts` need a build-time
+  // transform (`.ts` / `.tsx`). Each gets bundled into a single ESM
+  // `.js` chunk via `buildPackScript`; the manifest's scripts[] entry
+  // is rewritten to point at the compiled `.js` path, and the source
+  // file (plus any imports the entrypoint pulls in from `scripts/ui/`
+  // etc.) is excluded from the zip — it's a build input, not a
+  // runtime artifact.
+  const compiledScripts = new Map<string, string>(); // inZip path → compiled JS
+  const scriptSourcesToSkip = new Set<string>();     // sources NOT to emit
+  const scriptPathRewrites = new Map<string, string>(); // .tsx → .js mapping
+  if (manifest?.scripts) {
+    for (const scriptPath of manifest.scripts) {
+      if (!isCompilablePackScript(scriptPath)) continue;
+      const absSource = join(packRoot, scriptPath);
+      try {
+        const compiled = await buildPackScript(absSource);
+        const compiledPath = compiledPackScriptPath(scriptPath);
+        compiledScripts.set(compiledPath, compiled);
+        scriptPathRewrites.set(scriptPath, compiledPath);
+        // Skip the original .tsx in the zip pass.
+        scriptSourcesToSkip.add(scriptPath);
+        console.log(`    compiled ${scriptPath} → ${compiledPath}`);
+      } catch (err) {
+        throw new Error(
+          `pack-build: failed to compile ${scriptPath}: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
+  // Any `scripts/ui/*.tsx` (or other deep helpers) are sucked in by
+  // the bundler — they ship inside the compiled entrypoint already.
+  // Exclude them from byte-for-byte copy so the .apg doesn't carry
+  // dead source duplicates. Detection rule: `scripts/**/*.tsx` and
+  // `scripts/**/*.ts` that aren't themselves manifest entries.
+  const manifestScripts = new Set(manifest?.scripts ?? []);
+
+  // Rebuild manifest.json with rewritten scripts[] paths before the
+  // emit pass — the zipped manifest must reference the compiled .js
+  // names the engine sees at runtime.
+  let manifestText: string | null = null;
+  if (manifest && scriptPathRewrites.size > 0) {
+    const rewritten = {
+      ...manifest,
+      scripts: (manifest.scripts ?? []).map((p) => scriptPathRewrites.get(p) ?? p),
+    };
+    manifestText = JSON.stringify(rewritten, null, 2);
+  }
+
   // ── Emit pass: bake + zip ─────────────────────────────────────────
   let fileCount = 0;
   for await (const filePath of walk(packRoot)) {
     const inZip = relative(packRoot, filePath).split(/[\\/]+/).join("/");
 
-    if (inZip.startsWith("scenes/") && inZip.endsWith(".json")) {
+    // Skip the original .tsx/.ts script sources (their compiled
+    // output is added separately below).
+    if (scriptSourcesToSkip.has(inZip)) {
+      continue;
+    }
+    // Skip any other .tsx/.ts inside the `scripts/` tree that isn't a
+    // manifest entry — these are helpers (e.g. `scripts/ui/*.tsx`)
+    // bundled into the entrypoint already.
+    if (
+      (inZip.startsWith("scripts/") && (inZip.endsWith(".tsx") || inZip.endsWith(".ts"))) &&
+      !manifestScripts.has(inZip)
+    ) {
+      continue;
+    }
+
+    if (inZip === "manifest.json" && manifestText !== null) {
+      zip.file(inZip, manifestText);
+    } else if (inZip.startsWith("scenes/") && inZip.endsWith(".json")) {
       const sceneJson = mergedScenes.get(inZip)!;
       // Pre-expand idMap → legacy structured shape so the bake script's
       // emissive collection sees the cell `emissive` field directly.
@@ -431,6 +503,13 @@ async function buildPack(
       const bytes = await Bun.file(filePath).bytes();
       zip.file(inZip, bytes);
     }
+    fileCount++;
+  }
+
+  // Emit each compiled .tsx → .js. Done after the walk so they land
+  // in the zip even though the source file was skipped above.
+  for (const [compiledPath, source] of compiledScripts) {
+    zip.file(compiledPath, source);
     fileCount++;
   }
 

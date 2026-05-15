@@ -5,9 +5,7 @@ import { World } from "ECS";
 import { KeyboardController, MouseController } from "Controllers";
 import { TwoDRenderer, WebGLRenderer, type SceneRenderer } from "Renderers";
 import {
-  InventoryScreenSystem,
   LightCollectionSystem,
-  SettingsScreenSystem,
   SpriteRenderSystem,
 } from "Systems";
 import ModalRegistry from "ModalRegistry";
@@ -17,6 +15,7 @@ import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
 import { ModAPIImpl } from "ModAPI";
 import ItemImages from "ItemImages";
+import { installPreactRuntime } from "PreactRuntime";
 
 /**
  * Long-lived state preserved across HMR reloads. Re-using the `World`
@@ -49,8 +48,6 @@ export class Game {
 
   readonly spriteRender: SpriteRenderSystem;
   readonly lightCollection: LightCollectionSystem;
-  readonly inventoryScreen: InventoryScreenSystem;
-  readonly settingsScreen: SettingsScreenSystem;
   readonly modals: ModalRegistry;
   readonly itemImages: ItemImages;
   readonly api: ModAPIImpl;
@@ -115,24 +112,23 @@ export class Game {
     this.world = previous?.world ?? new World();
 
     this.scene = scene;
-    // Engine-side systems still in the engine after R3: sprite + light
-    // collection are renderer bridges (not gameplay), and the modal
-    // screens own DOM/Preact mounts the pack-script runtime can't
-    // construct itself. The 7 pack-migrated systems (player-input,
-    // gun-render, pickup, minimap, reticle, stats, inventory-bar) are
-    // loaded by `runPackScripts` below.
+    // Engine-side systems still in the engine after R4: sprite + light
+    // collection are renderer bridges (not gameplay). The two modal
+    // screens (inventory + settings) moved to the default-pack in R4
+    // and now mount via `api.ui.registerModal`. The 7 pack-migrated
+    // systems from R3 (player-input, gun-render, pickup, minimap,
+    // reticle, stats, inventory-bar) are loaded by `runPackScripts`.
     this.itemImages = new ItemImages(pack);
     this.spriteRender = new SpriteRenderSystem();
     this.lightCollection = new LightCollectionSystem();
     this.modals = new ModalRegistry();
-    this.inventoryScreen = new InventoryScreenSystem(
-      this.keyboard,
-      pack,
-      this.itemImages,
-      this.modals,
-    );
-    this.settingsScreen = new SettingsScreenSystem(this.keyboard, this.modals);
-    this.settingsScreen.setPackConfig(packConfig);
+
+    // Pack-side `.tsx` scripts (e.g. modal screens) import `"preact"`
+    // and `"preact/hooks"`; the pack-builder bundled those imports
+    // against virtual modules that read from `globalThis` slots.
+    // Install the engine's Preact instance into those slots before
+    // pack scripts execute so the imports resolve.
+    installPreactRuntime();
 
     // Modding surface — handed to every pack script via `runPackScripts`.
     // We wire keyboard / mouse / modals references in so pack-side
@@ -148,6 +144,7 @@ export class Game {
       mouse: this.mouse,
       modals: this.modals,
       itemImages: this.itemImages,
+      packConfig,
     });
 
     this.engine = new Engine();
@@ -162,8 +159,14 @@ export class Game {
   }
 
   private readonly onPointerLockChange = (): void => {
+    // Esc-during-pointer-lock is swallowed by the browser, but it
+    // still triggers `pointerlockchange`. Flip the "settings" modal
+    // open via the registry so the pack-side `SettingsScreenSystem`
+    // reacts on the next frame just as it would on a normal Esc edge.
+    // The engine never reads the modal's contents — only that it's
+    // open — so this stays content-agnostic.
     if (document.pointerLockElement === null && !this.modals.any()) {
-      this.settingsScreen.openModal(this.world);
+      this.modals.setOpen("settings", true);
     }
   };
 
@@ -275,17 +278,20 @@ export class Game {
   }
 
   private readonly update = (deltaTime: number): void => {
-    // Modal-toggle polling stays live regardless of state — that's how
-    // you actually open / close them.
-    this.inventoryScreen.update(this.world, deltaTime);
-    this.settingsScreen.update(this.world, deltaTime);
-
     if (!this.modals.any()) {
-      // World-affecting systems (all mod-registered after R3 — see
+      // World-affecting systems (mod-registered after R3 — see
       // `packages/default-pack/scripts/systems/*`) pause while any
-      // modal owns the screen.
+      // modal owns the screen. The pack-side modal systems register
+      // their open-toggle polling through the same `registerSystem`
+      // path; they only need to fire while no modal is open. Their
+      // close-side path runs inside the Preact component itself
+      // (window keydown listener) and so doesn't need a frame tick.
       this.api.runFrame(deltaTime);
     }
+    // Reconcile pack-registered modal components (Preact) against the
+    // engine's open-modal set. Runs every frame so live-prop callbacks
+    // see fresh state (CONFIG, inventory, etc).
+    this.api.flushUI();
   };
 
   private readonly render = (deltaTime: number): void => {

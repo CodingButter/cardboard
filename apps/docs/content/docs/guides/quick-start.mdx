@@ -1,31 +1,54 @@
 ---
 title: Quick start
-description: Install, run the dev server, build the default pack, and explore.
+description: Clone, install, run, and edit a pack script in ten minutes.
 ---
 
-cardboard is a Bun-first monorepo. Every workflow below uses `bun` —
-no `npm`, no `yarn`, no `pnpm`.
+This guide takes you from a fresh checkout to seeing your own
+edit reflected in the browser. The whole loop is under ten
+minutes on a warm machine.
 
-## Install
+## Prerequisites
+
+You need [Bun](https://bun.sh) installed. cardboard is
+Bun-first — every script in the repo assumes `bun` is on your
+`$PATH`. macOS / Linux / WSL all work.
 
 ```sh
+curl -fsSL https://bun.sh/install | bash
+bun --version
+```
+
+That's the only required dependency. The engine, runner, and
+docs site all build from source with no system toolchain beyond
+Bun itself.
+
+## Clone and install
+
+```sh
+git clone https://github.com/CodingButter/cardboard.git
+cd cardboard
 bun install
 ```
 
-Bun resolves the workspace graph automatically. The root
-`package.json` declares `workspaces: ["packages/*", "apps/*"]`.
+`bun install` resolves the workspace graph automatically. The
+root `package.json` declares `workspaces: ["packages/*", "apps/*"]`,
+so every package — engine, default pack, docs site, game
+runner, pack builder — links into the same `node_modules`
+tree.
 
 ## Build the default pack
 
-The game runs against an `.apg` asset pack. Build the default pack
-first so the runner has something to load:
+The game runs against `.apg` asset packs. Build the default pack
+once so the runner has something to load:
 
 ```sh
 bun run build-packs
 ```
 
-This bakes lightmaps, zips the contents of `packages/default-pack/`,
-and emits `apps/game/public/packs/default.apg`.
+This walks every `packages/*-pack/` directory, bakes lightmaps,
+zips the contents into an `.apg`, and writes the result to
+`apps/game/public/packs/default.apg`. The default pack is the
+only one that ships in the repo today.
 
 ## Run the dev server
 
@@ -33,35 +56,84 @@ and emits `apps/game/public/packs/default.apg`.
 bun run dev
 ```
 
-Opens the game on `http://localhost:3000`. HMR-friendly: editing
-engine TypeScript reloads the module and re-snapshots world state
-across the boundary. Editing pack content requires `bun run
-build-packs` + a page reload.
+Opens the game on `http://localhost:3000`. You should see:
 
-## Explore the default pack
+- A first-person view inside a room.
+- An assault rifle viewmodel pinned to the bottom of the screen.
+- A minimap top-left, with your position and facing.
+- A reticle in the centre.
+- An inventory hotbar across the bottom-centre. Slot 1 holds
+  the rifle.
+- Yellow ammo-pack pickups scattered around the open cells.
 
-The default pack lives at `packages/default-pack/`. Its layout:
+Click the canvas to capture the mouse. WASD walks, mouse
+turns, scroll cycles hotbar, left-click fires, R reloads,
+Ctrl+\` toggles a stats overlay.
 
+## Edit one script
+
+Everything you see — the player, the gun, the pickups, the
+hotbar, the minimap — is implemented in pack scripts, not in
+the engine. The engine ships zero gameplay code.
+
+Open `packages/default-pack/scripts/hello.js` and find this
+line near the bottom of the ammo-scatter block:
+
+```js
+if (rand() < 1 / 25) {
+  ammo(x + 0.5, y + 0.5);
+  count++;
+}
 ```
-packages/default-pack/
-├── manifest.json        items, prefabs, defaultInventory, requires[]
-├── config.json          deep-merged over the engine baseline
-├── scenes/*.json        SceneJSON (walls, floors, ceilings, entities, lightmap)
-├── images/*             textures + item icons
-├── scripts/*.js         ES modules; default-export receives ModAPI
-└── (future) shaders/*   opt-in pack-shipped fragment/vertex sources
+
+That `1 / 25` means "1 in 25 open cells gets an ammo pack."
+Change it to `1 / 5`:
+
+```js
+if (rand() < 1 / 5) {
+  ammo(x + 0.5, y + 0.5);
+  count++;
+}
 ```
 
-Load a different pack via URL query:
-
-```
-http://localhost:3000/?pack=https://example.com/some.apg
-```
-
-## Build for production
+Save the file. The dev server already hot-reloads engine code,
+but **pack content needs a rebuild** because the runtime loads
+it from the `.apg` zip, not from disk:
 
 ```sh
-bun run build
+bun run build-packs
 ```
 
-Emits a static bundle from `apps/game/`.
+Reload the browser tab. The world is now five times as littered
+with ammo packs. Open the dev tools console and you'll see the
+new count logged by `hello.js`:
+
+```
+[mod] scattered 234 ammo packs
+```
+
+## What just happened
+
+You changed a pack script. `bun run build-packs` re-zipped the
+default pack into `apps/game/public/packs/default.apg`. On
+reload, the runner fetched the new `.apg`, extracted the
+manifest, loaded each script listed in `manifest.scripts` as
+an ES module, and called the default export with the live
+`ModAPI` instance. `hello.js` ran, registered its system + its
+ammo-scatter, and the engine carried on.
+
+That's the whole loop. The engine doesn't know what an "ammo
+pack" is. It only knows how to spawn entities with components
+and run systems against them; the pack tells it what those
+components and systems are.
+
+## Where to next
+
+- [Concepts](/docs/guides/concepts) — the mental model. What's
+  an entity, what's a system, how the pieces compose.
+- [Writing your first pack](/docs/guides/writing-your-first-pack) —
+  build a new pack from scratch.
+- [ModAPI cookbook](/docs/guides/modapi-cookbook) — short
+  copy-pasteable recipes for common modder tasks.
+- [Custom shaders](/docs/guides/shaders) — for when you want to
+  change how the engine looks, not just what it spawns.

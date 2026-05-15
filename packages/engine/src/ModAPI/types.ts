@@ -5,6 +5,8 @@ import type { AssetPack } from "AssetPack";
 import { Vec2 } from "Libs/Vector";
 import type { KeyCode } from "Controllers/KeyboardController";
 import type { SceneRenderer } from "Renderers";
+import type { ComponentType } from "preact";
+import type { PartialGameConfig } from "Settings";
 import {
   Position,
   Facing,
@@ -24,11 +26,14 @@ import {
   HOTBAR_SIZE,
   addItem,
   countItem,
+  defaultStackMax,
   emptyEquipment,
   getActiveItem,
+  quickTransfer,
   removeItem,
   seedInventory,
 } from "Libs/Inventory";
+import { EQUIP_SLOTS } from "AssetPack";
 import type ItemImages from "ItemImages";
 import { castRayToWall } from "Libs/Raycast";
 
@@ -136,6 +141,58 @@ export interface ModalsAPI {
   anyOther(modalId: string): boolean;
 }
 
+/**
+ * Modal-screen mount surface. Pack scripts register a Preact component
+ * by name; the engine renders it into a top-level mount whenever
+ * `api.modals.isOpen(name)` is true. The optional `props()` callback
+ * is invoked on every render so components can see fresh live state
+ * (current CONFIG, current inventory) without the pack having to wire
+ * its own re-render loop.
+ *
+ * Pack-side `.tsx` scripts go through the pack-builder's TSX pipeline
+ * — `import { h } from "preact"` resolves at runtime to the engine's
+ * own Preact instance (see `apps/pack-builder/src/build-packs.ts`),
+ * so the engine's mount and the pack's components share one renderer.
+ */
+export interface UIAPI {
+  registerModal<P>(
+    name: string,
+    component: ComponentType<P>,
+    props?: () => P,
+  ): void;
+  unregisterModal(name: string): void;
+}
+
+/**
+ * Settings persistence surface. Wraps `Settings.ts` for pack-side
+ * settings UIs that need to round-trip the user's saved overlay to a
+ * file (export/import JSON) and re-apply changes to the live CONFIG.
+ *
+ * Pack scripts shouldn't reach into engine-internal `Settings.ts`
+ * directly because pack code only sees the ModAPI — the engine
+ * re-exposes the four functions the settings modal actually needs.
+ */
+export interface SettingsAPI {
+  /** Last-known user overlay (the persisted delta from baseline + pack). */
+  load(): PartialGameConfig;
+  /** Persist a new overlay AND re-apply it to live CONFIG (pack layer included). */
+  save(overlay: PartialGameConfig): void;
+  /** Trigger a JSON download of the supplied overlay. */
+  export(overlay: PartialGameConfig): void;
+  /** Pop a file picker; resolves with the parsed overlay. */
+  import(): Promise<PartialGameConfig>;
+}
+
+/**
+ * Bindings helpers. Just `label` today — wraps the engine's
+ * `bindingLabel` so the settings UI can show "Mouse L" instead of
+ * "Mouse0" without pulling in `Controllers/Bindings`.
+ */
+export interface BindingsAPI {
+  /** Human-readable label for a binding code (`"KeyW"` → `"KeyW"`, `"Mouse0"` → `"Mouse L"`). */
+  label(code: KeyCode): string;
+}
+
 /** Engine-defined components exposed to mods by name. */
 export interface BuiltInComponents {
   Position: typeof Position;
@@ -166,12 +223,18 @@ export interface BuiltInComponents {
 export interface InventoryAPI {
   readonly BAG_SIZE: number;
   readonly HOTBAR_SIZE: number;
+  /** Ordered list of equipment slot ids (helmet, chest, ...). */
+  readonly EQUIP_SLOTS: typeof EQUIP_SLOTS;
   readonly emptyEquipment: typeof emptyEquipment;
   readonly seedInventory: typeof seedInventory;
   readonly addItem: typeof addItem;
   readonly removeItem: typeof removeItem;
   readonly countItem: typeof countItem;
   readonly getActiveItem: typeof getActiveItem;
+  /** Maximum stack size for an item def (from `stackMax` or type default). */
+  readonly defaultStackMax: typeof defaultStackMax;
+  /** Shift-click flow — moves a stack between bag/hotbar/equipment. */
+  readonly quickTransfer: typeof quickTransfer;
 }
 
 /**
@@ -228,6 +291,19 @@ export interface ModAPI {
    * own toggle keys).
    */
   readonly modals: ModalsAPI;
+  /**
+   * Pack-mounted modal screens (Preact). Pack scripts register a
+   * component by name; the engine renders it when its modal name is
+   * open. See `UIAPI`.
+   */
+  readonly ui: UIAPI;
+  /**
+   * Settings persistence + import/export for pack-side settings UIs.
+   * Mirrors the four functions in the engine's `Settings.ts`.
+   */
+  readonly settings: SettingsAPI;
+  /** Bindings label resolver — wraps `Controllers/Bindings#bindingLabel`. */
+  readonly bindings: BindingsAPI;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */
