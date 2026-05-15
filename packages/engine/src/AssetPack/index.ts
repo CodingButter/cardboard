@@ -10,6 +10,8 @@ export type {
   ItemImageVariant,
   PackManifest,
   ShaderRole,
+  ShaderHookRole,
+  ShaderEntry,
 } from "./types";
 export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS } from "./types";
 export { discoverItemVariants } from "./discoverItemVariants";

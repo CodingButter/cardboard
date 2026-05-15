@@ -8,6 +8,7 @@ import { Texture } from "./Texture";
 import type { LightInstance, SceneRenderer, SpriteDrawRequest } from "./SceneRenderer";
 import type { AssetPack, SheetEntry, ShaderRole } from "AssetPack";
 import { getShaderSource, SHADER_ROLES } from "./ShaderRoleRegistry";
+import { buildFragmentSource } from "./ShaderInjection";
 
 export interface WebGLRendererProps {
   canvas: HTMLCanvasElement;
@@ -95,169 +96,65 @@ void main() {
 }
 `;
 
-const FRAG_SPRITE_SRC = `#version 300 es
-#define MAX_SLABS 4
-#define MAX_LIGHTS 8
-#define MAX_LOS_STEPS 16
-precision highp float;
-precision highp sampler2DArray;
-in vec2 v_uv;
-flat in float v_layer;
-flat in float v_camY;
-flat in vec2 v_worldPos;
-out vec4 outColor;
-uniform sampler2DArray u_sprites;
-uniform sampler2D u_columns;
-uniform sampler2D u_columnsSeg;
-// Phase 4: sprites sample only the FLOOR lightmap. Most sprites sit
-// near the floor; route a per-sprite-z choice later if needed.
-uniform sampler2D u_lightmapFloor;
-uniform sampler2D u_sceneTiles;
-uniform vec2 u_resolution;
-uniform vec2 u_sceneSize;
-// K-factor: sub-samples per cell on each axis the bake used. Default
-// 4 for new bakes; legacy bakes ship K=1 and the UV math degenerates
-// to the original (W+1)×(H+1) corner grid.
-uniform float u_lightmapResolution;
-uniform float u_horizonOffset;
-uniform float u_cameraZ;
-uniform float u_planeScale;
-uniform float u_fogInv;
-// Dynamic lights — see MAX_DYNAMIC_LIGHTS_GL on the CPU side.
-//   u_lightPos.xyz = world (x, y, z), .w = intensity.
-//   u_lightCol.rgb = colour in [0,1] (HDR allowed), .a = radius (tiles).
-uniform int u_lightCount;
-uniform vec4 u_lightPos[MAX_LIGHTS];
-uniform vec4 u_lightCol[MAX_LIGHTS];
-
-// Soft-shadow jitter table — same offsets the world shader uses. See
-// FRAG_WORLD_SRC for the rationale. Sprites get one sample per sprite
-// (matching the CPU model), so the jitter loop runs once per sprite,
-// not per pixel.
-#define LIGHT_JITTER_SAMPLES 3
-const vec2 LIGHT_JITTER_OFFSETS[LIGHT_JITTER_SAMPLES] = vec2[](
-  vec2(0.0, 0.0),
-  vec2(0.05, 0.0),
-  vec2(-0.05, 0.0)
-);
-// In-shader DDA LOS — walks integer cells between (ax, ay) and (bx, by)
-// using the same isFloorOccluderC predicate the AO pass uses (wall
-// reaches floor — fine for Phase 5 LOS). Capped at MAX_LOS_STEPS;
-// fail-closed at the cap so unreachable lights never leak. Skips the
-// destination cell so the light's own cell never self-occludes.
-bool losClearSprite(vec2 a, vec2 b) {
-  vec2 d = b - a;
-  float dist = length(d);
-  if (dist < 1e-4) return true;
-  int steps = int(min(float(MAX_LOS_STEPS), ceil(dist) + 2.0));
-  vec2 step = d / float(steps);
-  ivec2 endCell = ivec2(floor(b));
-  ivec2 cell = ivec2(floor(a));
-  vec2 p = a;
-  for (int i = 0; i < MAX_LOS_STEPS; i++) {
-    if (i >= steps) break;
-    p += step;
-    ivec2 nc = ivec2(floor(p));
-    if (nc == cell) continue;
-    cell = nc;
-    if (cell == endCell) return true;
-    if (cell.x < 0 || cell.y < 0
-        || cell.x >= int(u_sceneSize.x) || cell.y >= int(u_sceneSize.y)) continue;
-    if (texelFetch(u_sceneTiles, cell, 0).r > 0.5) return false;
-  }
-  return cell == endCell;
-}
+/**
+ * Engine default body for `spriteFrag`. S2 promoted helpers to the
+ * auto-injected header — this constant now contains ONLY `main()`. The
+ * jitter table, `losClearSprite`, `isSpriteHiddenBySlab`,
+ * `sampleLightmap`, and `accumulateDynamicLightSprite` live in
+ * `shaderHelpers.ts` and are prepended by `buildFragmentSource`.
+ *
+ * S3 weaves the spriteFrag hook catalog (§7.3) into the body's call
+ * sites. Identity defaults inline to zero cost.
+ */
+const FRAG_SPRITE_SRC = `
 void main() {
-  // Per-pixel slab z-clip — walks every wall hit on this column and
-  // discards the sprite pixel only if a slab CLOSER than the sprite
-  // actually covers this fragment's y. Lets a sprite peek over the
-  // top of a knee wall instead of being hidden whole-column.
-  int colX = int(floor(gl_FragCoord.x));
-  // Convert gl_FragCoord.y (bottom-up) to canvas-style y (top-down)
-  // so it matches the world shader's wall-band math.
-  float yTop = u_resolution.y - gl_FragCoord.y;
-  float horizonY = u_resolution.y * 0.5 + u_horizonOffset;
-  // Same aspect-correct per-unit Z scale as the world shader.
-  float pixelsPerUnit = u_resolution.x / (2.0 * u_planeScale);
-  bool hidden = false;
-  for (int s = 0; s < MAX_SLABS; s++) {
-    vec4 col = texelFetch(u_columns, ivec2(colX, s), 0);
-    int tile = int(col.a);
-    if (tile <= 0) continue;
-    float perpDist = col.r;
-    if (perpDist >= v_camY) continue; // slab is behind the sprite
-    vec4 seg = texelFetch(u_columnsSeg, ivec2(colX, s), 0);
-    float startZ = seg.r;
-    float height = seg.g;
-    float unitH = pixelsPerUnit / perpDist;
-    float wTop = horizonY - (startZ + height - u_cameraZ) * unitH;
-    float wBot = horizonY - (startZ - u_cameraZ) * unitH;
-    if (yTop >= wTop && yTop < wBot) {
-      hidden = true;
-      break;
-    }
-  }
-  if (hidden) discard;
-
-  // Texture orientation: getImageData returns data top-down, and GL
-  // upload (without UNPACK_FLIP_Y, which texSubImage3D ignores anyway)
-  // places the first data row at v=0 (texture bottom). Our quad UVs
-  // already use Y-down (TL = uv(0,0)), so the two flips cancel and a
-  // direct sample lands right-side-up.
+  // Per-pixel slab z-clip — engine default discards when a closer wall
+  // slab covers this fragment. Routed through hook_shouldDiscardSprite
+  // so a pack can stipple / dither / threshold differently. Engine
+  // identity default keeps the legacy behaviour.
   vec4 tex = texture(u_sprites, vec3(v_uv, v_layer));
-  if (tex.a <= 0.001) discard;
+  tex = hook_modifySpriteSample(tex, v_uv, int(v_layer));
+  bool defaultDiscard = (tex.a <= 0.001) || isSpriteHiddenBySlab();
+  if (hook_shouldDiscardSprite(defaultDiscard, v_uv, int(v_layer), v_worldPos)) discard;
+
   float fogMul = clamp(1.0 - v_camY * u_fogInv, 0.0, 1.0);
-  // Static lightmap — corner grid is (W*K+1)×(H*K+1) RGBA32F with
-  // LINEAR filtering. K=1 reproduces the original (W+1)×(H+1) layout
-  // for back-compat with legacy bakes; K>=2 sharpens shadow edges
-  // because the boundary can snap to a 1/K-wide gridline instead of
-  // the full integer cell line.
-  float lmK = u_lightmapResolution;
-  vec2 lightUV = vec2((v_worldPos.x * lmK + 0.5) / (u_sceneSize.x * lmK + 1.0),
-                      (v_worldPos.y * lmK + 0.5) / (u_sceneSize.y * lmK + 1.0));
-  vec3 staticLight = texture(u_lightmapFloor, lightUV).rgb;
-  // Dynamic-light add — Phase 5. One sample per sprite at v_worldPos,
-  // matching the canvas2d backend's per-sprite (not per-pixel) model.
-  // Each light runs LIGHT_JITTER_SAMPLES LOS tests at jittered light
-  // positions and averages into a coverage scalar — same soft-shadow
-  // treatment the world shader applies.
-  vec3 dynamicLight = vec3(0.0);
-  if (u_lightCount > 0) {
-    float invN = 1.0 / float(LIGHT_JITTER_SAMPLES);
-    for (int i = 0; i < MAX_LIGHTS; i++) {
-      if (i >= u_lightCount) break;
-      vec3 lp = u_lightPos[i].xyz;
-      float intensity = u_lightPos[i].w;
-      vec3 lc = u_lightCol[i].rgb;
-      float radius = u_lightCol[i].a;
-      vec2 dxy = lp.xy - v_worldPos;
-      float dist2 = dot(dxy, dxy);
-      if (dist2 > radius * radius) continue;
-      float dist = sqrt(dist2);
-      float coverage = 0.0;
-      for (int s = 0; s < LIGHT_JITTER_SAMPLES; s++) {
-        if (losClearSprite(v_worldPos, lp.xy + LIGHT_JITTER_OFFSETS[s])) coverage += 1.0;
-      }
-      if (coverage <= 0.0) continue;
-      coverage *= invN;
-      float t = 1.0 - dist / radius;
-      float atten = t * t * intensity * coverage;
-      dynamicLight += lc * atten;
-    }
-  }
-  outColor = vec4(tex.rgb * fogMul * (staticLight + dynamicLight), tex.a);
+  fogMul = hook_modifySpriteFog(fogMul, v_camY);
+
+  vec3 staticLight = sampleLightmap(v_worldPos, false);
+  staticLight = hook_modifySpriteStaticLight(staticLight, v_worldPos);
+  vec3 dynamicLight = accumulateDynamicLightSprite(v_worldPos);
+  dynamicLight = hook_modifySpriteDynamicLight(dynamicLight, v_worldPos);
+
+  vec3 spriteColor = tex.rgb;
+  spriteColor = hook_modifySpriteColor(spriteColor, v_uv, int(v_layer), v_worldPos);
+  float spriteAlpha = hook_modifySpriteAlpha(tex.a, v_uv, int(v_layer));
+
+  vec3 finalColor = spriteColor * fogMul * (staticLight + dynamicLight);
+  finalColor = hook_modifySpriteFinalColor(finalColor, int(v_layer), v_worldPos);
+  outColor = vec4(finalColor, spriteAlpha);
 }
 `;
 
-/** Sky pass — two-color vertical gradient (top color on top half, bottom on bottom). */
-const FRAG_SKY_SRC = `#version 300 es
-precision highp float;
-in vec2 v_uv;
-out vec4 outColor;
-uniform vec3 u_top;
-uniform vec3 u_bottom;
+/**
+ * Engine default body for `skyFrag`. Two-color vertical gradient (top
+ * color on top half, bottom on bottom). Sky has no helpers; just
+ * `main()` here. S3: routed through the 3 sky hooks (§7.4).
+ *
+ * The engine's identity default for `hook_modifySkyGradient` returns
+ * its argument; today's hard split is `step(0.5, v_uv.y)`. Smooth-sky
+ * packs override the hook to return `smoothstep(0.4, 0.6, v_uv.y)`.
+ */
+const FRAG_SKY_SRC = `
 void main() {
-  vec3 col = (v_uv.y > 0.5) ? u_top : u_bottom;
+  vec3 topCol = hook_modifySkyTop(u_top, v_uv);
+  vec3 botCol = hook_modifySkyBottom(u_bottom, v_uv);
+  // Engine default: strict-greater hard split at y=0.5 (matches the
+  // legacy (v_uv.y > 0.5) ? u_top : u_bottom ternary exactly).
+  // A pack overriding hook_modifySkyGradient can return a smoothstep
+  // value to soften the horizon.
+  float blend = (v_uv.y > 0.5) ? 1.0 : 0.0;
+  blend = hook_modifySkyGradient(blend, v_uv);
+  vec3 col = mix(botCol, topCol, blend);
   outColor = vec4(col, 1.0);
 }
 `;
@@ -285,282 +182,41 @@ void main() {
  * an offscreen buffer — wall color is deterministic from `(wallTile,
  * wallU, sideMul, perpDist, mirroredY)`, so we don't need a render target.
  */
-const FRAG_WORLD_SRC = `#version 300 es
-precision highp float;
-precision highp sampler2DArray;
-in vec2 v_uv;
-out vec4 outColor;
-
-uniform sampler2DArray u_tiles;
-uniform sampler2D u_columns;
-uniform sampler2D u_columnsSeg;
-uniform sampler2D u_columnsCap;
-uniform sampler2D u_columnsCell;
-uniform sampler2D u_columnsEmissive;
-uniform sampler2D u_sceneTiles;
-uniform sampler2D u_sceneRefl;
-uniform sampler2D u_sceneEmissiveFloor;
-uniform sampler2D u_sceneEmissiveCeil;
-// Split lightmap (Phase 4 fix): floor + ceiling get their own baked
-// corner grids. Knee walls block light to floor corners at z=0 but
-// not to ceiling corners at z=1 — sharing a single grid leaked floor
-// shadows onto the ceiling.
-uniform sampler2D u_lightmapFloor;
-uniform sampler2D u_lightmapCeiling;
-uniform vec2 u_resolution;
-uniform vec2 u_sceneSize;
-// K-factor of the baked lightmap (sub-samples per cell). Texture
-// dimensions are (W*K+1)×(H*K+1); UV math below scales world coords
-// by K so the texel-center math still nails each baked corner.
-uniform float u_lightmapResolution;
-uniform float u_fogInv;
-uniform vec2 u_position;
-uniform vec2 u_forward;
-uniform vec2 u_right;
-uniform float u_planeScale;
-uniform float u_horizonOffset;
-uniform float u_cameraZ;
-
-// Tuning knobs (mirror of CONFIG.* on the CPU path).
-uniform float u_wallAoBotDarken;
-uniform float u_wallAoBotBand;
-uniform float u_wallAoTopDarken;
-uniform float u_wallAoTopBand;
-uniform float u_floorAoBand;
-uniform float u_floorAoDarken;
-uniform float u_reflTileScale;
-uniform float u_wallReflStrength;
-uniform float u_wallReflBand;
-
-// Solid color fallbacks for tile id 0 (no texture bound).
-uniform vec3 u_fallbackFloor;
-uniform vec3 u_fallbackCeiling;
-
-#define MAX_LIGHTS 8
-#define MAX_LOS_STEPS 16
-// Dynamic lights — see MAX_DYNAMIC_LIGHTS_GL on the CPU side.
-//   u_lightPos.xyz = world (x, y, z), .w = intensity.
-//   u_lightCol.rgb = colour, .a = radius (tiles).
-uniform int u_lightCount;
-uniform vec4 u_lightPos[MAX_LIGHTS];
-uniform vec4 u_lightCol[MAX_LIGHTS];
-
-/* --- Helpers --------------------------------------------------------- */
-
-bool inBounds(ivec2 c) {
-  return c.x >= 0 && c.y >= 0
-      && c.x < int(u_sceneSize.x) && c.y < int(u_sceneSize.y);
-}
-
-bool isFloorOccluderC(ivec2 c) {
-  if (!inBounds(c)) return false;
-  return texelFetch(u_sceneTiles, c, 0).r > 0.5;
-}
-bool isCeilingOccluderC(ivec2 c) {
-  if (!inBounds(c)) return false;
-  return texelFetch(u_sceneTiles, c, 0).a > 0.5;
-}
-
-vec3 sampleTile(int tile, vec2 uv) {
-  return texture(u_tiles, vec3(uv, float(tile))).rgb;
-}
-
-// Wall AO multiplier as a function of screen y within the wall band.
-float wallAo(float y, float wallTop, float wallHeight) {
-  float aoBotStrength = 1.0 - u_wallAoBotDarken;
-  float aoBotStart = wallTop + wallHeight * (1.0 - u_wallAoBotBand);
-  float aoBotSpanInv = 1.0 / (wallHeight * u_wallAoBotBand);
-  float botT = max(0.0, (y - aoBotStart) * aoBotSpanInv);
-
-  float aoTopStrength = 1.0 - u_wallAoTopDarken;
-  float aoTopEnd = wallTop + wallHeight * u_wallAoTopBand;
-  float aoTopSpanInv = 1.0 / (wallHeight * u_wallAoTopBand);
-  float topT = max(0.0, (aoTopEnd - y) * aoTopSpanInv);
-
-  return (1.0 - aoBotStrength * botT * botT) * (1.0 - aoTopStrength * topT * topT);
-}
-
-// World-space AO at cell-type boundaries — parameterised by which
-// surface (floor / ceiling) we're testing so partial walls only cast a
-// contact shadow on the surface they actually touch.
-float surfaceAo(ivec2 cellCoord, vec2 frac, bool useCeiling) {
-  bool self = useCeiling
-    ? isCeilingOccluderC(cellCoord)
-    : isFloorOccluderC(cellCoord);
-  bool oL = (useCeiling ? isCeilingOccluderC(cellCoord + ivec2(-1, 0)) : isFloorOccluderC(cellCoord + ivec2(-1, 0))) != self;
-  bool oR = (useCeiling ? isCeilingOccluderC(cellCoord + ivec2( 1, 0)) : isFloorOccluderC(cellCoord + ivec2( 1, 0))) != self;
-  bool oU = (useCeiling ? isCeilingOccluderC(cellCoord + ivec2( 0,-1)) : isFloorOccluderC(cellCoord + ivec2( 0,-1))) != self;
-  bool oD = (useCeiling ? isCeilingOccluderC(cellCoord + ivec2( 0, 1)) : isFloorOccluderC(cellCoord + ivec2( 0, 1))) != self;
-
-  float prox = 0.0;
-  if (oL) prox = max(prox, 1.0 - frac.x);
-  if (oR) prox = max(prox, frac.x);
-  if (oU) prox = max(prox, 1.0 - frac.y);
-  if (oD) prox = max(prox, frac.y);
-
-  bool dTL = useCeiling ? isCeilingOccluderC(cellCoord + ivec2(-1,-1)) : isFloorOccluderC(cellCoord + ivec2(-1,-1));
-  bool dTR = useCeiling ? isCeilingOccluderC(cellCoord + ivec2( 1,-1)) : isFloorOccluderC(cellCoord + ivec2( 1,-1));
-  bool dBL = useCeiling ? isCeilingOccluderC(cellCoord + ivec2(-1, 1)) : isFloorOccluderC(cellCoord + ivec2(-1, 1));
-  bool dBR = useCeiling ? isCeilingOccluderC(cellCoord + ivec2( 1, 1)) : isFloorOccluderC(cellCoord + ivec2( 1, 1));
-  if (!oL && !oU && dTL != self) prox = max(prox, (1.0 - frac.x) * (1.0 - frac.y));
-  if (!oR && !oU && dTR != self) prox = max(prox, frac.x * (1.0 - frac.y));
-  if (!oL && !oD && dBL != self) prox = max(prox, (1.0 - frac.x) * frac.y);
-  if (!oR && !oD && dBR != self) prox = max(prox, frac.x * frac.y);
-
-  if (prox <= 0.0) return 1.0;
-  float aoT = max(0.0, (prox - (1.0 - u_floorAoBand)) / u_floorAoBand);
-  return 1.0 - (1.0 - u_floorAoDarken) * aoT * aoT;
-}
-
-// Effective reflectiveness for this cell, blended bilinearly with its
-// neighbors by transition. channel picks between floor (.r) and ceiling
-// (.b) of u_sceneRefl.
-float effectiveReflectiveness(
-  ivec2 cellCoord, vec2 frac, float ownRefl, float trans,
-  int channel
-) {
-  if (trans <= 0.0) return ownRefl;
-  ivec2 off;
-  off.x = frac.x < 0.5 ? -1 : 1;
-  off.y = frac.y < 0.5 ? -1 : 1;
-  float bix = frac.x < 0.5 ? 1.0 - 2.0 * frac.x : 2.0 * frac.x - 1.0;
-  float biy = frac.y < 0.5 ? 1.0 - 2.0 * frac.y : 2.0 * frac.y - 1.0;
-  float w00 = (1.0 - bix) * (1.0 - biy);
-  float w10 = bix * (1.0 - biy);
-  float w01 = (1.0 - bix) * biy;
-  float w11 = bix * biy;
-
-  ivec2 c10 = cellCoord + ivec2(off.x, 0);
-  ivec2 c01 = cellCoord + ivec2(0, off.y);
-  ivec2 c11 = cellCoord + ivec2(off.x, off.y);
-
-  float r10 = inBounds(c10) ? texelFetch(u_sceneRefl, c10, 0)[channel] : ownRefl;
-  float r01 = inBounds(c01) ? texelFetch(u_sceneRefl, c01, 0)[channel] : ownRefl;
-  float r11 = inBounds(c11) ? texelFetch(u_sceneRefl, c11, 0)[channel] : ownRefl;
-  float bilinear = ownRefl * w00 + r10 * w10 + r01 * w01 + r11 * w11;
-  return ownRefl + (bilinear - ownRefl) * trans;
-}
-
-// Reproduce the shaded wall pixel at screen y wy -- for in-shader mirror reflection.
-// segOffsetX and segOffsetY are pre-normalised by texture size on the CPU
-// side, so adding them straight onto the [0,1] UV slides the sample with
-// REPEAT wrap.
-vec3 wallPixelAt(
-  float wy, float wallTop, float wallHeight,
-  int wallTile, float wallU, float sideMul, float perpDist,
-  float segOffsetX, float segOffsetY
-) {
-  float texV = (wy - wallTop) / wallHeight + segOffsetY;
-  vec3 wallColor = sampleTile(wallTile, vec2(wallU + segOffsetX, texV));
-  float fogMul = clamp(1.0 - perpDist * u_fogInv, 0.0, 1.0);
-  float aoMul = wallAo(wy, wallTop, wallHeight);
-  return wallColor * sideMul * fogMul * aoMul;
-}
-
-// In-shader DDA LOS for the world pass. Walks integer cells from a to b
-// and returns false on the first isFloorOccluderC hit between them.
-// Capped at MAX_LOS_STEPS; fail-closed at the cap. The destination cell
-// is skipped so a light can never self-occlude.
-bool losClearWorld(vec2 a, vec2 b) {
-  vec2 d = b - a;
-  float dist = length(d);
-  if (dist < 1e-4) return true;
-  int steps = int(min(float(MAX_LOS_STEPS), ceil(dist) + 2.0));
-  vec2 step = d / float(steps);
-  ivec2 endCell = ivec2(floor(b));
-  ivec2 cell = ivec2(floor(a));
-  vec2 p = a;
-  for (int i = 0; i < MAX_LOS_STEPS; i++) {
-    if (i >= steps) break;
-    p += step;
-    ivec2 nc = ivec2(floor(p));
-    if (nc == cell) continue;
-    cell = nc;
-    if (cell == endCell) return true;
-    if (!inBounds(cell)) continue;
-    if (isFloorOccluderC(cell)) return false;
-  }
-  return cell == endCell;
-}
-
-// Phase 5 dynamic light accumulator. Walks every uploaded light, drops
-// any further than its radius, runs a cheap in-shader DDA LOS, and adds
-// color * (1 - d/r)^2 * intensity. Result is in the same [0,1] colour
-// space as the static lightmap multiplier — callers add it as
-// albedo * (staticLight + dynamic).
-//
-// Soft-shadow jitter: each (pixel, light) pair runs LIGHT_JITTER_SAMPLES
-// LOS tests at slightly offset light positions (matches the static bake's
-// jitter table) and averages the boolean visibility into a fractional
-// coverage in [0, 1]. Kills the dithering you'd otherwise see from
-// adjacent rays' Bresenham LOS stepping through different cells.
-#define LIGHT_JITTER_SAMPLES 3
-const vec2 LIGHT_JITTER_OFFSETS[LIGHT_JITTER_SAMPLES] = vec2[](
-  vec2(0.0, 0.0),
-  vec2(0.05, 0.0),
-  vec2(-0.05, 0.0)
-);
-vec3 accumulateDynamicLight(vec2 wp) {
-  vec3 acc = vec3(0.0);
-  if (u_lightCount <= 0) return acc;
-  float invN = 1.0 / float(LIGHT_JITTER_SAMPLES);
-  for (int i = 0; i < MAX_LIGHTS; i++) {
-    if (i >= u_lightCount) break;
-    vec3 lp = u_lightPos[i].xyz;
-    float intensity = u_lightPos[i].w;
-    vec3 lc = u_lightCol[i].rgb;
-    float radius = u_lightCol[i].a;
-    vec2 dxy = lp.xy - wp;
-    float dist2 = dot(dxy, dxy);
-    if (dist2 > radius * radius) continue;
-    float dist = sqrt(dist2);
-    float coverage = 0.0;
-    for (int s = 0; s < LIGHT_JITTER_SAMPLES; s++) {
-      if (losClearWorld(wp, lp.xy + LIGHT_JITTER_OFFSETS[s])) coverage += 1.0;
-    }
-    if (coverage <= 0.0) continue;
-    coverage *= invN;
-    float t = 1.0 - dist / radius;
-    acc += lc * (t * t * intensity * coverage);
-  }
-  return acc;
-}
-
-#define MAX_SLABS 4
-
+/**
+ * Engine default body for `worldFrag`. S2 promoted helpers + defines
+ * to the auto-injected header — this constant contains ONLY `main()`
+ * plus a tiny `surfaceTypeOf(...)` helper that picks which surface
+ * (floor / ceiling / wall / topCap / botCap) won this fragment. The
+ * helpers `inBounds`, `isFloorOccluderC`, `sampleTile`,
+ * `sampleLightmap`, `accumulateDynamicLight`, `wallAo`, `surfaceAo`,
+ * `effectiveReflectiveness`, `wallPixelAt`, etc. live in
+ * `shaderHelpers.ts` and are prepended by `buildFragmentSource`.
+ *
+ * S3 weaves the 27 worldFrag hooks (§7.2) into the body's call sites
+ * via identity-default `hook_*` functions in the prelude. When no pack
+ * ships overrides, every hook call is a no-op the GLSL compiler inlines
+ * away; visual output is byte-identical to pre-S3.
+ *
+ * Surface enum (§7.1): 0=floor, 1=ceiling, 2=wall, 3=topcap, 4=botcap.
+ * Refl `channel` enum: 0=floor refl (.r), 2=ceiling refl (.b).
+ */
+const FRAG_WORLD_SRC = `
 void main() {
-  // Canvas-style coords: x to the right, y down from top.
   float x = v_uv.x * u_resolution.x;
   float y = (1.0 - v_uv.y) * u_resolution.y;
   int colX = int(floor(x));
-  // Eye height in [0,1] (0.5 = standing). Horizon line stays at canvas
-  // center since the player looks level even when crouching; the pitch
-  // offset is the only thing shifting it.
   float horizonY = u_resolution.y * 0.5 + u_horizonOffset;
-  // Aspect-correct pixels-per-world-Z-unit at perpDist=1. Using
-  // canvas WIDTH (combined with the horizontal FOV) keeps walls
-  // looking like their world proportions regardless of window
-  // aspect — resizing changes the visible vertical FOV instead of
-  // squashing walls.
   float unitH = u_resolution.x / (2.0 * u_planeScale);
-  // Ray direction for this column — shared by floor/ceiling, walls,
-  // caps, and the lightmap world-position lookup so we don't recompute
-  // it in every branch.
   float cameraXn = (2.0 * x / u_resolution.x) - 1.0;
   vec2 rayDir = u_forward + u_right * (u_planeScale * cameraXn);
-  // Per-fragment world position used to look up the static lightmap at
-  // the very end of main(). Updated below as we determine which surface
-  // wins this pixel — floor/ceiling -> exact world hit; wall slab ->
-  // cell centre; cap -> cap world hit. Defaults to the camera (sample
-  // would be valid even if nothing paints over the sky).
   vec2 lightWorldPos = u_position;
-  // Phase 4 split: ceiling and top-caps sample the ceiling lightmap;
-  // everything else samples the floor lightmap. Default false (floor).
   bool useCeilingLightmap = false;
+  // Surface enum tracked through the pipeline — final-stage hooks
+  // (modifySurfaceColor, modifyFinalColor) need it to discriminate.
+  // Defaults to "floor" (winning surface for sky pixels is irrelevant
+  // since surfaceColor stays vec3(0) there).
+  int surfaceKind = 0;
 
-  // Nearest slab (index 0) feeds the floor/ceiling reflection mirror.
-  // Subsequent slabs (1..MAX_SLABS-1) are walls behind the nearest one —
-  // the loop further down handles their slab + cap rendering.
   vec4 col = texelFetch(u_columns, ivec2(colX, 0), 0);
   float perpDist = col.r;
   float wallU = col.g;
@@ -586,60 +242,75 @@ void main() {
 
   bool inWallBand = hasWall && y >= wallTop && y < wallBottom;
 
-  // Floor / ceiling color for this pixel — computed for every pixel,
-  // including those inside the wall band, because the wall's reflective
-  // edge blends *over* this color via alpha.
   vec3 fcColor = vec3(0.0);
-  // Emissive add accumulator — Phase 4. Each surface branch writes its
-  // own emissive contribution; the final pass adds it AFTER the
-  // lightmap multiply so glowing surfaces are visible in darkness.
   vec3 emissiveAdd = vec3(0.0);
-  // Emissive contribution from the floor/ceiling under THIS pixel
-  // (when fcColor is what we end up rendering). Walls and caps
-  // overwrite emissiveAdd further down.
   vec3 fcEmissive = vec3(0.0);
+  // Track active fc-cell so emissive hooks (modifyEmissive / addEmissive)
+  // can run with a defined worldPos when the floor/ceiling branch wins.
+  vec2 fcWorldPos = u_position;
+  int fcSurface = 0;
   float p = abs(y - horizonY);
   if (p >= 0.5) {
     bool isFloor = y > horizonY;
-    // Floor and ceiling each scale by their own "eye → surface"
-    // world distance: cameraZ for the floor, (1 - cameraZ) for the
-    // ceiling. When standing they're equal (0.5 each) and the formula
-    // matches the legacy posZ/p.
     float surfaceZ = isFloor ? u_cameraZ : (1.0 - u_cameraZ);
     float rowDistance = (surfaceZ * unitH) / p;
     vec2 worldPos = u_position + rowDistance * rayDir;
     ivec2 cellCoord = ivec2(floor(worldPos));
     vec2 frac = fract(worldPos);
-    // Floor/ceiling pixel — exact world position drives the lightmap.
-    // Pick the ceiling grid for the ceiling row (isFloor == false).
     lightWorldPos = worldPos;
     useCeilingLightmap = !isFloor;
+    fcWorldPos = worldPos;
+    fcSurface = isFloor ? 0 : 1;
+    surfaceKind = fcSurface;
 
-    float fogMul = clamp(1.0 - rowDistance * u_fogInv, 0.0, 1.0);
+    // S3: depth hook BEFORE fog math (lets a pack remap depth, e.g.
+    // height-fog via worldPos.y). Identity default returns base.
+    float depth = hook_modifyDepth(rowDistance, worldPos);
+    float fogMul = clamp(1.0 - depth * u_fogInv, 0.0, 1.0);
+    fogMul = hook_modifyFogMul(fogMul, depth);
+    // hook_modifyFogColor: §7.2.5 of the plan doc. Engine default
+    // returns its arg unchanged (vec3(0)); engine fog is multiplicative,
+    // not a colour blend, so a non-zero return is not folded into the
+    // surface here. The call exists for catalog completeness — the
+    // GLSL compiler inlines the identity default away. Packs that want
+    // additive fog override hook_modifyFinalColor with their own tint;
+    // the friction is captured in the S3 report (see plan doc §7.2.5).
+    vec3 fogColorObserved = hook_modifyFogColor(vec3(0.0), depth);
 
     vec4 cellTiles = inBounds(cellCoord) ? texelFetch(u_sceneTiles, cellCoord, 0) : vec4(0.0);
     vec4 cellRefl = inBounds(cellCoord) ? texelFetch(u_sceneRefl, cellCoord, 0) : vec4(0.0);
     int floorTile = int(cellTiles.g);
     int ceilTile = int(cellTiles.b);
 
-    vec3 floorColor = floorTile > 0
-      ? sampleTile(floorTile, frac) * fogMul
-      : u_fallbackFloor * fogMul;
-    vec3 ceilColor = ceilTile > 0
-      ? sampleTile(ceilTile, frac) * fogMul
-      : u_fallbackCeiling * fogMul;
+    // S3: albedo + fallback hooks per surface.
+    vec3 floorBase;
+    if (floorTile > 0) {
+      floorBase = sampleTile(floorTile, frac);
+      floorBase = hook_modifyAlbedo(floorBase, frac, floorTile, 0);
+    } else {
+      floorBase = hook_modifyFallbackFloor(u_fallbackFloor);
+    }
+    vec3 ceilBase;
+    if (ceilTile > 0) {
+      ceilBase = sampleTile(ceilTile, frac);
+      ceilBase = hook_modifyAlbedo(ceilBase, frac, ceilTile, 1);
+    } else {
+      ceilBase = hook_modifyFallbackCeiling(u_fallbackCeiling);
+    }
+    // Multiplicative fog — matches engine default. Hook for additive
+    // fog tint sits at finalColor / finalSurface (see §7.2.5).
+    vec3 floorColor = floorBase * fogMul;
+    vec3 ceilColor  = ceilBase  * fogMul;
 
     float fRefl = effectiveReflectiveness(cellCoord, frac, cellRefl.r, cellRefl.g, 0);
     float cRefl = effectiveReflectiveness(cellCoord, frac, cellRefl.b, cellRefl.a, 2);
+    // S3: reflectivity hook — flagship Mode-3 demo (wet floors).
+    fRefl = hook_modifyReflectivity(fRefl, vec2(cellCoord), 0);
+    cRefl = hook_modifyReflectivity(cRefl, vec2(cellCoord), 1);
 
     if (isFloor && fRefl > 0.0) {
-      vec3 refl;
+      vec3 refl = vec3(0.0);
       bool foundWallMirror = false;
-      // Multi-slab mirror: a knee wall in front of a tall wall must
-      // reflect BOTH. Walk every slab on this column, mirror y about
-      // each slab's own bottom edge, and pick the NEAREST slab whose
-      // wall band brackets the mirrored y. Re-shading via wallPixelAt
-      // means each slab gets its own correct fog / sideMul / AO.
       float bestPerp = 1e20;
       for (int s = 0; s < MAX_SLABS; s++) {
         vec4 sCol = texelFetch(u_columns, ivec2(colX, s), 0);
@@ -668,18 +339,18 @@ void main() {
       if (!foundWallMirror) {
         if (ceilTile > 0) {
           vec2 tiledUv = fract(frac * u_reflTileScale);
-          refl = sampleTile(ceilTile, tiledUv) * fogMul;
+          vec3 tiled = sampleTile(ceilTile, tiledUv) * fogMul;
+          refl = hook_modifyTiledReflection(tiled, tiledUv, ceilTile);
         } else {
           refl = ceilColor;
         }
       }
+      refl = hook_modifyReflectionColor(refl, 0, worldPos);
       floorColor = mix(floorColor, refl, fRefl);
     }
     if (!isFloor && cRefl > 0.0) {
-      vec3 refl;
+      vec3 refl = vec3(0.0);
       bool foundWallMirror = false;
-      // Symmetric multi-slab pick — each slab mirrors the ceiling pixel
-      // about its OWN top edge. Nearest matching slab wins.
       float bestPerp = 1e20;
       for (int s = 0; s < MAX_SLABS; s++) {
         vec4 sCol = texelFetch(u_columns, ivec2(colX, s), 0);
@@ -708,22 +379,22 @@ void main() {
       if (!foundWallMirror) {
         if (floorTile > 0) {
           vec2 tiledUv = fract(frac * u_reflTileScale);
-          refl = sampleTile(floorTile, tiledUv) * fogMul;
+          vec3 tiled = sampleTile(floorTile, tiledUv) * fogMul;
+          refl = hook_modifyTiledReflection(tiled, tiledUv, floorTile);
         } else {
           refl = floorColor;
         }
       }
+      refl = hook_modifyReflectionColor(refl, 1, worldPos);
       ceilColor = mix(ceilColor, refl, cRefl);
     }
 
-    // Surface-specific AO: floor pass uses floor-occluder neighbours
-    // (knee walls qualify), ceiling pass uses ceiling-occluder
-    // neighbours (hanging headers qualify).
-    float aoMul = surfaceAo(cellCoord, frac, !isFloor);
-    fcColor = (isFloor ? floorColor : ceilColor) * aoMul;
+    // Surface-specific AO + the AO-combined hook.
+    float aoSurf = surfaceAo(cellCoord, frac, !isFloor);
+    aoSurf = hook_modifySurfaceAo(aoSurf, cellCoord, frac, !isFloor);
+    float aoCombined = hook_modifyAoCombined(aoSurf, fcSurface, worldPos);
+    fcColor = (isFloor ? floorColor : ceilColor) * aoCombined;
 
-    // Per-cell emissive — RGB pre-packed as color*intensity on the
-    // CPU. The texture is RGBA32F with alpha unused; we only read .rgb.
     if (inBounds(cellCoord)) {
       vec4 emFloor = texelFetch(u_sceneEmissiveFloor, cellCoord, 0);
       vec4 emCeil = texelFetch(u_sceneEmissiveCeil, cellCoord, 0);
@@ -732,13 +403,10 @@ void main() {
   }
   emissiveAdd = fcEmissive;
 
-  // ── Multi-slab pass: walk every wall hit on this column from
-  // FARTHEST to nearest, overwriting with slab front face or cap
-  // surface where this pixel lies in their respective screen-y
-  // zones. Iterating back-to-front means a nearer slab naturally
-  // clobbers a farther one in overlapping pixels. Only the nearest
-  // slab gets the reflective-wall fade.
+  // Multi-slab pass — back to front. Final winning surface kind/world
+  // pos for the post-loop hooks is tracked through the loop.
   vec3 surfaceColor = fcColor;
+  vec2 wallWorldPos = fcWorldPos;
   for (int s = MAX_SLABS - 1; s >= 0; s--) {
     vec4 sCol = texelFetch(u_columns, ivec2(colX, s), 0);
     int sTile = int(sCol.a);
@@ -763,33 +431,31 @@ void main() {
     float sBot = horizonY - (sStartZ - u_cameraZ) * sUnitH;
 
     if (y >= sTop && y < sBot) {
+      // wallPixelAt internally calls wallAo() which routes through
+      // hook_modifyWallAo — so the wall AO hook already participates in
+      // the wall band shading without any extra wiring here.
       vec3 wColor = wallPixelAt(y, sTop, sSlabH, sTile, sWallU, sSide, sPerp, sOffX, sOffY);
+      wColor = hook_modifyWallColor(wColor, sTile, sWallU, sSide, sPerp);
       if (s == 0) {
-        // Reflective wall fade at top/bottom of the nearest slab.
         float reflBandSpan = sSlabH * u_wallReflBand;
         float reflBandSpanInv = 1.0 / reflBandSpan;
         float topReflT = max(0.0, (sTop + reflBandSpan - y) * reflBandSpanInv);
         float botReflT = max(0.0, (y - (sBot - reflBandSpan)) * reflBandSpanInv);
         float fadeT = max(topReflT, botReflT);
+        fadeT = hook_modifyWallReflFade(fadeT, fadeT, s);
         float reflFade = u_wallReflStrength * fadeT * fadeT;
         surfaceColor = mix(wColor, fcColor, reflFade);
       } else {
         surfaceColor = wColor;
       }
-      // Wall pixel: sample the lightmap at the hit cell's centre. The
-      // CPU-side DDA already knows the exact cell, so we read it from
-      // u_columnsCell rather than re-deriving from the (non-normalised)
-      // ray — the ray-based derivation could grab the OPEN neighbour
-      // cell for grazing-angle columns, producing a sliding dark band.
       vec4 sCell = texelFetch(u_columnsCell, ivec2(colX, s), 0);
       lightWorldPos = sCell.xy;
+      wallWorldPos = sCell.xy;
+      surfaceKind = 2;
       emissiveAdd = sEm.rgb;
       continue;
     }
 
-    // Cap test: top cap (visible looking down on a slab whose top is
-    // below the eye), then bottom cap (looking up at a slab whose
-    // bottom is above the eye).
     float topZ = sStartZ + sHeight;
     float bottomZ = sStartZ;
     if (sTopTile > 0 && topZ < 1.0 && u_cameraZ > topZ) {
@@ -803,13 +469,14 @@ void main() {
           if (dCap > 0.0) {
             vec2 capWorld = u_position + dCap * rayDir;
             vec3 capColor = sampleTile(sTopTile, fract(capWorld));
+            capColor = hook_modifyAlbedo(capColor, fract(capWorld), sTopTile, 3);
             float capFog = clamp(1.0 - dCap * u_fogInv, 0.0, 1.0);
+            capFog = hook_modifyFogMul(capFog, dCap);
             surfaceColor = capColor * capFog;
+            surfaceColor = hook_modifyCapColor(surfaceColor, sTopTile, capWorld, true);
             lightWorldPos = capWorld;
-            // Top cap = looking down on the wall's upper face (a knee
-            // wall's parapet, etc.). Cap sits at z = startZ + height;
-            // sample the CEILING grid because that's the side the cap
-            // surface looks toward.
+            wallWorldPos = capWorld;
+            surfaceKind = 3;
             useCeilingLightmap = true;
             emissiveAdd = sEm.rgb;
             continue;
@@ -818,7 +485,7 @@ void main() {
       }
     }
     if (sBotTile > 0 && bottomZ > 0.0 && u_cameraZ < bottomZ) {
-      float dz = u_cameraZ - bottomZ; // negative
+      float dz = u_cameraZ - bottomZ;
       float yFrontB = horizonY + dz * unitH / sPerp;
       float yBackB = horizonY + dz * unitH / sBack;
       if (y >= yFrontB && y < yBackB) {
@@ -828,9 +495,14 @@ void main() {
           if (dCap > 0.0) {
             vec2 capWorld = u_position + dCap * rayDir;
             vec3 capColor = sampleTile(sBotTile, fract(capWorld));
+            capColor = hook_modifyAlbedo(capColor, fract(capWorld), sBotTile, 4);
             float capFog = clamp(1.0 - dCap * u_fogInv, 0.0, 1.0);
+            capFog = hook_modifyFogMul(capFog, dCap);
             surfaceColor = capColor * capFog;
+            surfaceColor = hook_modifyCapColor(surfaceColor, sBotTile, capWorld, false);
             lightWorldPos = capWorld;
+            wallWorldPos = capWorld;
+            surfaceKind = 4;
             emissiveAdd = sEm.rgb;
           }
         }
@@ -838,28 +510,24 @@ void main() {
     }
   }
 
-  // Static lightmap multiply — corner grid is (W*K+1)×(H*K+1), so
-  // corner i lives at texel center (i+0.5)/(W*K+1) in UV space.
-  // Bilinear filtering gives us the bilinear interpolation between
-  // the 4 surrounding corners for free. Phase 4: floor + ceiling each
-  // ship their own grid; the per-branch boolean above picks which one
-  // this fragment samples. K (sub-samples per cell) sharpens shadow
-  // edges; legacy K=1 bakes degenerate to the original layout.
-  float lmK = u_lightmapResolution;
-  vec2 lightUV = vec2((lightWorldPos.x * lmK + 0.5) / (u_sceneSize.x * lmK + 1.0),
-                      (lightWorldPos.y * lmK + 0.5) / (u_sceneSize.y * lmK + 1.0));
-  vec3 staticLight = useCeilingLightmap
-    ? texture(u_lightmapCeiling, lightUV).rgb
-    : texture(u_lightmapFloor, lightUV).rgb;
-  // Phase 5 dynamic-light add — sampled at the same world point the
-  // static lightmap uses for this surface (floor/ceiling = exact hit,
-  // wall = cell centre, cap = cap hit). Folded into the lightmap
-  // multiplier so the dynamic contribution and the static one both
-  // modulate the surface albedo together.
+  // Last-call surface-color hook before lighting.
+  surfaceColor = hook_modifySurfaceColor(surfaceColor, surfaceKind, wallWorldPos);
+  surfaceColor = hook_modifyFinalSurface(surfaceColor, wallWorldPos, surfaceKind);
+
+  // Static + dynamic light.
+  vec3 staticLight = sampleLightmap(lightWorldPos, useCeilingLightmap);
+  staticLight = hook_modifyStaticLight(staticLight, lightWorldPos, useCeilingLightmap);
   vec3 dynamicLight = accumulateDynamicLight(lightWorldPos);
-  // Phase 4: emissive add lands AFTER the lightmap multiply so a
-  // glowing surface stays bright in pitch darkness.
-  outColor = vec4(surfaceColor * (staticLight + dynamicLight) + emissiveAdd, 1.0);
+  dynamicLight = hook_modifyDynamicLight(dynamicLight, lightWorldPos);
+
+  // Emissive: existing baked contribution + pack's additive hook.
+  emissiveAdd = hook_modifyEmissive(emissiveAdd, surfaceKind, wallWorldPos);
+  emissiveAdd += hook_addEmissive(vec3(0.0), wallWorldPos, surfaceKind);
+
+  vec3 finalColor = surfaceColor * (staticLight + dynamicLight) + emissiveAdd;
+  finalColor = hook_modifyFinalColor(finalColor, wallWorldPos, surfaceKind);
+  float finalAlpha = hook_modifyFinalAlpha(1.0, surfaceKind);
+  outColor = vec4(finalColor, finalAlpha);
 }
 `;
 
@@ -1048,8 +716,10 @@ export class WebGLRenderer implements SceneRenderer {
    * passed into the `WebGLRenderer` constructor via `shaderSources`,
    * which can then run synchronously.
    *
-   * Roles the pack doesn't override are returned as the engine's
-   * built-in default source. Phase S1 — single pack, no chain.
+   * Roles the pack doesn't override produce the engine's default body
+   * routed through the same header / hook prelude / helper block as a
+   * pack override would see — single source of truth for the role's
+   * compile-time contract. Phase S2 + S3 of `ENGINE_PACK_SHADERS.md`.
    */
   static async prefetchShaderSources(
     pack: AssetPack,
@@ -1111,12 +781,13 @@ export class WebGLRenderer implements SceneRenderer {
 
     // ── Programs ───────────────────────────────────────────────────────
     // Per-role fragment source: pack override (when provided via
-    // `prefetchShaderSources`) wins over the engine default. The
-    // engine defaults (`FRAG_*_SRC`) are full source strings and ship
-    // byte-identical to pre-S1 builds when no pack override exists.
-    const fragSky = shaderSources?.skyFrag ?? FRAG_SKY_SRC;
-    const fragWorld = shaderSources?.worldFrag ?? FRAG_WORLD_SRC;
-    const fragSprite = shaderSources?.spriteFrag ?? FRAG_SPRITE_SRC;
+    // `prefetchShaderSources`) wins over the engine default. S2 routed
+    // the engine defaults through `buildFragmentSource` too — both
+    // engine and pack bodies receive the same auto-injected header +
+    // helpers + hook prelude, so the contract is byte-identical.
+    const fragSky = shaderSources?.skyFrag ?? buildFragmentSource("skyFrag", FRAG_SKY_SRC);
+    const fragWorld = shaderSources?.worldFrag ?? buildFragmentSource("worldFrag", FRAG_WORLD_SRC);
+    const fragSprite = shaderSources?.spriteFrag ?? buildFragmentSource("spriteFrag", FRAG_SPRITE_SRC);
 
     this.skyProgram = buildProgram(gl, VERT_SRC, fragSky);
     this.skyTopLoc = gl.getUniformLocation(this.skyProgram, "u_top")!;

@@ -182,6 +182,17 @@ export type ItemImageVariant = (typeof ITEM_IMAGE_VARIANTS)[number];
  */
 export type ShaderRole = "skyFrag" | "worldFrag" | "spriteFrag";
 
+/**
+ * Hook-file variant of every role. A pack supplies `{role}Hooks` (Mode
+ * 3 / S3) to redefine specific named `hook_*` functions in the engine's
+ * default body, instead of replacing the whole role (`{role}Frag` —
+ * Mode 1 / S1). See `docs/plans/ENGINE_PACK_SHADERS.md` §5.
+ */
+export type ShaderHookRole = "skyHooks" | "worldHooks" | "spriteHooks";
+
+/** Either of the two pack-supplied shader manifest keys. */
+export type ShaderEntry = ShaderRole | ShaderHookRole;
+
 /** Authoritative index of a pack's contents. */
 export interface PackManifest {
   name: string;
@@ -240,14 +251,25 @@ export interface PackManifest {
     supersample?: number;
   };
   /**
-   * Optional per-role fragment-shader overrides. Each value is a path
-   * inside the pack to a `.frag` whose **body** (helpers + `void
-   * main()`) replaces the engine's built-in shader for that role. The
-   * engine auto-prepends a header declaring every uniform / varying /
-   * `#define` for the role — see `shaderHeaders.ts`.
+   * Optional per-role fragment shaders.
+   *
+   *  - `{role}Frag` (Mode 1, S1) — full role replacement. The pack
+   *    ships the **body** of a fragment shader (helpers + `void
+   *    main()`); the engine prepends the auto-injected header
+   *    declaring every uniform / varying / `#define`. See
+   *    `shaderHeaders.ts`.
+   *  - `{role}Hooks` (Mode 3, S3) — pack ships ONLY `hook_*` function
+   *    definitions which override the engine's identity-default hooks
+   *    at fixed call sites in the engine's `main()`. No `main()` and
+   *    no boilerplate in the file. See `HookPrelude.ts` and
+   *    `docs/plans/ENGINE_PACK_SHADERS.md` §5 + §7.
+   *
+   * Mode 1 and Mode 3 are mutually exclusive per-role per-pack (§5.5)
+   * — a manifest with both `worldFrag` and `worldHooks` set drops the
+   * hooks file with a console warning at boot.
    *
    * WebGL2 backend only. On the canvas2d backend any entries here are
-   * silently ignored. Phase S1 of `ENGINE_PACK_SHADERS.md`.
+   * silently ignored.
    */
-  shaders?: Partial<Record<ShaderRole, string>>;
+  shaders?: Partial<Record<ShaderEntry, string>>;
 }

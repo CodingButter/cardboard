@@ -64,7 +64,7 @@
     "ammo_pack": { "image": "images/items/ammo_pack.png" }
   },
   "shaders_example": {
-    "_doc": "R4/S1 smoke test. Rename this key to `shaders` and run `bun run build-packs` to enable the world-frag override. Default ships disabled.",
-    "worldFrag": "shaders/wet-world.frag"
+    "_doc": "R4/S3 smoke test (wet floor via Mode 3 hooks — supersedes the S1 wet-world.frag full-shader demo). Rename this key to `shaders` and run `bun run build-packs` to enable. Default ships disabled.",
+    "worldHooks": "shaders/wet-world-hooks.glsl"
   }
 }
