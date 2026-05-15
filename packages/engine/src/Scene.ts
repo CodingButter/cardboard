@@ -1,4 +1,5 @@
 import { Vec2 } from "Libs/Vector";
+import type { PresetResolver, ResolvedPresetData } from "AssetPack/PresetResolver";
 
 /**
  * Which face of a cell a wall segment lies on. A wall is a 1-D segment in
@@ -594,8 +595,17 @@ export class Scene {
    * Parse a scene from the JSON shape used inside asset packs.
    * Equivalent to the `new Scene(walls, floors, ceilings, options, spawn)`
    * constructor — JSON keys map straight to the constructor args.
+   *
+   * When `data.idMap` is present the grids carry small ints that
+   * resolve through the resolver to preset ids → renderer tile ids.
+   * Legacy grids (no `idMap`) skip the resolver and parse exactly as
+   * before.
    */
-  static fromJSON(data: SceneJSON, options: SceneOptions = {}): Scene {
+  static fromJSON(
+    data: SceneJSON,
+    options: SceneOptions = {},
+    resolver?: PresetResolver,
+  ): Scene {
     const rawSpawn = data.spawn;
     const spawn: SceneSpawn = rawSpawn
       ? {
@@ -605,15 +615,177 @@ export class Scene {
         }
       : DEFAULT_SPAWN;
     const lightmap = data.lightmap ? decodeLightmap(data.lightmap) : undefined;
+
+    // ── idMap fast path ────────────────────────────────────────────
+    // When the scene declares an idMap, every cell is a small int that
+    // resolves to a preset id. We translate each grid into the
+    // existing WallCellInput / FloorCellInput shape the Scene
+    // constructor already accepts — no runtime changes downstream.
+    let walls = data.walls as WallCellInput[][];
+    let floors = (data.floors ?? []) as FloorCellInput[][];
+    let ceilings = (data.ceilings ?? []) as CeilingCellInput[][];
+    if (data.idMap && resolver) {
+      const lookup = (idx: unknown): string | null => {
+        // Tolerate either string or number keys in the source map.
+        if (idx === null || idx === undefined) return null;
+        if (typeof idx === "number") {
+          if (idx === 0) return null;
+          return data.idMap![String(idx)] ?? null;
+        }
+        if (typeof idx === "string") return data.idMap![idx] ?? null;
+        return null;
+      };
+      walls = (data.walls as Array<Array<number | WallCellInput>>).map((row) =>
+        row.map((cell) => translateWallCell(cell, lookup, resolver)),
+      );
+      const floorDefault = data.layerDefaults?.floor ?? null;
+      const ceilingDefault = data.layerDefaults?.ceiling ?? null;
+      floors = ((data.floors as Array<Array<number | FloorCellInput>>) ?? []).map((row) =>
+        row.map((cell) => translateFloorCell(cell, lookup, resolver, floorDefault)),
+      );
+      ceilings = ((data.ceilings as Array<Array<number | CeilingCellInput>>) ?? []).map(
+        (row) => row.map((cell) => translateFloorCell(cell, lookup, resolver, ceilingDefault)),
+      );
+    }
+
     return new Scene(
-      data.walls,
-      data.floors ?? [],
-      data.ceilings ?? [],
+      walls,
+      floors,
+      ceilings,
       options,
       spawn,
       data.lights ?? [],
       lightmap,
     );
+  }
+}
+
+/**
+ * Translate one `walls[y][x]` value through the resolver.
+ *
+ * - Small int → idMap[idx] → preset → WallSegmentInput
+ * - Bare WallCellInput (legacy structured) → pass through
+ *
+ * Unknown ids fall through to `null` (open cell) after warning.
+ */
+function translateWallCell(
+  cell: number | WallCellInput,
+  lookup: (idx: unknown) => string | null,
+  resolver: PresetResolver,
+): WallCellInput {
+  if (cell === null || cell === undefined) return null;
+  // Inline structured objects are passed through verbatim — they were
+  // authored before the migration. The deprecation path in § 5.3 will
+  // hard-error these in T3; for now we keep parsing them.
+  if (typeof cell === "object") return cell as WallCellInput;
+  if (typeof cell !== "number") return null;
+  if (cell === 0) return 0;
+  const presetId = lookup(cell);
+  if (!presetId) return 0;
+  const data = resolver.resolveCell(presetId);
+  if (!data) {
+    console.warn(`[scene] idMap references unknown preset "${presetId}" — rendering as open cell`);
+    return 0;
+  }
+  return wallInputFromPreset(data, resolver);
+}
+
+function translateFloorCell(
+  cell: number | FloorCellInput,
+  lookup: (idx: unknown) => string | null,
+  resolver: PresetResolver,
+  defaultPresetId: string | null,
+): FloorCellInput {
+  if (cell === null || cell === undefined) return null;
+  if (typeof cell === "object") return cell as FloorCellInput;
+  if (typeof cell === "string") return cell;
+  if (typeof cell !== "number") return null;
+  // `0` resolves to the layer default preset (if any), else "use layer default".
+  let presetId: string | null;
+  if (cell === 0) {
+    if (!defaultPresetId) return undefined;
+    presetId = defaultPresetId;
+  } else {
+    presetId = lookup(cell);
+  }
+  if (!presetId) return undefined;
+  const data = resolver.resolveCell(presetId);
+  if (!data) {
+    console.warn(`[scene] idMap references unknown preset "${presetId}" — using layer default`);
+    return undefined;
+  }
+  return floorInputFromPreset(data, resolver);
+}
+
+/**
+ * Reduce a resolved preset to the `WallSegmentInput` shape the Scene
+ * constructor consumes. Texture paths are reverse-looked-up against
+ * `manifest.tileTextures` to recover the renderer's tile id; an
+ * unmapped texture warns + falls back to tile id `0` (transparent
+ * pink — the renderer's default-color path).
+ */
+function wallInputFromPreset(
+  data: ResolvedPresetData,
+  resolver: PresetResolver,
+): WallSegmentInput {
+  const tile = resolver.tileIdForTexture(data.texture);
+  if (tile === undefined) {
+    console.warn(`[scene] preset texture "${data.texture}" is not in manifest.tileTextures`);
+  }
+  const topTile = data.topCap ? resolver.tileIdForTexture(data.topCap) : undefined;
+  const bottomTile = data.bottomCap ? resolver.tileIdForTexture(data.bottomCap) : undefined;
+  const seg: WallSegmentInput = {
+    tile: tile ?? 0,
+    startZ: data.wallStartZ,
+    height: data.wallHeight,
+    offsetX: data.offsetX,
+    offsetY: data.offsetY,
+  };
+  if (data.partialWall) {
+    seg.face = facePresetToShort(data.partialWall.face);
+    seg.startU = data.partialWall.startU;
+    seg.widthU = data.partialWall.widthU;
+  }
+  if (topTile !== undefined) seg.topTile = topTile;
+  if (bottomTile !== undefined) seg.bottomTile = bottomTile;
+  if (data.emissive) {
+    seg.emissive = {
+      color: data.emissive.color,
+      intensity: data.emissive.intensity,
+      areaLight: data.emissive.areaLight,
+    };
+  }
+  return seg;
+}
+
+function floorInputFromPreset(
+  data: ResolvedPresetData,
+  resolver: PresetResolver,
+): FloorCellInput {
+  const tile = resolver.tileIdForTexture(data.texture);
+  if (tile === undefined) {
+    console.warn(`[scene] preset texture "${data.texture}" is not in manifest.tileTextures`);
+  }
+  return {
+    tile: tile ?? 0,
+    reflectiveness: data.reflectiveness,
+    transition: data.transition,
+    emissive: data.emissive
+      ? {
+          color: data.emissive.color,
+          intensity: data.emissive.intensity,
+          areaLight: data.emissive.areaLight,
+        }
+      : undefined,
+  };
+}
+
+function facePresetToShort(face: "north" | "south" | "east" | "west"): WallFace {
+  switch (face) {
+    case "north": return "N";
+    case "south": return "S";
+    case "east": return "E";
+    case "west": return "W";
   }
 }
 
@@ -722,9 +894,26 @@ function base64ToBytes(b64: string): Uint8Array {
  *     a tile id (shorthand) / one `WallSegmentInput` / an array of them.
  */
 export interface SceneJSON {
-  walls: WallCellInput[][];
-  floors?: FloorCellInput[][];
-  ceilings?: CeilingCellInput[][];
+  /**
+   * Optional scene-local preset-id table. When present, every cell in
+   * `walls`/`floors`/`ceilings` is read as a small int that resolves
+   * through this map (Tiled `firstgid` pattern). `"0"` is reserved
+   * for "no tile"; non-zero entries are preset IDs registered with the
+   * pack's `PresetResolver`. See `docs/plans/TILE_PRESETS.md` § 4.
+   *
+   * When absent, the grids are parsed as today — bare ints (or full
+   * structured `WallSegmentInput`/`StructuredFloorSpec` objects).
+   */
+  idMap?: Record<string, string | null>;
+  /**
+   * Optional per-layer default preset id. A cell value of `0` in a
+   * `floors` / `ceilings` grid resolves to this preset instead of
+   * "no tile". `walls` has no layer default — `0` always means open.
+   */
+  layerDefaults?: { floor?: string; ceiling?: string };
+  walls: WallCellInput[][] | number[][];
+  floors?: FloorCellInput[][] | number[][];
+  ceilings?: CeilingCellInput[][] | number[][];
   /** Optional player spawn override. Falls back to `(1.5, 1.5)` facing east. */
   spawn?: { x: number; y: number; facing?: number };
   /**

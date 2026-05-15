@@ -40,6 +40,21 @@ export type {
   LightDef,
 } from "./Scene";
 
+// Asset-pack surface — pack-builder + editor consume preset types.
+export {
+  PresetResolver,
+  stripJsonComments,
+  ZipAssetPack,
+  type Preset,
+  type PresetSource,
+  type PresetError,
+  type PresetEmissive,
+  type PresetPartialWall,
+  type PresetWallFace,
+  type ResolvedPresetData,
+} from "./AssetPack";
+export type { PackManifest, SheetEntry } from "./AssetPack";
+
 // Raycast helpers used by the bake script.
 export { castRayThroughWalls, castRayToWall, traceRay } from "./Libs/Raycast";
 export type { WallHit, RayTrace } from "./Libs/Raycast";

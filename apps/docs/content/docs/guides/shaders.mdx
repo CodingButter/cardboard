@@ -1,0 +1,181 @@
+---
+title: Custom shaders
+description: Three ways a pack can change how the engine renders — hooks, role replacement, and post-passes.
+---
+
+The engine ships its own GLSL. The world, sprite, and sky passes
+each have a default fragment shader compiled into the binary. A
+pack opts in to customising the look through one of three
+mechanisms. Pick the smallest one that does the job — they get
+progressively heavier as you go down the list.
+
+## The three modes
+
+| Mode | What you ship | When to reach for it |
+|---|---|---|
+| **Mode 3 — Shader hooks** | A `.glsl` file with one or more `hook_*` function overrides. Three lines is normal. | Tweaks to a value the engine already computes: wet floors, recoloured fog, sprite glow. **Start here.** |
+| **Mode 1 — Role replacement** | A complete `.frag` shader for `worldFrag`, `spriteFrag`, or `skyFrag`. ~300 lines. | Fundamentally different look: neon wireframe, PSX jitter, custom forward-shading model. |
+| **Mode 2 — Post-process passes** | A list of fullscreen `.frag` passes applied to the rendered frame. Planned — see [phase status](#status). | Screen-space effects on the final image: CRT, bloom, colour grading, vignette. |
+
+### Why hooks first
+
+The engine `main()` calls about forty named hook functions at
+fixed points — `hook_modifyReflectivity`, `hook_modifyFogColor`,
+`hook_modifyFinalColor`, and so on. The default body of each one
+returns its input unchanged, so the compiler folds it away to
+zero cost. A pack that ships its own version replaces the body.
+
+That gives you the Unity surface-shader pattern: keep the
+engine's algorithm, swap the parameters. When the engine
+refactors its rendering, your hook still applies — identity
+defaults mean a removed hook silently no-ops instead of breaking
+your pack.
+
+Role replacement (Mode 1) is the escape hatch. You write the
+entire fragment shader; the engine merely supplies uniforms and
+varyings via an auto-injected header. Use it when the algorithm
+itself needs to change, not just the values feeding it.
+
+## Your first hook in five minutes
+
+Goal: make every floor in your pack look wet by forcing high
+reflectivity.
+
+### 1. Create the hook file
+
+Inside your pack, alongside `manifest.json` and `scenes/`:
+
+```
+my-pack/
+├── manifest.json
+├── scenes/
+└── shaders/
+    └── world-hooks.glsl    <-- new file
+```
+
+`shaders/world-hooks.glsl`:
+
+```glsl
+// Override the engine's per-pixel reflectivity for floors.
+// Surface enum: 0 = floor, 1 = ceiling, 2 = wall, 3 = top cap, 4 = bottom cap.
+float hook_modifyReflectivity(float base, vec2 cellCoord, int surface) {
+  if (surface == 0) return 0.85;
+  return base;
+}
+```
+
+That is the entire pack-supplied GLSL. No `main()`, no uniform
+declarations, no varying declarations — the engine prepends a
+header with everything you can read from.
+
+### 2. Reference the hook file from your manifest
+
+`manifest.json`:
+
+```jsonc
+{
+  "name": "my-pack",
+  "version": "0.1.0",
+  "engine": "two_5_d@0.1",
+  "requires": [{ "id": "default", "version": "^0.2.0" }],
+  "startScene": "scenes/start.json",
+  "shaders": {
+    "worldHooks": "shaders/world-hooks.glsl"
+  }
+}
+```
+
+The `shaders` object accepts three keys for Mode 3:
+
+- `worldHooks` — walls, floors, ceilings, caps. 27 hooks available.
+- `spriteHooks` — billboard entities. 8 hooks available.
+- `skyHooks` — the gradient sky. 3 hooks available.
+
+You can ship any subset. Roles you don't mention use the engine
+default.
+
+### 3. Rebuild the pack and reload
+
+```sh
+bun run build-packs
+```
+
+Reload the game in your browser. Floors should now reflect their
+surroundings as if the player walked into a flooded corridor.
+
+If you don't see a change, check the browser console — the hook
+parser logs any name typos it rejects (every valid hook starts
+with the prefix `hook_` and matches one of the names in the
+[catalog](/docs/guides/shader-hooks-catalog)).
+
+## Override vs. amplify
+
+The example above **forces** reflectivity to 0.85 regardless of
+what the scene authored. That's right for the default pack,
+which ships scenes with zero authored reflectivity — multiplying
+by any constant would still give zero.
+
+When you author scenes that mark some cells as "a little shiny"
+(via the lightmap-bake reflection channel), prefer **amplifying**
+the existing value so dry cells stay dry:
+
+```glsl
+float hook_modifyReflectivity(float base, vec2 cellCoord, int surface) {
+  if (surface == 0) return clamp(base * 4.0, 0.0, 0.95);
+  return base;
+}
+```
+
+This is the design pattern across the catalog: `base` is the
+engine's current value for the intermediate, and you decide
+whether to override or transform it.
+
+## Using engine helpers inside hooks
+
+Every uniform documented in the role's uniform contract is
+available inside your hook bodies. Common ones you'll reach for:
+
+- `u_resolution` — `vec2` screen size in pixels.
+- `gl_FragCoord` — pixel-space coordinates. Combine with
+  `u_resolution` to derive screen-space UVs for vignettes and
+  post-style effects.
+- `u_time` — seconds since render-start, for animation.
+- `worldPos` — passed as a hook argument; the world-space XY
+  coordinate of the surface point being shaded.
+
+Example: an aspect-corrected screen-space vignette in a final
+hook:
+
+```glsl
+vec3 hook_modifyFinalColor(vec3 base, vec2 worldPos, int surface) {
+  vec2 screenUv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 fromCenter = screenUv - vec2(0.5);
+  fromCenter.x *= u_resolution.x / u_resolution.y;
+  float v = smoothstep(0.55, 0.22, length(fromCenter));
+  return base * v;
+}
+```
+
+See the [examples gallery](/docs/guides/shader-examples) for the
+full night-vision demo this snippet was lifted from.
+
+## What's next
+
+- [Shader hook catalog](/docs/guides/shader-hooks-catalog) — every
+  hook's signature, semantic, and a one-line use case. Bookmark
+  this; it's the reference modders return to.
+- [Shader examples gallery](/docs/guides/shader-examples) — the two
+  demos shipped with the default pack, source-included.
+- `docs/plans/ENGINE_PACK_SHADERS.md` (in the repo) — the
+  full design document. Covers uniform contracts per role,
+  build-time validation, and the pack-chain resolution rules for
+  Mode 1 / Mode 3 conflicts.
+
+## Status
+
+Mode 1 and Mode 3 ship today (phases S1 and S3). Mode 2
+(post-process passes) is on the roadmap as phase S4 — manifest
+schema, FBO ping-pong, and the post-pass uniform set are
+designed but not yet implemented. Plan a hook-based fallback
+for any vignette / colour-grade / scanline effect you want
+shipping now; promote it to a post-pass later when S4 lands.

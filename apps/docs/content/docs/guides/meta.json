@@ -1,4 +1,12 @@
 {
   "title": "Guides",
-  "pages": ["what-is-cardboard", "quick-start", "concepts", "writing-your-first-pack"]
+  "pages": [
+    "what-is-cardboard",
+    "quick-start",
+    "concepts",
+    "writing-your-first-pack",
+    "shaders",
+    "shader-hooks-catalog",
+    "shader-examples"
+  ]
 }

@@ -18,3 +18,14 @@ export { discoverItemVariants } from "./discoverItemVariants";
 export { AssetPack } from "./AssetPack";
 export { ZipAssetPack } from "./ZipAssetPack";
 export { DEFAULT_PACK_URL, loadAssetPack } from "./loadAssetPack";
+export {
+  PresetResolver,
+  stripJsonComments,
+  type Preset,
+  type PresetSource,
+  type PresetError,
+  type PresetEmissive,
+  type PresetPartialWall,
+  type PresetWallFace,
+  type ResolvedPresetData,
+} from "./PresetResolver";

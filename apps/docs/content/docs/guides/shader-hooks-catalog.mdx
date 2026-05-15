@@ -1,0 +1,327 @@
+---
+title: Shader hook catalog
+description: Every hook the engine exposes — signatures, semantics, and a one-line use case.
+---
+
+This page enumerates every Mode 3 shader hook the engine exposes.
+There are **38 hooks** across three fragment roles: **27 world**,
+**8 sprite**, **3 sky**.
+
+Each hook has an identity-default body in the engine that just
+returns its first argument. When a pack ships an override, the
+engine substitutes its function body in before compile. Hooks
+you don't override inline to zero cost.
+
+Read [Custom shaders](/docs/guides/shaders) first if you haven't —
+this page is the reference; that page is the tutorial.
+
+## Conventions
+
+- All hook names start with `hook_`.
+- The first argument of every hook is `base` — the engine's
+  current value for the intermediate. Returning `base` is a
+  no-op.
+- `int surface` discriminator: `0 = floor`, `1 = ceiling`,
+  `2 = wall`, `3 = top cap`, `4 = bottom cap`. Lets a single hook
+  branch on surface type without N copies.
+- `int channel` (reflection-only): `0 = floor refl`,
+  `2 = ceiling refl`. Matches `u_sceneRefl.r/.b` layout.
+- `bool isCeiling`: `true` when sampling the ceiling lightmap /
+  ceiling AO; `false` otherwise.
+
+The canonical identity-default declarations live in
+`packages/engine/src/Renderers/HookPrelude.ts`. If you spot a
+signature drift between this page and that file, trust the
+implementation.
+
+---
+
+## World fragment hooks (27)
+
+Used inside `worldFrag` — walls, floors, ceilings, caps. Active
+when your manifest declares `shaders.worldHooks`.
+
+### Surface color (6)
+
+Modify per-pixel tile / surface color **before** lighting,
+reflection, and fog.
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifyAlbedo(vec3 base, vec2 uv, int tile, int surface)` | Last chance to alter a tile sample, immediately after `sampleTile`. |
+| `vec3 hook_modifyFallbackFloor(vec3 base)` | Override the fallback floor color used when `floorTile == 0`. |
+| `vec3 hook_modifyFallbackCeiling(vec3 base)` | Override the fallback ceiling color used when `ceilingTile == 0`. |
+| `vec3 hook_modifyWallColor(vec3 base, int wallTile, float wallU, float sideMul, float perpDist)` | Tweak the wall-only color produced by `wallPixelAt`. |
+| `vec3 hook_modifyCapColor(vec3 base, int capTile, vec2 capWorld, bool isTop)` | Tweak the top-cap or bottom-cap color before fog. |
+| `vec3 hook_modifySurfaceColor(vec3 base, int surface, vec2 worldPos)` | The single chokepoint before static + dynamic lighting multiply, regardless of which surface won. |
+
+**Example — palette quantize on every surface:**
+
+```glsl
+vec3 hook_modifySurfaceColor(vec3 base, int surface, vec2 worldPos) {
+  return floor(base * 8.0) / 8.0;
+}
+```
+
+### Reflection (4)
+
+Modify the reflective-surface mix.
+
+| Hook | What it does |
+|---|---|
+| `float hook_modifyReflectivity(float base, vec2 cellCoord, int surface)` | Per-pixel reflectivity scalar fed into the surface/reflection `mix`. |
+| `vec3 hook_modifyReflectionColor(vec3 base, int surface, vec2 worldPos)` | Tint the reflected color before mixing. |
+| `vec3 hook_modifyTiledReflection(vec3 base, vec2 tiledUv, int sampledTile)` | Tweak the tiled cross-reflection fallback used when no wall mirror brackets the mirrored y. |
+| `float hook_modifyWallReflFade(float base, float fadeT, int slabIndex)` | Modify the reflective-wall fade near the top/bottom of the nearest slab. `fadeT` is the band-distance in `[0,1]`. |
+
+**Example — wet floor (force reflectivity for floors only):**
+
+```glsl
+float hook_modifyReflectivity(float base, vec2 cellCoord, int surface) {
+  if (surface == 0) return 0.85;
+  return base;
+}
+```
+
+### Lighting (5)
+
+Modify static-lightmap, dynamic-light sums, and per-light
+attenuation / coverage / color.
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifyStaticLight(vec3 base, vec2 worldPos, bool isCeiling)` | Tweak the static-lightmap sample before adding dynamic. |
+| `vec3 hook_modifyDynamicLight(vec3 base, vec2 worldPos)` | Tweak the accumulated dynamic-light sum. |
+| `float hook_modifyLightAttenuation(float base, vec3 lightPos, vec2 worldPos, float radius, float intensity)` | Per-light attenuation override; called once per active dynamic light. `base` is `t*t*intensity*coverage` from the engine. |
+| `float hook_modifyLightCoverage(float base, vec3 lightPos, vec2 worldPos)` | Soft-shadow coverage scalar in `[0,1]`. Last word over the engine's 3-sample average. |
+| `vec3 hook_modifyLightColor(vec3 base, int lightIndex)` | Modify a light's color before attenuation multiplies. |
+
+**Example — hard-shadowed dynamic lights:**
+
+```glsl
+float hook_modifyLightCoverage(float base, vec3 lightPos, vec2 worldPos) {
+  return base > 0.5 ? 1.0 : 0.0;
+}
+```
+
+### Ambient occlusion (4)
+
+Modify wall AO, surface AO, the occluder predicate, and the
+combined final AO scalar.
+
+| Hook | What it does |
+|---|---|
+| `float hook_modifyWallAo(float base, float y, float wallTop, float wallHeight)` | Adjust the wall AO band multiplier. |
+| `float hook_modifySurfaceAo(float base, ivec2 cellCoord, vec2 frac, bool useCeiling)` | Adjust the world-space floor/ceiling boundary AO. |
+| `bool hook_isOccluder(bool base, ivec2 cellCoord, bool useCeiling)` | Override the occluder predicate used by AO neighbour tests. |
+| `float hook_modifyAoCombined(float base, int surface, vec2 worldPos)` | Final AO scalar after surface AO and wall AO are merged. |
+
+**Example — disable AO entirely:**
+
+```glsl
+float hook_modifyAoCombined(float base, int surface, vec2 worldPos) {
+  return 1.0;
+}
+```
+
+### Fog (3)
+
+Modify the depth scalar, the multiplier (engine default
+`clamp(1 - depth*uFogInv, 0, 1)`), and the fog color.
+
+| Hook | What it does |
+|---|---|
+| `float hook_modifyFogMul(float base, float depth)` | Override the fog multiplier. |
+| `vec3 hook_modifyFogColor(vec3 base, float depth)` | Tint the fog. Engine default returns `base` unchanged (fog is a multiplier). Overriding with a non-zero color shifts to additive fog. |
+| `float hook_modifyDepth(float base, vec2 worldPos)` | Last chance to alter the depth scalar fed into fog. |
+
+**Example — bluish underwater fog:**
+
+```glsl
+vec3 hook_modifyFogColor(vec3 base, float depth) {
+  return vec3(0.1, 0.3, 0.7);
+}
+```
+
+### Emissive (2)
+
+Modify the per-surface emissive add (from
+`uSceneEmissiveFloor / Ceil / Columns`), or add an additional
+contribution.
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifyEmissive(vec3 base, int surface, vec2 worldPos)` | Tweak the engine's per-surface emissive sample. |
+| `vec3 hook_addEmissive(vec3 base, vec2 worldPos, int surface)` | Add an additional emissive contribution on top of the engine's. `base` starts at `vec3(0)`. |
+
+**Example — player halo:**
+
+```glsl
+vec3 hook_addEmissive(vec3 base, vec2 worldPos, int surface) {
+  float d = length(worldPos - u_playerPos.xy);
+  return base + vec3(1.0, 0.4, 0.2) * smoothstep(2.5, 0.5, d);
+}
+```
+
+### Final composite (3)
+
+Last hooks before `outColor` is written. `modifyFinalSurface`
+runs before the lightmap multiply, `modifyFinalColor` after.
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifyFinalSurface(vec3 base, vec2 worldPos, int surface)` | Last hook BEFORE the lightmap multiply. Use for per-surface colour grading that should still receive lighting. |
+| `vec3 hook_modifyFinalColor(vec3 base, vec2 worldPos, int surface)` | Absolute final RGB hook. Called on the engine's `surfaceColor * (static + dynamic) + emissive` result. |
+| `float hook_modifyFinalAlpha(float base, int surface)` | Override `outColor.a`. Engine default is `1.0` for opaque world. |
+
+**Example — sepia tone over the entire world:**
+
+```glsl
+vec3 hook_modifyFinalColor(vec3 base, vec2 worldPos, int surface) {
+  float l = dot(base, vec3(0.299, 0.587, 0.114));
+  return vec3(l) * vec3(1.07, 0.74, 0.43);
+}
+```
+
+---
+
+## Sprite fragment hooks (8)
+
+Used inside `spriteFrag` — billboard entities. Active when your
+manifest declares `shaders.spriteHooks`.
+
+### Surface + alpha (3)
+
+| Hook | What it does |
+|---|---|
+| `vec4 hook_modifySpriteSample(vec4 base, vec2 uv, int layer)` | Tweak the raw `texture(u_sprites, ...)` sample. Includes alpha. |
+| `float hook_modifySpriteAlpha(float base, vec2 uv, int layer)` | Alpha-only convenience hook for fades. |
+| `vec3 hook_modifySpriteColor(vec3 base, vec2 uv, int layer, vec2 worldPos)` | Pre-lighting sprite color. |
+
+**Example — dissolve fade by layer:**
+
+```glsl
+float hook_modifySpriteAlpha(float base, vec2 uv, int layer) {
+  return layer == 7 ? base * smoothstep(0.0, 1.0, u_time) : base;
+}
+```
+
+### Lighting + composite (3)
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifySpriteStaticLight(vec3 base, vec2 worldPos)` | Adjust sprite's static-lightmap contribution. |
+| `vec3 hook_modifySpriteDynamicLight(vec3 base, vec2 worldPos)` | Adjust sprite's dynamic-light contribution. |
+| `vec3 hook_modifySpriteFinalColor(vec3 base, int layer, vec2 worldPos)` | Last RGB hook before alpha composite. |
+
+**Example — sprites always rendered brighter than their floor:**
+
+```glsl
+vec3 hook_modifySpriteStaticLight(vec3 base, vec2 worldPos) {
+  return max(base, vec3(0.35));
+}
+```
+
+### Discard / clip + fog (2)
+
+| Hook | What it does |
+|---|---|
+| `bool hook_shouldDiscardSprite(bool base, vec2 uv, int layer, vec2 worldPos)` | Override discard logic (engine default: `tex.a <= 0.001 \|\| isSpriteHiddenBySlab()`). |
+| `float hook_modifySpriteFog(float base, float camDepth)` | Per-sprite fog multiplier. |
+
+**Example — sprites less fog-affected than the world:**
+
+```glsl
+float hook_modifySpriteFog(float base, float camDepth) {
+  return mix(base, 1.0, 0.5);
+}
+```
+
+---
+
+## Sky fragment hooks (3)
+
+Used inside `skyFrag`. Active when your manifest declares
+`shaders.skyHooks`. The engine default is a two-color vertical
+gradient: `uSkyTop` above the horizon, `uSkyBottom` below.
+
+| Hook | What it does |
+|---|---|
+| `vec3 hook_modifySkyTop(vec3 base, vec2 uv)` | Override `uSkyTop` per-pixel. |
+| `vec3 hook_modifySkyBottom(vec3 base, vec2 uv)` | Override `uSkyBottom` per-pixel. |
+| `float hook_modifySkyGradient(float base, vec2 uv)` | Override the top/bottom blend factor. Engine default is `step(0.5, uv.y)` (hard split). |
+
+**Example — soft horizon line:**
+
+```glsl
+float hook_modifySkyGradient(float base, vec2 uv) {
+  return smoothstep(0.42, 0.58, uv.y);
+}
+```
+
+---
+
+## Summary table
+
+| Category | World | Sprite | Sky | Total |
+|---|---:|---:|---:|---:|
+| Surface color | 6 | 3 | — | 9 |
+| Reflection | 4 | — | — | 4 |
+| Lighting | 5 | 3 | — | 8 |
+| AO | 4 | — | — | 4 |
+| Fog | 3 | 1 | — | 4 |
+| Emissive | 2 | — | — | 2 |
+| Discard / clip | — | 1 | — | 1 |
+| Final composite | 3 | — | — | 3 |
+| Sky gradient | — | — | 3 | 3 |
+| **Total** | **27** | **8** | **3** | **38** |
+
+---
+
+## Engine call-site order (informative)
+
+The engine `main()` for `worldFrag` calls hooks at fixed points
+in roughly this order. You don't see this directly, but the
+order determines what `base` contains when your hook runs.
+
+```
+albedo        = sampleTile(...)
+albedo        = hook_modifyAlbedo(...)
+fallback      = hook_modifyFallbackFloor / Ceiling(...)
+wallColor     = hook_modifyWallColor(...)
+capColor      = hook_modifyCapColor(...)
+surfaceColor  = hook_modifySurfaceColor(...)
+
+refl          = hook_modifyReflectivity(...)
+reflColor     = hook_modifyReflectionColor(...)
+tiledRefl     = hook_modifyTiledReflection(...)
+fadeT         = hook_modifyWallReflFade(...)
+surfaceColor  = mix(surfaceColor, reflColor, refl)
+
+aoWall        = hook_modifyWallAo(...)
+aoSurf        = hook_modifySurfaceAo(...)
+aoFinal       = hook_modifyAoCombined(aoSurf * aoWall, ...)
+surfaceColor *= aoFinal
+
+depth         = hook_modifyDepth(...)
+fogMul        = hook_modifyFogMul(...)
+fogColor      = hook_modifyFogColor(...)
+// fog applied to surfaceColor
+
+surfaceColor  = hook_modifyFinalSurface(...)
+
+staticL       = hook_modifyStaticLight(...)
+dynL          = hook_modifyDynamicLight(...)
+// (per-light hooks called inside the dynamic accumulator)
+
+emissive      = hook_modifyEmissive(...)
+emissive     += hook_addEmissive(vec3(0), ...)
+
+final         = surfaceColor * (staticL + dynL) + emissive
+final         = hook_modifyFinalColor(...)
+alpha         = hook_modifyFinalAlpha(1.0, ...)
+outColor      = vec4(final, alpha)
+```
+
+For the spriteFrag pipeline order and the full uniform contract
+per role, see `docs/plans/ENGINE_PACK_SHADERS.md` §6 and §7.6.

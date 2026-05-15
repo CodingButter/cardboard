@@ -1,0 +1,8 @@
+// Ceiling presets — default pack. Auto-generated.
+// Hand-editable — keys are preset IDs, values are PresetSource records.
+// See docs/plans/TILE_PRESETS.md § 3 for the schema.
+{
+  "stone.ceiling": {
+    "texture": "images/tiles/ceiling.jpg"
+  }
+}

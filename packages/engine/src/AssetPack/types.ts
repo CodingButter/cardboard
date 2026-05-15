@@ -199,10 +199,26 @@ export interface PackManifest {
   version: string;
   /** Engine version the pack targets (semver string). */
   engine?: string;
-  /** Tile id → image path. Path is resolved against the pack root. */
+  /**
+   * Tile id → image path. Path is resolved against the pack root.
+   *
+   * **Deprecated** in favour of `tilePresets[]` but kept indefinitely
+   * as the only renderer texture source — the resolver synthesises
+   * `__legacy.<id>` presets from this table and the migrated scene
+   * `idMap` entries point at preset ids that round-trip through here
+   * for the renderer's tile-id world. See
+   * `docs/plans/TILE_PRESETS.md` § 5.3.
+   */
   tileTextures: Record<number, string>;
   /** Sprite sheets that get cropped into multiple tiles at load time. */
   tileSheets: SheetEntry[];
+  /**
+   * Optional list of JSONC preset library paths (relative to the pack
+   * root). Each file is `{ "preset.id": { ...PresetSource } }`. Order
+   * matters only for in-pack ID collisions — later file wins. See
+   * `docs/plans/TILE_PRESETS.md` § 3 + § 5.1.
+   */
+  tilePresets?: string[];
   /** Path inside the pack to the scene loaded at startup. */
   startScene: string;
   /**

@@ -1,0 +1,257 @@
+// Sheet-derived prop presets — one per cell in manifest.tileSheets. Auto-generated.
+// Hand-editable — keys are preset IDs, values are PresetSource records.
+// See docs/plans/TILE_PRESETS.md § 3 for the schema.
+{
+  "sheet.10": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 10 (col 0, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.11": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 11 (col 1, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.12": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 12 (col 2, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.13": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 13 (col 3, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.14": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 14 (col 4, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.15": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 15 (col 5, row 0)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.16": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 16 (col 0, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.17": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 17 (col 1, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.18": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 18 (col 2, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.19": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 19 (col 3, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.20": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 20 (col 4, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.21": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 21 (col 5, row 1)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.22": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 22 (col 0, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.23": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 23 (col 1, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.24": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 24 (col 2, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.25": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 25 (col 3, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.26": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 26 (col 4, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.27": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 27 (col 5, row 2)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.28": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 28 (col 0, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.29": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 29 (col 1, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.30": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 30 (col 2, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.31": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 31 (col 3, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.32": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 32 (col 4, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.33": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 33 (col 5, row 3)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.34": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 34 (col 0, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.35": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 35 (col 1, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.36": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 36 (col 2, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.37": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 37 (col 3, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.38": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 38 (col 4, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.39": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 39 (col 5, row 4)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.40": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 40 (col 0, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.41": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 41 (col 1, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.42": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 42 (col 2, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.43": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 43 (col 3, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.44": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 44 (col 4, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  },
+  "sheet.45": {
+    "texture": "images/tiles/multiple_tiles.jpg",
+    "displayName": "Sheet tile 45 (col 5, row 5)",
+    "tags": [
+      "sheet"
+    ]
+  }
+}

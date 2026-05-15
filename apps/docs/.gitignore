@@ -6,6 +6,8 @@
 .typedoc.tsconfig.json
 /content/docs/plans/
 /content/docs/api/
+# staged static game bundle (built by scripts/build-game-for-docs.ts)
+/public/play/
 
 # test & build
 /coverage

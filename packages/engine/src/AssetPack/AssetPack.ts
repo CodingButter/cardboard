@@ -1,4 +1,5 @@
 import { Scene, type SceneJSON } from "Scene";
+import { PresetResolver } from "./PresetResolver";
 import type { PackManifest } from "./types";
 
 /**
@@ -14,9 +15,49 @@ export abstract class AssetPack {
   abstract has(path: string): boolean;
 
   /**
+   * Lazily-built tile-preset resolver. Loads every file listed in
+   * `manifest.tilePresets[]`, synthesises legacy presets for any
+   * `manifest.tileTextures` entries, and exposes a flat lookup the
+   * renderer + scene loader share.
+   *
+   * Built once per pack, then cached. Scene loading reads through it
+   * to translate preset IDs into the renderer's tile-id world. See
+   * `docs/plans/TILE_PRESETS.md` § 6.
+   */
+  private _presets?: Promise<PresetResolver>;
+  presets(): Promise<PresetResolver> {
+    if (!this._presets) {
+      this._presets = PresetResolver.build(
+        this.manifest,
+        this.manifest.name,
+        (path) => this.textBody(path),
+      ).then((resolver) => {
+        // Surface preset-load diagnostics once, immediately after the
+        // resolver builds. Hard errors abort the pack-chain load
+        // upstream; soft errors only log.
+        if (resolver.errors.length > 0) {
+          for (const e of resolver.errors) {
+            const where = e.presetId ? `${e.file}:${e.presetId}` : e.file;
+            const hint = e.hint ? `  — ${e.hint}` : "";
+            console.warn(`[preset] ${e.packId} ${where}: ${e.message}${hint}`);
+          }
+        }
+        return resolver;
+      });
+    }
+    return this._presets;
+  }
+
+  /**
    * Parse a scene JSON file inside the pack into a `Scene`. Used by the
    * bootstrap to load `manifest.startScene`, and available to gameplay
    * code that wants to switch levels later.
+   *
+   * The resolver is consulted up front so scenes whose grids reference
+   * preset ids via `idMap` resolve into the renderer's tile-id world
+   * transparently. Legacy scenes (no `idMap`) skip the resolver
+   * lookups entirely — `Scene.fromJSON` falls through to its existing
+   * bare-int parsing.
    */
   async scene(path: string): Promise<Scene> {
     const text = await this.textBody(path);
@@ -26,7 +67,8 @@ export abstract class AssetPack {
     } catch (err) {
       throw new Error(`Scene ${path}: invalid JSON — ${(err as Error).message}`);
     }
-    return Scene.fromJSON(data);
+    const resolver = await this.presets();
+    return Scene.fromJSON(data, undefined, resolver);
   }
 
   /** Convenience: load the scene named in `manifest.startScene`. */

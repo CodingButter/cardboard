@@ -1,0 +1,45 @@
+// AUTO-GENERATED anonymous-bucket presets — collapsed inline cells. Do not hand-edit.
+// Hand-editable — keys are preset IDs, values are PresetSource records.
+// See docs/plans/TILE_PRESETS.md § 3 for the schema.
+{
+  "_372353079073c64c": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.35,
+    "topCap": "images/tiles/tile_floor.jpg",
+    "emissive": {
+      "color": [
+        1,
+        0.4,
+        0.8
+      ],
+      "intensity": 1.5
+    }
+  },
+  "_4b75108a8a9d7abb": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.7,
+    "topCap": "images/tiles/tile_floor.jpg"
+  },
+  "_6240ca8fbdb40b1f": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.35,
+    "topCap": "images/tiles/tile_floor.jpg"
+  },
+  "_9fd28d356972b84c": {
+    "texture": "images/tiles/ceiling.jpg",
+    "emissive": {
+      "color": [
+        0.6,
+        1,
+        0.7
+      ],
+      "intensity": 1.2
+    }
+  },
+  "_e80e1b40116b1885": {
+    "texture": "images/tiles/wall.jpg",
+    "wallStartZ": 0.6,
+    "wallHeight": 0.4,
+    "bottomCap": "images/tiles/ceiling.jpg"
+  }
+}

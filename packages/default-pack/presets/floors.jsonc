@@ -1,0 +1,16 @@
+// Floor presets — default pack. Auto-generated.
+// Hand-editable — keys are preset IDs, values are PresetSource records.
+// See docs/plans/TILE_PRESETS.md § 3 for the schema.
+{
+  "tile.floor": {
+    "texture": "images/tiles/tile_floor.jpg"
+  },
+  "tile.floor.r030.t080": {
+    "extends": "tile.floor",
+    "reflectiveness": 0.3,
+    "transition": 0.8
+  },
+  "wood.floor": {
+    "texture": "images/tiles/wood_floor.jpg"
+  }
+}

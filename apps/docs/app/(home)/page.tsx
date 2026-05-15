@@ -28,6 +28,20 @@ import { PlanLinkCard } from '@/components/landing/PlanLinkCard';
 import { gitConfig } from '@/lib/shared';
 
 /**
+ * GitHub Pages serves the docs site at `/cardboard/...`, so the embedded
+ * game runner lives at `/cardboard/play/`. Next.js's `basePath` prefix
+ * auto-applies to internal `<Link>` and `<Image>` routes, but it does
+ * NOT rewrite raw `src` attributes on `<iframe>`, so we hardcode the
+ * production-deployed path here. In `next dev` (where `basePath` is
+ * still `/cardboard`) the path is correct too — but the iframe will 404
+ * unless the static game bundle has been staged into `public/play/`.
+ * The `prebuild` step does that, so it works once you've run any
+ * `bun run build`.
+ */
+const PLAY_BASE = '/cardboard/play';
+const PLAY_SRC = `${PLAY_BASE}/?pack=${PLAY_BASE}/packs/default.apg`;
+
+/**
  * cardboard documentation landing page.
  *
  * Audience: modders who'll write pack scripts against the ModAPI. The
@@ -133,6 +147,46 @@ export default function HomePage() {
               <ExternalLink aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
             </a>
           </div>
+        </div>
+      </section>
+
+      {/* ──────────── 1b. Play in your browser ──────────── */}
+      <section className="border-b bg-fd-muted/30">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14 sm:py-20">
+          <div className="mb-6 flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-fd-primary">
+              Try it now
+            </span>
+            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+              Play in your browser
+            </h2>
+            <p className="max-w-2xl text-fd-muted-foreground">
+              The runner below is the same engine you'll script against,
+              loading the default pack from this site. No install — just
+              click in and move with{' '}
+              <code className="rounded bg-fd-muted/60 px-1 py-0.5 font-mono text-sm">WASD</code>.
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-xl border bg-black shadow-sm">
+            <iframe
+              src={PLAY_SRC}
+              title="cardboard demo"
+              allow="pointer-lock; fullscreen; gamepad; screen-wake-lock"
+              loading="lazy"
+              className="block h-full w-full"
+              style={{
+                aspectRatio: '16 / 10',
+                border: 0,
+                width: '100%',
+                background: '#0f172a',
+              }}
+            />
+          </div>
+          <p className="mt-3 text-sm text-fd-muted-foreground">
+            Click the game to capture your mouse. Press{' '}
+            <code className="rounded bg-fd-muted/60 px-1 py-0.5 font-mono text-xs">Esc</code>{' '}
+            to release. Loading the demo pack (~26 MB) — first load may take a moment.
+          </p>
         </div>
       </section>
 
