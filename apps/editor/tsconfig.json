@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    // Editor uses React, not Preact. Override the base's `jsxImportSource`
+    // (which points at "preact") so React's JSX runtime is picked up.
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "paths": {
+      "@two_5_d/engine": ["../../packages/engine/src/index.ts"],
+      "@two_5_d/engine/*": ["../../packages/engine/src/*"]
+    }
+  },
+  "include": ["index.tsx", "server.ts", "src/**/*"],
+  "exclude": ["node_modules", "public", "dist"]
+}

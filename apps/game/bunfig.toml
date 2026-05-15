@@ -1,0 +1,15 @@
+[serve.static]
+plugins = ["bun-plugin-tailwind", "./setup-plugins.ts"]
+
+# Bun resolves `bunfig.toml` relative to the current working directory,
+# not the workspace root. After the monorepo migration `bun run dev`
+# runs from this directory (via `cd apps/game && bun run dev`), so the
+# Tailwind plugin must be wired here. Without this file the dev server
+# silently serves `index.css` unprocessed — `@tailwind`, `@source`,
+# and `@theme` survive as raw at-rules and every utility class becomes
+# a no-op (the Settings modal lost all its styling that way).
+#
+# Note: `bun build` CLI's plugin API doesn't support `onBeforeParse`,
+# which bun-plugin-tailwind requires, so the `invalid @ rule` warnings
+# during `bun run build` are unavoidable in that path. The dev server
+# loads the plugin via [serve.static] and processes Tailwind correctly.

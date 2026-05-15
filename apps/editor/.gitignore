@@ -1,0 +1,4 @@
+# Build output from `bun run build`. Unlike apps/game/public (which
+# carries the PWA static assets), this directory holds only bundler
+# output and should not be checked in.
+public/

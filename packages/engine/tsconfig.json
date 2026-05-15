@@ -1,0 +1,39 @@
+{
+  // Engine package — keeps the project's bare-name path aliases
+  // (`"Components"`, `"Scene"`, etc.) intra-package. Cross-package
+  // consumers go through `./src/index.ts` (the `@two_5_d/engine`
+  // barrel).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "AssetPack": ["./src/AssetPack/index.ts"],
+      "AssetPack/*": ["./src/AssetPack/*"],
+      "Components": ["./src/Components/index.ts"],
+      "Components/*": ["./src/Components/*"],
+      "Config": ["./src/Config.ts"],
+      "Controllers": ["./src/Controllers/index.ts"],
+      "Controllers/*": ["./src/Controllers/*"],
+      "ECS": ["./src/ECS/index.ts"],
+      "ECS/*": ["./src/ECS/*"],
+      "Engine": ["./src/Engine.ts"],
+      "Game": ["./src/Game.ts"],
+      "GameConfig": ["./src/GameConfig.ts"],
+      "ItemImages": ["./src/ItemImages.ts"],
+      "Libs/*": ["./src/Libs/*"],
+      "ModalRegistry": ["./src/ModalRegistry.ts"],
+      "ModAPI": ["./src/ModAPI/index.ts"],
+      "ModAPI/*": ["./src/ModAPI/*"],
+      "Renderers": ["./src/Renderers/index.ts"],
+      "Renderers/*": ["./src/Renderers/*"],
+      "Scene": ["./src/Scene.ts"],
+      "Settings": ["./src/Settings.ts"],
+      "Systems": ["./src/Systems/index.ts"],
+      "Systems/*": ["./src/Systems/*"],
+      "UI/*": ["./src/UI/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}

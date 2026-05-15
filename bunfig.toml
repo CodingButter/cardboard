@@ -1,0 +1,9 @@
+[serve.static]
+plugins = ["bun-plugin-tailwind", "./apps/game/setup-plugins.ts"]
+
+# Note: `bun build` CLI's plugin API doesn't support `onBeforeParse`,
+# which bun-plugin-tailwind requires — so the @theme/@tailwind warnings
+# you may see during `bun build` are unavoidable in that path. The
+# dev server (`bun run dev`) loads the plugin via [serve.static] and
+# processes Tailwind correctly; warnings only appear in the cold
+# `bun build` smoke test, not at runtime.

@@ -1,0 +1,5 @@
+[serve.static]
+plugins = ["bun-plugin-tailwind"]
+
+# See `apps/game/bunfig.toml` for why this needs to live here rather
+# than at the workspace root.

@@ -1,0 +1,6 @@
+{
+  "name": "@two_5_d/default-pack",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Default content pack (the 'Browser Doom' demo). Built into a .apg by apps/pack-builder."
+}

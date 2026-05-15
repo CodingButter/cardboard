@@ -1,0 +1,17 @@
+{
+  "name": "@two_5_d/pack-builder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-packs": "bun src/build-packs.ts",
+    "generate-scene": "bun src/generate-scene.ts",
+    "make-icons": "bun src/make-icons.ts",
+    "kill": "bun src/kill-server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@two_5_d/engine": "workspace:*",
+    "jszip": "^3.10.1"
+  }
+}

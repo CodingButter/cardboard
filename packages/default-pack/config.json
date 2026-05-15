@@ -1,0 +1,3 @@
+{
+  "_comment": "Pack-level overrides. Anything you put here deep-merges over game.config.json. Try changing fovDegrees or fogDistance and rebuilding the pack."
+}

@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind v4 auto-scans this CSS file's directory tree for class
+ * usage. Settings + Inventory UI lives in packages/engine/src/UI/,
+ * outside `apps/game/`, so without these directives those classes
+ * tree-shake out of the build and the modals render unstyled.
+ */
+@source "../../packages/engine/src/**/*.{ts,tsx}";
+@source "../../packages/default-pack/scripts/**/*.{js,ts,tsx}";
+
+html,body{
+    margin:0;
+    padding:0;
+    width:100%;
+    height:100%;
+}
+

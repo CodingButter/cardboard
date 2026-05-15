@@ -1,0 +1,66 @@
+{
+  "name": "default",
+  "version": "0.2.0",
+  "engine": "two_5_d@0.1",
+  "startScene": "scenes/scene1.json",
+  "config": "config.json",
+  "scripts": [
+    "scripts/prefabs/player.js",
+    "scripts/systems/player-input.js",
+    "scripts/systems/gun-render.js",
+    "scripts/systems/pickup.js",
+    "scripts/systems/minimap-render.js",
+    "scripts/systems/reticle-render.js",
+    "scripts/systems/stats-render.js",
+    "scripts/systems/inventory-bar-render.js",
+    "scripts/hello.js"
+  ],
+  "tileTextures": {
+    "1": "images/tiles/wall.jpg",
+    "2": "images/tiles/wood_floor.jpg",
+    "3": "images/tiles/ceiling.jpg",
+    "4": "images/tiles/tile_floor.jpg"
+  },
+  "tileSheets": [
+    {
+      "path": "images/tiles/multiple_tiles.jpg",
+      "tileWidth": 42,
+      "tileHeight": 42,
+      "offsetX": 1,
+      "offsetY": 0,
+      "cols": 6,
+      "rows": 6,
+      "startTileId": 10
+    }
+  ],
+  "items": {
+    "rifle": {
+      "name": "Assault Rifle",
+      "image": "images/items/rifle.png",
+      "type": "weapon",
+      "stackMax": 1,
+      "equipSlot": "mainHand",
+      "weapon": {
+        "fireRate": 8,
+        "magazineSize": 30,
+        "reloadTime": 1.5,
+        "startingMag": 30,
+        "ammoItem": "rifle_ammo"
+      }
+    },
+    "rifle_ammo": {
+      "name": "5.56mm Rounds",
+      "image": "images/items/ammo_pack.png",
+      "type": "ammo",
+      "stackMax": 120,
+      "worldSpriteId": "ammo_pack"
+    }
+  },
+  "defaultInventory": [
+    { "itemId": "rifle", "slot": "hotbar:0" },
+    { "itemId": "rifle_ammo", "count": 90 }
+  ],
+  "sprites": {
+    "ammo_pack": { "image": "images/items/ammo_pack.png" }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "rendering": {
+    "bilinearFiltering": true,
+    "backend": "webgl",
+    "resolutionScale": 1
+  },
+  "walls": {
+    "ao": {
+      "bottomDarken": 0.35,
+      "bottomBand": 0.2,
+      "topDarken": 0.75,
+      "topBand": 0.12
+    },
+    "reflection": {
+      "strength": 0.28,
+      "band": 0.45
+    },
+    "tileColors": {
+      "1": { "r": 200, "g": 80, "b": 80, "a": 255 },
+      "2": { "r": 110, "g": 80, "b": 50, "a": 255 },
+      "3": { "r": 80, "g": 80, "b": 100, "a": 255 },
+      "4": { "r": 140, "g": 140, "b": 145, "a": 255 }
+    },
+    "defaultColor": { "r": 200, "g": 200, "b": 200, "a": 255 }
+  },
+  "floor": {
+    "ao": {
+      "band": 0.3,
+      "darken": 0.55
+    },
+    "reflection": {
+      "tileScale": 4
+    }
+  },
+  "camera": {
+    "fovDegrees": 60,
+    "ceiling": { "r": 40, "g": 40, "b": 60, "a": 255 },
+    "floor": { "r": 60, "g": 50, "b": 40, "a": 255 },
+    "fogDistance": 16,
+    "maxRaySteps": 64,
+    "pitchFraction": 0.7
+  },
+  "player": {
+    "speed": 1.0,
+    "rotationSpeed": 0.2,
+    "runMultiplier": 1.75,
+    "radius": 0.22
+  },
+  "bindings": {
+    "forward":     ["KeyW", "ArrowUp"],
+    "backward":    ["KeyS", "ArrowDown"],
+    "strafeLeft":  ["KeyA", "ArrowLeft"],
+    "strafeRight": ["KeyD", "ArrowRight"],
+    "run":         ["ShiftLeft", "ShiftRight"],
+    "jump":        ["Space"],
+    "crouch":      ["KeyC"]
+  },
+  "minimap": {
+    "scale": 0.25,
+    "viewRadiusTiles": 6,
+    "style": {
+      "background":    "#181818",
+      "outline":       "#888",
+      "wall":          "#cc5050",
+      "ray":           "#ffcc40",
+      "strokeWidthPx": 2
+    },
+    "playerMarker": {
+      "color":   "#ff4040",
+      "radius":  0.25
+    }
+  },
+  "gun": {
+    "heightFraction":         0.78,
+    "reticleGapFraction":     -0.065,
+    "swayAmplitudeFraction":  0.028,
+    "swayFrequency":          6,
+    "recoilDuration":         0.18,
+    "recoilHeightFraction":   0.067,
+    "recoilScale":            0.08,
+    "recoilSkew":             0.06
+  },
+  "reticle": {
+    "imageUrl":          "/images/redicle.png",
+    "imageSizeFraction": 0.13,
+    "color":             "#ffffff",
+    "size":              12,
+    "gap":               4,
+    "lineWidth":         2,
+    "sensitivity":       30,
+    "invertY":           false,
+    "maxOffsetFraction": 0.4
+  },
+  "stats": {
+    "background":  "rgba(0, 0, 0, 0.7)",
+    "text":        "#7fff7f",
+    "font":        "12px monospace",
+    "lineHeight":  16,
+    "padding":     8,
+    "width":       200
+  }
+}

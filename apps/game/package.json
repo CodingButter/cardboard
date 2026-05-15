@@ -1,0 +1,21 @@
+{
+  "name": "@two_5_d/game",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot server.ts",
+    "build": "bun build index.html --outdir dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@two_5_d/engine": "workspace:*",
+    "@two_5_d/default-pack": "workspace:*",
+    "preact": "^10.29.1",
+    "tailwindcss": "^4.3.0"
+  },
+  "devDependencies": {
+    "bun-plugin-glsl": "^0.2.2",
+    "bun-plugin-tailwind": "^0.1.2"
+  }
+}

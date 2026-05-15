@@ -1,0 +1,7 @@
+node_modules
+dist
+build
+*.wad
+# Default-pack content (images, scene JSONs, baked .apgs) — not source
+packages/default-pack/
+apps/game/public/

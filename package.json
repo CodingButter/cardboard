@@ -1,0 +1,23 @@
+{
+  "name": "two_5_d",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "cd apps/game && bun run dev",
+    "dev:editor": "cd apps/editor && bun run dev",
+    "build": "cd apps/game && bun run build",
+    "build-packs": "cd apps/pack-builder && bun run build-packs",
+    "generate-scene": "cd apps/pack-builder && bun run generate-scene",
+    "make-icons": "cd apps/pack-builder && bun run make-icons",
+    "kill": "cd apps/pack-builder && bun run kill",
+    "typecheck": "cd packages/shared && bun run typecheck && cd ../engine && bun run typecheck && cd ../../apps/game && bun run typecheck && cd ../pack-builder && bun run typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "prettier": "^3.8.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

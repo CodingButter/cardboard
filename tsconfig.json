@@ -1,0 +1,11 @@
+{
+  // Workspace root tsconfig. Each package below has its own
+  // `tsconfig.json` that extends `tsconfig.base.json` and declares its
+  // own paths + include. We deliberately don't use TypeScript
+  // `composite` project references: the base config has `noEmit: true`
+  // (we run TS via Bun directly, never emit), which composite mode
+  // forbids. The `typecheck` script in package.json runs `tsc --noEmit`
+  // in each workspace instead.
+  "files": [],
+  "include": []
+}
