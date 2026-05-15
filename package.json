@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "cd apps/game && bun run dev",
     "dev:editor": "cd apps/editor && bun run dev",
+    "docs:dev": "cd apps/docs && bun run dev",
+    "docs:build": "cd apps/docs && bun run build",
     "build": "cd apps/game && bun run build",
     "build-packs": "cd apps/pack-builder && bun run build-packs",
     "generate-scene": "cd apps/pack-builder && bun run generate-scene",

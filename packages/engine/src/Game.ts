@@ -14,7 +14,7 @@ import ModalRegistry from "ModalRegistry";
 import type { PartialGameConfig } from "Settings";
 import { Aim, Camera, Facing, Position } from "Components";
 import { CONFIG } from "GameConfig";
-import type { AssetPack } from "AssetPack";
+import type { AssetPack, ShaderRole } from "AssetPack";
 import { ModAPIImpl } from "ModAPI";
 import ItemImages from "ItemImages";
 
@@ -72,6 +72,13 @@ export class Game {
     scene: Scene,
     previous?: Partial<GameState>,
     packConfig: PartialGameConfig = {},
+    /**
+     * Pre-resolved per-role fragment shaders, produced by
+     * `WebGLRenderer.prefetchShaderSources(pack)`. Forwarded to the
+     * WebGL renderer; the canvas2d renderer ignores it (pack shaders
+     * are a WebGL-only feature — `ENGINE_PACK_SHADERS.md` § 2).
+     */
+    shaderSources?: Partial<Record<ShaderRole, string>>,
   ) {
     this.pack = pack;
     this.canvas = canvas;
@@ -90,7 +97,7 @@ export class Game {
     const rendererProps = { canvas, pack, width: CANVAS_SIZE.x, height: CANVAS_SIZE.y };
     this.renderer =
       CONFIG.rendering.backend === "webgl"
-        ? new WebGLRenderer(rendererProps)
+        ? new WebGLRenderer({ ...rendererProps, shaderSources })
         : new TwoDRenderer(rendererProps);
     // Now that the renderer is ready, size the pixel buffer to the
     // actual window (was a no-op on the earlier `fitCanvasToWindow`

@@ -4,3 +4,10 @@ export { WebGLRenderer } from "./WebGLRenderer";
 export type { WebGLRendererProps } from "./WebGLRenderer";
 export { Texture } from "./Texture";
 export type { SceneRenderer, SpriteDrawRequest, LightInstance } from "./SceneRenderer";
+export {
+  getShaderSource,
+  isShaderRole,
+  SHADER_ROLES,
+  type ShaderRole as RendererShaderRole,
+} from "./ShaderRoleRegistry";
+export { headerFor } from "./shaderHeaders";

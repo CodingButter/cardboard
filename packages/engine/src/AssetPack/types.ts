@@ -172,6 +172,16 @@ export interface SpriteDef {
 export const ITEM_IMAGE_VARIANTS = ["icon", "held", "world"] as const;
 export type ItemImageVariant = (typeof ITEM_IMAGE_VARIANTS)[number];
 
+/**
+ * Catalog of fragment-shader roles a pack can override. Kept in sync
+ * with `ShaderRoleRegistry`'s `ShaderRole`; re-declared here so
+ * `PackManifest` doesn't pull a renderer dep just for a type literal.
+ *
+ * Phase S1 of `docs/plans/ENGINE_PACK_SHADERS.md` — three roles match
+ * the WebGL2 renderer's three fragment programs.
+ */
+export type ShaderRole = "skyFrag" | "worldFrag" | "spriteFrag";
+
 /** Authoritative index of a pack's contents. */
 export interface PackManifest {
   name: string;
@@ -229,4 +239,15 @@ export interface PackManifest {
     /** Jitter samples per light per corner (1 = hard shadows). */
     supersample?: number;
   };
+  /**
+   * Optional per-role fragment-shader overrides. Each value is a path
+   * inside the pack to a `.frag` whose **body** (helpers + `void
+   * main()`) replaces the engine's built-in shader for that role. The
+   * engine auto-prepends a header declaring every uniform / varying /
+   * `#define` for the role — see `shaderHeaders.ts`.
+   *
+   * WebGL2 backend only. On the canvas2d backend any entries here are
+   * silently ignored. Phase S1 of `ENGINE_PACK_SHADERS.md`.
+   */
+  shaders?: Partial<Record<ShaderRole, string>>;
 }

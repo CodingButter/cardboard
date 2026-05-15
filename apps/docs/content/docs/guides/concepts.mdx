@@ -1,0 +1,75 @@
+---
+title: "Concepts: packs, scenes, prefabs, ModAPI"
+description: The mental model — what the engine owns vs. what packs own.
+---
+
+cardboard has a small set of moving parts. Once you have the mental
+model these four words convey, everything else is detail.
+
+## Packs
+
+A **pack** is the unit of distribution. One `.apg` zip contains
+everything needed to run a game on top of the engine: a manifest,
+scenes, scripts, images, optional shaders.
+
+The engine ships zero gameplay content. Even the "default" game —
+player prefab, weapons, inventory UI, pickup systems — lives in
+`packages/default-pack/`, loaded the same way any third-party pack
+would be.
+
+Packs can declare a `requires[]` list, which lets one pack extend
+another. The runner resolves the chain and merges overrides in
+declared order. See `PACK_CHAIN` for the rollout plan.
+
+## Scenes
+
+A **scene** is the running world's static geometry + initial
+entity placements. SceneJSON ships in `scenes/*.json` inside a
+pack. Each scene declares:
+
+- Walls (with variable heights, partial-cell shape, cap textures).
+- Floor + ceiling tiles.
+- Entities (positions + components — the prefab system attaches the
+  rest).
+- A baked lightmap.
+
+The engine loads one scene at a time. Scene swaps reset the ECS
+world but keep the asset cache.
+
+## Prefabs
+
+A **prefab** is a named factory function: `(api, ...args) => Entity`.
+The engine has zero built-in prefabs. The default pack registers
+the player, weapons, projectiles, pickups, and so on.
+
+```js
+// inside a pack script
+api.registerPrefab('player', (x, y) => {
+  const e = api.world.spawn();
+  api.world.add(e, api.components.Position, new api.Vec2(x, y));
+  api.world.add(e, api.components.PlayerInput, {});
+  return e;
+});
+```
+
+Scene entity records reference prefabs by name; the engine looks
+each one up at load time.
+
+## ModAPI
+
+The **ModAPI** is the surface a pack script sees. It's
+intentionally small: registry hooks for components, prefabs,
+systems, and renderer systems; read-only views of input and
+modals; the live world + scene + config + pack manifest.
+
+A pack script is an ES module:
+
+```js
+export default (api) => {
+  // register components, prefabs, systems...
+};
+```
+
+The runner loads each script in `manifest.scripts` as a Blob URL,
+imports its default export, and calls it with a `ModAPI` instance.
+The full surface is documented in the [API reference](/docs/api).

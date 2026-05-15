@@ -1,0 +1,24 @@
+---
+title: What is cardboard?
+description: A browser-based 2.5D raycaster engine where every game ships as a hot-loadable asset pack.
+---
+
+## What it is
+
+Wolfenstein-style raycaster written in TypeScript + Bun, rendered to
+canvas2d or WebGL2. Walls have variable heights and partial-cell
+shape (knee walls, hangers); lighting is bake-heavy with optional
+dynamic lights; reflections on floor + walls; sprite entities with
+ECS-driven behavior.
+
+The engine knows nothing about the game it's running. All game
+content — scenes, prefabs, scripts, textures, manifest — ships as a
+single `.apg` zip. The runner loads whichever pack you point it at
+via `?pack=<url>`.
+
+This means:
+
+- Modders can build entire games without forking the engine.
+- Packs can extend each other via a `requires[]` dependency chain.
+- Any pack hosted anywhere is playable in the official runner.
+- The community store is one distribution path; raw URL is another.

@@ -1,0 +1,43 @@
+---
+title: Writing your first pack
+description: Skeleton walkthrough for assembling a minimal .apg pack.
+---
+
+> **TODO** — this guide is a skeleton. Each section below is marked
+> with a `TODO` describing what should land here.
+
+## 1. Pack layout
+
+> **TODO** — list the minimum files: `manifest.json`,
+> `scenes/start.json`, one script, one texture. Show the directory
+> tree with checkbox-style "required vs optional" annotations.
+
+## 2. `manifest.json`
+
+> **TODO** — document the schema fields a pack needs at minimum
+> (`name`, `version`, `startScene`, `scripts[]`, `items{}`).
+> Reference `PackManifest` from `packages/engine/src/AssetPack/`.
+
+## 3. Scene
+
+> **TODO** — show a minimal SceneJSON with a 5x5 room, one wall
+> texture, one entity (the player), no lighting bake. Note that
+> the lightmap is optional and packs can ship pre-baked or rely on
+> dynamic lights only.
+
+## 4. A pack script
+
+> **TODO** — show a script that registers a `player` prefab and a
+> trivial per-frame system (e.g. a wobble). Reference the ModAPI
+> surface and link to the API reference page.
+
+## 5. Building the `.apg`
+
+> **TODO** — walk through `bun run build-packs` and where the
+> output lands. Mention `apps/pack-builder/` and the URL-query
+> hot-load mechanism (`?pack=...`).
+
+## 6. Iterating
+
+> **TODO** — describe the edit-rebuild-reload cycle and point at
+> the future in-browser editor (see `EDITOR.md` plan).

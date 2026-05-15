@@ -1,0 +1,67 @@
+---
+title: Quick start
+description: Install, run the dev server, build the default pack, and explore.
+---
+
+cardboard is a Bun-first monorepo. Every workflow below uses `bun` —
+no `npm`, no `yarn`, no `pnpm`.
+
+## Install
+
+```sh
+bun install
+```
+
+Bun resolves the workspace graph automatically. The root
+`package.json` declares `workspaces: ["packages/*", "apps/*"]`.
+
+## Build the default pack
+
+The game runs against an `.apg` asset pack. Build the default pack
+first so the runner has something to load:
+
+```sh
+bun run build-packs
+```
+
+This bakes lightmaps, zips the contents of `packages/default-pack/`,
+and emits `apps/game/public/packs/default.apg`.
+
+## Run the dev server
+
+```sh
+bun run dev
+```
+
+Opens the game on `http://localhost:3000`. HMR-friendly: editing
+engine TypeScript reloads the module and re-snapshots world state
+across the boundary. Editing pack content requires `bun run
+build-packs` + a page reload.
+
+## Explore the default pack
+
+The default pack lives at `packages/default-pack/`. Its layout:
+
+```
+packages/default-pack/
+├── manifest.json        items, prefabs, defaultInventory, requires[]
+├── config.json          deep-merged over the engine baseline
+├── scenes/*.json        SceneJSON (walls, floors, ceilings, entities, lightmap)
+├── images/*             textures + item icons
+├── scripts/*.js         ES modules; default-export receives ModAPI
+└── (future) shaders/*   opt-in pack-shipped fragment/vertex sources
+```
+
+Load a different pack via URL query:
+
+```
+http://localhost:3000/?pack=https://example.com/some.apg
+```
+
+## Build for production
+
+```sh
+bun run build
+```
+
+Emits a static bundle from `apps/game/`.

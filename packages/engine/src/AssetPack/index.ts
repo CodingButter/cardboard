@@ -9,6 +9,7 @@ export type {
   SpriteDef,
   ItemImageVariant,
   PackManifest,
+  ShaderRole,
 } from "./types";
 export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS } from "./types";
 export { discoverItemVariants } from "./discoverItemVariants";

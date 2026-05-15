@@ -3,6 +3,8 @@
 A browser-based 2.5D raycaster engine where every game ships as a
 hot-loadable asset pack.
 
+Docs: <https://codingbutter.github.io/cardboard/>
+
 ## What it is
 
 Wolfenstein-style raycaster written in TypeScript + Bun, rendered to

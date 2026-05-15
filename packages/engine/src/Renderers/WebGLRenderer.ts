@@ -6,13 +6,22 @@ import type { CameraData } from "Components";
 import { CONFIG } from "GameConfig";
 import { Texture } from "./Texture";
 import type { LightInstance, SceneRenderer, SpriteDrawRequest } from "./SceneRenderer";
-import type { AssetPack, SheetEntry } from "AssetPack";
+import type { AssetPack, SheetEntry, ShaderRole } from "AssetPack";
+import { getShaderSource, SHADER_ROLES } from "./ShaderRoleRegistry";
 
 export interface WebGLRendererProps {
   canvas: HTMLCanvasElement;
   pack: AssetPack;
   width?: number;
   height?: number;
+  /**
+   * Pre-resolved shader source per role, as produced by
+   * `WebGLRenderer.prefetchShaderSources(pack)`. When omitted, the
+   * renderer uses its built-in defaults — equivalent to passing the
+   * result of a `prefetchShaderSources` call on a pack with no
+   * `shaders` field. Phase S1 of `ENGINE_PACK_SHADERS.md`.
+   */
+  shaderSources?: Partial<Record<ShaderRole, string>>;
 }
 
 /* --- Tile texture array --------------------------------------------------- */
@@ -933,7 +942,7 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly skyBottomLoc: WebGLUniformLocation;
 
   private readonly worldProgram: WebGLProgram;
-  private readonly u: Record<string, WebGLUniformLocation>;
+  private readonly u: Record<string, WebGLUniformLocation | null>;
 
   private readonly quadVAO: WebGLVertexArrayObject;
 
@@ -1015,7 +1024,7 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly warnedSpriteIds: Set<string> = new Set();
   /** CPU-side scratch VBO; one quad = 6 verts × 8 floats (pos2, uv2, layer, camY, worldPos2). */
   private readonly spriteVertexData: Float32Array = new Float32Array(MAX_SPRITES_PER_FRAME * 6 * 8);
-  private readonly spriteUniforms: Record<string, WebGLUniformLocation>;
+  private readonly spriteUniforms: Record<string, WebGLUniformLocation | null>;
   /** Diagnostic: log sprite-pass stats once per session, then never again. */
   private spriteDiagLogged: boolean = false;
 
@@ -1032,11 +1041,37 @@ export class WebGLRenderer implements SceneRenderer {
   /** How many of the slots above are populated this frame. `0` means "no dynamic lights". */
   private dynamicLightCount: number = 0;
 
+  /**
+   * Resolve every role's fragment source for a given pack, applying
+   * any `manifest.shaders` overrides. Async because pack-shipped
+   * shader bodies are read via `pack.textBody()`. The result is
+   * passed into the `WebGLRenderer` constructor via `shaderSources`,
+   * which can then run synchronously.
+   *
+   * Roles the pack doesn't override are returned as the engine's
+   * built-in default source. Phase S1 — single pack, no chain.
+   */
+  static async prefetchShaderSources(
+    pack: AssetPack,
+  ): Promise<Partial<Record<ShaderRole, string>>> {
+    const out: Partial<Record<ShaderRole, string>> = {};
+    const defaults: Record<ShaderRole, string> = {
+      skyFrag: FRAG_SKY_SRC,
+      worldFrag: FRAG_WORLD_SRC,
+      spriteFrag: FRAG_SPRITE_SRC,
+    };
+    for (const role of SHADER_ROLES) {
+      out[role] = await getShaderSource(role, pack, defaults[role]);
+    }
+    return out;
+  }
+
   constructor({
     canvas,
     pack,
     width = canvas.clientWidth,
     height = canvas.clientHeight,
+    shaderSources,
   }: WebGLRendererProps) {
     canvas.width = width;
     canvas.height = height;
@@ -1075,14 +1110,34 @@ export class WebGLRenderer implements SceneRenderer {
     this.ctx = hudCtx;
 
     // ── Programs ───────────────────────────────────────────────────────
-    this.skyProgram = buildProgram(gl, VERT_SRC, FRAG_SKY_SRC);
+    // Per-role fragment source: pack override (when provided via
+    // `prefetchShaderSources`) wins over the engine default. The
+    // engine defaults (`FRAG_*_SRC`) are full source strings and ship
+    // byte-identical to pre-S1 builds when no pack override exists.
+    const fragSky = shaderSources?.skyFrag ?? FRAG_SKY_SRC;
+    const fragWorld = shaderSources?.worldFrag ?? FRAG_WORLD_SRC;
+    const fragSprite = shaderSources?.spriteFrag ?? FRAG_SPRITE_SRC;
+
+    this.skyProgram = buildProgram(gl, VERT_SRC, fragSky);
     this.skyTopLoc = gl.getUniformLocation(this.skyProgram, "u_top")!;
     this.skyBottomLoc = gl.getUniformLocation(this.skyProgram, "u_bottom")!;
 
-    this.worldProgram = buildProgram(gl, VERT_SRC, FRAG_WORLD_SRC);
-    const ul = (name: string): WebGLUniformLocation => {
+    this.worldProgram = buildProgram(gl, VERT_SRC, fragWorld);
+    // Pack-supplied shaders may not reference every engine uniform; GLSL
+    // strips unused ones. Tolerate optimized-out uniforms when the shader
+    // came from a pack (gl.uniform* is a silent no-op on null locations).
+    // Engine-default shaders still hard-throw — a missing uniform there
+    // means the shader source drifted from this lookup table.
+    const isPackWorldFrag = shaderSources?.worldFrag !== undefined;
+    const ul = (name: string): WebGLUniformLocation | null => {
       const loc = gl.getUniformLocation(this.worldProgram, name);
-      if (loc === null) throw new Error(`Uniform ${name} not found (optimized out?)`);
+      if (loc === null) {
+        if (isPackWorldFrag) {
+          console.warn(`[cardboard] pack worldFrag does not reference ${name}; uniform set calls will no-op`);
+          return null;
+        }
+        throw new Error(`Uniform ${name} not found (optimized out?)`);
+      }
       return loc;
     };
     this.u = {
@@ -1192,10 +1247,17 @@ export class WebGLRenderer implements SceneRenderer {
     );
 
     // ── Sprite program + VAO + atlas ───────────────────────────────────
-    this.spriteProgram = buildProgram(gl, VERT_SPRITE_SRC, FRAG_SPRITE_SRC);
-    const sul = (name: string): WebGLUniformLocation => {
+    this.spriteProgram = buildProgram(gl, VERT_SPRITE_SRC, fragSprite);
+    const isPackSpriteFrag = shaderSources?.spriteFrag !== undefined;
+    const sul = (name: string): WebGLUniformLocation | null => {
       const loc = gl.getUniformLocation(this.spriteProgram, name);
-      if (loc === null) throw new Error(`Sprite uniform ${name} not found`);
+      if (loc === null) {
+        if (isPackSpriteFrag) {
+          console.warn(`[cardboard] pack spriteFrag does not reference ${name}; uniform set calls will no-op`);
+          return null;
+        }
+        throw new Error(`Sprite uniform ${name} not found`);
+      }
       return loc;
     };
     this.spriteUniforms = {

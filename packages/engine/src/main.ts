@@ -87,7 +87,18 @@ export async function main(previous?: Partial<GameState>): Promise<GameClass> {
   //    applyConfigOverride has run, so renderer captures see merged config)
   bootStatus("Initialising renderer…");
   const { Game } = await import("Game");
-  const game = new Game(canvas, pack, scene, previous, packConfig);
+  // Resolve any `manifest.shaders` overrides BEFORE constructing the
+  // renderer. WebGL-only; canvas2d gets `undefined` and silently
+  // ignores the override (ENGINE_PACK_SHADERS.md § 2). The prefetch is
+  // a small handful of `pack.textBody` reads — pack files are already
+  // in memory after step 1, so this is microseconds.
+  const { CONFIG } = await import("GameConfig");
+  const { WebGLRenderer } = await import("Renderers");
+  const shaderSources =
+    CONFIG.rendering.backend === "webgl" && pack.manifest.shaders
+      ? await WebGLRenderer.prefetchShaderSources(pack)
+      : undefined;
+  const game = new Game(canvas, pack, scene, previous, packConfig, shaderSources);
 
   // 5. Mod scripts — must run BEFORE we spawn the player, because the
   //    "player" prefab is pack-side content. The default pack's
