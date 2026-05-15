@@ -51,12 +51,21 @@ export default (api) => {
     return e;
   });
 
+  // ── M1 of MATERIALS.md — per-entity shader smoke test ─────────────
+  // When the pack ships a `materialsSmokeTest: true` flag in its
+  // manifest, every other ammo pickup gets a `Shader` component
+  // pointing at the green-tinted, alpha-pulsing `ghost-sprite.glsl`.
+  // Disabled by default; flip the manifest flag + `bun run
+  // build-packs` to see.
+  const ghostShaderEnabled = api.pack.manifest.materialsSmokeTest === true;
+
   // Scatter ammo packs across every open cell in the scene that's at
   // least a few tiles away from the spawn. Procedural placement means
   // this works regardless of map size or layout. Guarded by a
   // "world empty of sprites?" check so HMR reruns don't duplicate.
   const hasSprites = api.world.first(api.components.Sprite) !== undefined;
   if (!hasSprites) {
+    let ghostFlag = false;
     const ammo = (x, y) => {
       const e = api.world.spawn();
       api.world
@@ -75,6 +84,17 @@ export default (api) => {
           radius: 0.12,
           drawForwardRay: false,
         });
+      // Alternate ammo packs carry the ghost-sprite shader when the
+      // smoke test is enabled. The engine's variant collector picks
+      // it up at scene-load and these entities render translucent /
+      // green-tinted while the others render normally. M1 sprites-
+      // only — `worldHooks` / `skyHooks` are reserved but unused.
+      if (ghostShaderEnabled && ghostFlag) {
+        api.world.add(e, api.components.Shader, {
+          spriteHooks: "shaders/ghost-sprite.glsl",
+        });
+      }
+      ghostFlag = !ghostFlag;
       return e;
     };
 

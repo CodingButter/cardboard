@@ -11,3 +11,14 @@ export {
   type ShaderRole as RendererShaderRole,
 } from "./ShaderRoleRegistry";
 export { headerFor } from "./shaderHeaders";
+export {
+  collectSpriteVariants,
+  collectWorldVariants,
+  collectSceneShaderLayer,
+  emptySceneLayer,
+  ShaderVariantSet,
+  WorldShaderVariantSet,
+  type ShaderVariant,
+  type WorldShaderVariant,
+  type SceneShaderLayer,
+} from "./ShaderVariants";

@@ -25,21 +25,21 @@ import {
 import { CodeSnippet } from '@/components/landing/CodeSnippet';
 import { FeatureCard } from '@/components/landing/FeatureCard';
 import { PlanLinkCard } from '@/components/landing/PlanLinkCard';
+import { PlayableIframe } from '@/components/landing/PlayableIframe';
 import { gitConfig } from '@/lib/shared';
 
 /**
  * GitHub Pages serves the docs site at `/cardboard/...`, so the embedded
  * game runner lives at `/cardboard/play/`. Next.js's `basePath` prefix
  * auto-applies to internal `<Link>` and `<Image>` routes, but it does
- * NOT rewrite raw `src` attributes on `<iframe>`, so we hardcode the
- * production-deployed path here. In `next dev` (where `basePath` is
- * still `/cardboard`) the path is correct too — but the iframe will 404
+ * NOT rewrite raw `src` attributes on `<iframe>`. The iframe (and its
+ * scene picker) lives in `PlayableIframe.tsx`, which hardcodes the
+ * production-deployed path. In `next dev` (where `basePath` is still
+ * `/cardboard`) the path is correct too — but the iframe will 404
  * unless the static game bundle has been staged into `public/play/`.
  * The `prebuild` step does that, so it works once you've run any
  * `bun run build`.
  */
-const PLAY_BASE = '/cardboard/play';
-const PLAY_SRC = `${PLAY_BASE}/?pack=${PLAY_BASE}/packs/default.apg`;
 
 /**
  * cardboard documentation landing page.
@@ -167,21 +167,7 @@ export default function HomePage() {
               <code className="rounded bg-fd-muted/60 px-1 py-0.5 font-mono text-sm">WASD</code>.
             </p>
           </div>
-          <div className="overflow-hidden rounded-xl border bg-black shadow-sm">
-            <iframe
-              src={PLAY_SRC}
-              title="cardboard demo"
-              allow="pointer-lock; fullscreen; gamepad; screen-wake-lock"
-              loading="lazy"
-              className="block h-full w-full"
-              style={{
-                aspectRatio: '16 / 10',
-                border: 0,
-                width: '100%',
-                background: '#0f172a',
-              }}
-            />
-          </div>
+          <PlayableIframe />
           <p className="mt-3 text-sm text-fd-muted-foreground">
             Click the game to capture your mouse. Press{' '}
             <code className="rounded bg-fd-muted/60 px-1 py-0.5 font-mono text-xs">Esc</code>{' '}

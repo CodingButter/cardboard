@@ -10,3 +10,4 @@ export * from "./Sprite";
 export * from "./Camera";
 export * from "./Light";
 export * from "./MinimapMarker";
+export * from "./Shader";

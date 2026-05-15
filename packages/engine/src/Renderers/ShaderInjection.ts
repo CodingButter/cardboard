@@ -15,9 +15,14 @@
 
 import type { AssetPack, ShaderHookRole } from "AssetPack";
 import type { ShaderRole } from "./ShaderRoleRegistry";
-import { fullHeaderFor } from "./shaderHeaders";
+import { fullHeaderFor, headerFor, helpersFor } from "./shaderHeaders";
 import { parseHookOverrides, substituteHooks } from "./HookParser";
 import { hookPreludeFor, hookNamesFor } from "./HookPrelude";
+import type {
+  SceneShaderLayer,
+  ShaderVariantSet,
+  WorldShaderVariantSet,
+} from "./ShaderVariants";
 
 /**
  * Map a shader role to its corresponding `*Hooks` manifest key.
@@ -66,8 +71,27 @@ export async function assembleShaderSource(
   role: ShaderRole,
   pack: AssetPack | undefined,
   engineBody: string,
+  /**
+   * Optional scene-level overrides (M3 of MATERIALS.md §9). Already
+   * parsed by `collectSceneShaderLayer` — a `Map<hookName, fullBody>`
+   * keyed exactly like pack-side `parseHookOverrides` output. These
+   * are merged ON TOP of pack-level overrides before the prelude
+   * substitution runs, so scene-level wins on overlap.
+   *
+   * When `undefined` or empty, behaviour is byte-identical to the
+   * pre-M3 single-tier (pack-only) path.
+   */
+  sceneOverrides?: ReadonlyMap<string, string>,
 ): Promise<string> {
-  if (!pack) return buildFragmentSource(role, engineBody);
+  if (!pack) {
+    // No pack — still apply scene overrides on top of the bare engine
+    // default. This supports tests + fixtures where a Scene exists
+    // without a pack.
+    if (!sceneOverrides || sceneOverrides.size === 0) {
+      return buildFragmentSource(role, engineBody);
+    }
+    return substitutePreludeOverrides(role, engineBody, sceneOverrides, "scene");
+  }
 
   const shaders = pack.manifest.shaders;
   const fragPath = shaders?.[role];
@@ -84,43 +108,65 @@ export async function assembleShaderSource(
           `Mode 1 wins per role-replacement rules. The hooks file is ignored.`,
       );
     }
+    if (sceneOverrides && sceneOverrides.size > 0) {
+      // Mode 1 has no hook prelude — the pack's body owns its own
+      // main() and there's nowhere to splice in scene-level hook
+      // overrides. Match the per-entity Mode-1 incompatibility
+      // (MATERIALS.md §3.3) and log + drop.
+      console.warn(
+        `[two_5_d] pack '${pack.manifest.name}' ships shaders.${role} (Mode 1) — scene.shaders.${hookKeyFor(role)} overrides are dropped for this scene (no hook call sites in pack main()).`,
+      );
+    }
     return buildFragmentSource(role, body);
   }
 
-  // Mode-3-only path: substitute the pack's hook overrides into the
-  // identity-default prelude, then concatenate with the engine body.
-  if (!hooksPath) return buildFragmentSource(role, engineBody);
+  // Mode-3-only path: merge pack-level overrides with scene-level
+  // overrides (last-wins per hook), substitute into the identity-
+  // default prelude, then concatenate with the engine body.
+  const overrides = new Map<string, string>();
 
-  let hookSource = "";
-  try {
-    hookSource = await pack.textBody(hooksPath);
-  } catch (err) {
-    console.warn(
-      `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} (${hooksPath}) failed to load — ignoring. ${(err as Error).message}`,
-    );
-    return buildFragmentSource(role, engineBody);
+  if (hooksPath) {
+    let hookSource = "";
+    try {
+      hookSource = await pack.textBody(hooksPath);
+    } catch (err) {
+      console.warn(
+        `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} (${hooksPath}) failed to load — ignoring. ${(err as Error).message}`,
+      );
+      hookSource = "";
+    }
+    if (hookSource) {
+      const parsed = parseHookOverrides(hookSource);
+      if (parsed.size === 0) {
+        console.warn(
+          `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} (${hooksPath}) contains no hook_* function definitions — ignoring.`,
+        );
+      }
+      for (const [name, body] of parsed) overrides.set(name, body);
+    }
   }
 
-  const overrides = parseHookOverrides(hookSource);
-  if (overrides.size === 0) {
-    console.warn(
-      `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} (${hooksPath}) contains no hook_* function definitions — ignoring.`,
-    );
-    return buildFragmentSource(role, engineBody);
+  // Scene overrides layer on top — last-wins per hook name (§9.2).
+  if (sceneOverrides) {
+    for (const [name, body] of sceneOverrides) overrides.set(name, body);
   }
+
+  if (overrides.size === 0) return buildFragmentSource(role, engineBody);
 
   // Validate overrides against the role catalog. Names that don't
   // match anything in the prelude get a warning per name; matching
   // hooks still apply.
   const valid = new Set(hookNamesFor(role));
-  const unknown: string[] = [];
-  for (const name of overrides.keys()) if (!valid.has(name)) unknown.push(name);
-  for (const name of unknown) {
-    console.warn(
-      `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} declares ${name}, which is not a known hook for role ${role}. Ignored.`,
-    );
-    overrides.delete(name);
+  for (const name of [...overrides.keys()]) {
+    if (!valid.has(name)) {
+      console.warn(
+        `[two_5_d] pack '${pack.manifest.name}' shaders.${hookKeyFor(role)} declares ${name}, which is not a known hook for role ${role}. Ignored.`,
+      );
+      overrides.delete(name);
+    }
   }
+
+  if (overrides.size === 0) return buildFragmentSource(role, engineBody);
 
   // Splice into the prelude — `fullHeaderFor` returns header + prelude
   // + helpers + body-marker; we substitute overrides inside the
@@ -137,4 +183,527 @@ export async function assembleShaderSource(
   // Replace the unmodified prelude block with the assembled (with
   // overrides) version. The prelude appears verbatim in `fullSource`.
   return fullSource.replace(prelude, assembledPrelude);
+}
+
+/**
+ * Standalone prelude substitution — when no pack is provided but a
+ * Scene still wants to override hooks. Validates against the role
+ * catalog and logs unknown names. `tierLabel` controls the warning
+ * prefix ("pack" vs "scene") for clearer diagnostics.
+ */
+function substitutePreludeOverrides(
+  role: ShaderRole,
+  engineBody: string,
+  overrides: ReadonlyMap<string, string>,
+  tierLabel: string,
+): string {
+  const valid = new Set(hookNamesFor(role));
+  const filtered = new Map<string, string>();
+  for (const [name, body] of overrides) {
+    if (!valid.has(name)) {
+      console.warn(
+        `[two_5_d] ${tierLabel} ${hookKeyFor(role)} declares ${name}, which is not a known hook for role ${role}. Ignored.`,
+      );
+      continue;
+    }
+    filtered.set(name, body);
+  }
+  if (filtered.size === 0) return buildFragmentSource(role, engineBody);
+  const prelude = hookPreludeFor(role);
+  const { source: assembledPrelude } = substituteHooks(prelude, filtered);
+  const fullSource = buildFragmentSource(role, engineBody);
+  return fullSource.replace(prelude, assembledPrelude);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Per-entity sprite-variant assembly (M1 of MATERIALS.md).
+ *
+ * The pack-level path above produces ONE set of hook bodies for the
+ * sprite-frag program. Per-entity shaders introduce N additional
+ * variants — each entity carrying a `Shader` component contributes
+ * its own hook overrides on top of the pack default. The frag program
+ * grows a dispatcher that switches on a per-vertex `v_variant`
+ * integer and routes each hook call to the variant-specific body.
+ *
+ * Variant 0 (= pack default) is the original prelude-after-pack-
+ * substitution function. Variant 1..N are renamed `__vN` copies of
+ * the modder-supplied bodies. Hooks not overridden by a particular
+ * variant fall through `default:` in the switch to variant 0 — no
+ * duplicated code, full inheritance from the pack tier.
+ * ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Find a `hook_<name>` function definition's `(start, end)` byte range
+ * in `src`. Returns `null` when the named hook isn't present. Brace-
+ * counting mirrors `HookParser.findHookDefinitionRange` (kept private
+ * there) — sharing the implementation isn't worth a public export.
+ */
+function findHookRange(src: string, name: string): { start: number; end: number } | null {
+  const re = new RegExp(`(\\w+)\\s+${name}\\s*\\(`);
+  const m = re.exec(src);
+  if (!m) return null;
+  let i = m.index + m[0].length;
+  let parenDepth = 1;
+  while (i < src.length && parenDepth > 0) {
+    const c = src[i];
+    if (c === "(") parenDepth++;
+    else if (c === ")") parenDepth--;
+    i++;
+  }
+  while (i < src.length && src[i] !== "{") i++;
+  if (src[i] !== "{") return null;
+  i++;
+  let braceDepth = 1;
+  while (i < src.length && braceDepth > 0) {
+    const c = src[i];
+    if (c === "{") braceDepth++;
+    else if (c === "}") braceDepth--;
+    i++;
+  }
+  if (braceDepth !== 0) return null;
+  return { start: m.index, end: i };
+}
+
+/**
+ * Rename a hook function definition `hook_name(...)` → `hook_name__vN(
+ * ...)` in its source. Operates on a single parsed-out function body
+ * — does NOT touch call sites. Used to convert a variant's override
+ * into a renamed function the dispatcher can call.
+ */
+function renameHookDefinition(src: string, name: string, variantId: number): string {
+  const re = new RegExp(`(\\b)${name}(\\s*\\()`);
+  return src.replace(re, `$1${name}__v${variantId}$2`);
+}
+
+/**
+ * Parameter-list extractor for the sprite-frag hook prelude. Given a
+ * hook function in source form (`<ret> name(<params>) { ... }`),
+ * returns `{ retType, paramTypes[], paramNames[] }`. Used to build a
+ * dispatcher that calls the variant-renamed function with the same
+ * arguments the caller passed.
+ *
+ * Robust to extra whitespace and `in`/`out` qualifiers (not used by
+ * any sprite hook today, but harmless to tolerate).
+ */
+function parseHookSignature(src: string): {
+  retType: string;
+  paramNames: string[];
+} | null {
+  const m = /(\w+)\s+(hook_\w+)\s*\(([^)]*)\)/.exec(src);
+  if (!m) return null;
+  const retType = m[1]!;
+  const paramsRaw = m[3]!.trim();
+  if (paramsRaw === "" || paramsRaw === "void") return { retType, paramNames: [] };
+  const paramNames: string[] = [];
+  for (const part of paramsRaw.split(",")) {
+    // Each `part` looks like `vec3 base` or `int surface` — the last
+    // identifier-shaped token is the name.
+    const tokens = part.trim().split(/\s+/);
+    paramNames.push(tokens[tokens.length - 1]!);
+  }
+  return { retType, paramNames };
+}
+
+/**
+ * Assemble the sprite-frag GLSL source with per-entity variants
+ * dispatched at fragment time. Builds on the existing pack-level
+ * assembly:
+ *
+ *   1. Resolve the pack-default sprite source (header + prelude +
+ *      pack-hook substitutions + helpers + main).
+ *   2. For each sprite hook overridden by ANY variant:
+ *      a. Rename the variant-0 (= pack-default) function to
+ *         `hook_X__v0`.
+ *      b. Emit each variant's override renamed to `hook_X__vN`.
+ *      c. Emit a top-level `hook_X(...)` dispatcher that switches on
+ *         `v_variant` and calls the right `__vN` copy.
+ *   3. Inject `flat in int v_variant;` into the header just before
+ *      the prelude.
+ *
+ * Hooks NOT overridden by any variant are left untouched — they keep
+ * their pack-default identity (or pack-supplied override) inline and
+ * the GLSL compiler folds the call site as before. Sprites with
+ * `v_variant == 0` get the same generated code path as today for those
+ * hooks.
+ *
+ * Called from `WebGLRenderer.rebuildSpriteProgram` when
+ * `collectSpriteVariants` returned a non-empty variant set.
+ *
+ * `engineBody` is the engine's authoritative `main()` for the sprite
+ * frag — the caller passes `FRAG_SPRITE_SRC` from `WebGLRenderer.ts`.
+ * Mode-1 (pack-shipped `spriteFrag`) is incompatible with per-entity
+ * variants — see MATERIALS.md §3.3. If the pack ships Mode 1, the
+ * variants are dropped and the call falls back to the pack body.
+ */
+export async function assembleSpriteSource(
+  pack: AssetPack | undefined,
+  engineBody: string,
+  variants: ShaderVariantSet,
+  /**
+   * Optional scene-level sprite hooks (M3 of MATERIALS.md). Layered
+   * on top of pack hooks to form variant 0 for this scene. When
+   * `undefined`/empty, behaviour is byte-identical to M1.
+   */
+  sceneSpriteOverrides?: ReadonlyMap<string, string>,
+): Promise<string> {
+  // Mode-1 (pack ships its own main()) — variants can't splice into a
+  // foreign main(); fall back to the pack-level path. The runtime
+  // surface for entities still works (variant ids get written) but
+  // the dispatcher has no hook call sites to extend.
+  const packShaders = pack?.manifest.shaders;
+  if (packShaders?.spriteFrag) {
+    if (!variants.isEmpty()) {
+      console.warn(
+        `[two_5_d] pack ships shaders.spriteFrag (Mode 1) — per-entity Shader.spriteHooks overrides are dropped for this pack. See MATERIALS.md §3.3.`,
+      );
+    }
+    return assembleShaderSource("spriteFrag", pack, engineBody, sceneSpriteOverrides);
+  }
+
+  // Resolve the pack-default source (prelude + pack hook subs +
+  // scene-level subs + helpers + body). This is the variant-0
+  // hook-bearing source.
+  const packDefaultSource = pack
+    ? await assembleShaderSource("spriteFrag", pack, engineBody, sceneSpriteOverrides)
+    : sceneSpriteOverrides && sceneSpriteOverrides.size > 0
+      ? substitutePreludeOverrides("spriteFrag", engineBody, sceneSpriteOverrides, "scene")
+      : buildFragmentSource("spriteFrag", engineBody);
+
+  if (variants.isEmpty()) return packDefaultSource;
+
+  // The set of hook names that ANY variant overrides. We rewrite each
+  // of these in the assembled source; other hooks stay byte-identical
+  // (identity or pack-supplied) and inline as before.
+  const overriddenHooks = new Set<string>();
+  for (const v of variants.variants) {
+    for (const name of v.spriteHookBodies.keys()) overriddenHooks.add(name);
+  }
+
+  // Validate names against the catalog — variants that reference a
+  // wrong-role / mistyped hook get a warning and the offending
+  // function is ignored.
+  const valid = new Set(hookNamesFor("spriteFrag"));
+  for (const name of [...overriddenHooks]) {
+    if (!valid.has(name)) {
+      console.warn(
+        `[two_5_d] Shader.spriteHooks variant declares ${name}, which is not a known sprite-frag hook. Ignored.`,
+      );
+      overriddenHooks.delete(name);
+      for (const v of variants.variants) v.spriteHookBodies.delete(name);
+    }
+  }
+
+  if (overriddenHooks.size === 0) {
+    // Variants exist but none of their overrides match a valid hook
+    // — nothing to dispatch on; emit the pack-default source. The
+    // per-vertex `a_variant` attribute is still written by the
+    // sprite VBO but never read.
+    return packDefaultSource;
+  }
+
+  // Inject `flat in int v_variant;` into the header. We append it
+  // after the existing varyings (just before the first `out` line)
+  // so the position is stable across edits to the header.
+  let out = packDefaultSource;
+  const variantVarying = `flat in int v_variant;\n`;
+  out = out.replace(/(out\s+vec4\s+outColor\s*;\s*\n)/, `${variantVarying}$1`);
+
+  // For each overridden hook: rename the pack-default copy to __v0,
+  // append every variant's __vN, append a dispatcher with the
+  // canonical hook name.
+  for (const hookName of overriddenHooks) {
+    const range = findHookRange(out, hookName);
+    if (!range) {
+      console.warn(
+        `[two_5_d] sprite variant assembly: could not locate ${hookName} in the assembled source. Skipping.`,
+      );
+      continue;
+    }
+    const originalSrc = out.slice(range.start, range.end);
+    const sig = parseHookSignature(originalSrc);
+    if (!sig) {
+      console.warn(
+        `[two_5_d] sprite variant assembly: could not parse signature for ${hookName}. Skipping.`,
+      );
+      continue;
+    }
+    const v0Renamed = renameHookDefinition(originalSrc, hookName, 0);
+
+    const variantBlocks: string[] = [];
+    const switchCases: string[] = [];
+    for (const v of variants.variants) {
+      const override = v.spriteHookBodies.get(hookName);
+      if (!override) continue;
+      const renamed = renameHookDefinition(override, hookName, v.id);
+      variantBlocks.push(renamed);
+      const callArgs = sig.paramNames.join(", ");
+      switchCases.push(`    case ${v.id}: return ${hookName}__v${v.id}(${callArgs});`);
+    }
+
+    const callArgs = sig.paramNames.join(", ");
+    const dispatcher =
+      `${sig.retType} ${hookName}(${parseHookSignatureToString(originalSrc)}) {\n` +
+      `  switch (v_variant) {\n` +
+      `${switchCases.join("\n")}\n` +
+      `  }\n` +
+      `  return ${hookName}__v0(${callArgs});\n` +
+      `}\n`;
+
+    const replacement =
+      `${v0Renamed}\n` +
+      variantBlocks.join("\n") +
+      `\n` +
+      dispatcher;
+
+    out = out.slice(0, range.start) + replacement + out.slice(range.end);
+  }
+
+  return out;
+}
+
+/**
+ * Re-emit a hook function's parameter list as a parameter declaration
+ * string (e.g. `vec3 base, int layer, vec2 worldPos`). Used by the
+ * dispatcher emitter to declare the canonical `hook_name(...)` with
+ * the same signature as the original.
+ */
+function parseHookSignatureToString(src: string): string {
+  const m = /(\w+)\s+(hook_\w+)\s*\(([^)]*)\)/.exec(src);
+  if (!m) return "";
+  return m[3]!.trim();
+}
+
+// `headerFor` and `helpersFor` are re-imported for potential future
+// use by callers that need to inspect / re-build the sprite source
+// piecewise. Re-exporting keeps the module's contract self-contained.
+export { headerFor, helpersFor };
+
+/* ────────────────────────────────────────────────────────────────────
+ * Per-cell world-variant assembly (M2 of MATERIALS.md §8).
+ *
+ * Same dispatcher pattern as `assembleSpriteSource`, but the variant
+ * id comes from a per-cell texture (`u_sceneShaderVariants`, RGBA32F
+ * SW×SH, R channel = variant id) rather than a per-vertex attribute.
+ *
+ * Each cell-aware hook (one whose signature contains a `vec2 worldPos`
+ * / `vec2 cellCoord` / `vec2 capWorld` / `ivec2 cellCoord` parameter
+ * we can derive a cell coord from) gets a dispatcher that reads the
+ * cell variant from the texture at the relevant coord and routes the
+ * call to the matching `__vN` body.
+ *
+ * Scene-only hooks (fog, fallback, final-alpha, etc. — see
+ * MATERIALS.md §8) DO NOT dispatch per-cell. They keep their pack +
+ * scene baseline (variant 0) and the variant texture is never read.
+ * ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Which world-frag hooks are cell-aware (per-fragment dispatch) vs
+ * scene-only (always run variant 0). The split derives from the hook
+ * signatures in `HookPrelude.ts`: a hook is cell-aware iff its
+ * parameter list contains a position-like argument we can map to a
+ * grid cell.
+ *
+ * - `worldPos` / `capWorld` (`vec2`) → derive via `ivec2(floor(...))`
+ * - `cellCoord` (`vec2` or `ivec2`) → use directly
+ *
+ * Any other hook (e.g. `hook_modifyAlbedo(base, uv, tile, surface)`
+ * where `uv` is `fract(worldPos)` not a position) routes to
+ * variant 0 always. See MATERIALS.md §8 for the rationale.
+ */
+const WORLD_CELL_AWARE_HOOKS = new Map<string, string>([
+  // hookName → parameter to derive cellCoord from
+  ["hook_modifyCapColor", "capWorld"],
+  ["hook_modifySurfaceColor", "worldPos"],
+  ["hook_modifyReflectivity", "cellCoord"],
+  ["hook_modifyReflectionColor", "worldPos"],
+  ["hook_modifyStaticLight", "worldPos"],
+  ["hook_modifyDynamicLight", "worldPos"],
+  ["hook_modifyLightAttenuation", "worldPos"],
+  ["hook_modifyLightCoverage", "worldPos"],
+  ["hook_modifySurfaceAo", "cellCoord"],
+  ["hook_isOccluder", "cellCoord"],
+  ["hook_modifyAoCombined", "worldPos"],
+  ["hook_modifyDepth", "worldPos"],
+  ["hook_modifyEmissive", "worldPos"],
+  ["hook_addEmissive", "worldPos"],
+  ["hook_modifyFinalSurface", "worldPos"],
+  ["hook_modifyFinalColor", "worldPos"],
+]);
+
+/**
+ * GLSL snippet injected into the world-frag header (before the body)
+ * when at least one cell-aware variant is registered. Provides a
+ * `worldVariantAt(worldPos)` and `worldVariantAtCell(cellCoord)`
+ * helper the dispatchers call. Reads `u_sceneShaderVariants.r` and
+ * clamps out-of-bounds coords to 0 (= pack default).
+ */
+const WORLD_VARIANT_HEADER = `
+uniform sampler2D u_sceneShaderVariants;
+int worldVariantAtCell(ivec2 cellCoord) {
+  if (cellCoord.x < 0 || cellCoord.y < 0
+      || cellCoord.x >= int(u_sceneSize.x) || cellCoord.y >= int(u_sceneSize.y)) {
+    return 0;
+  }
+  return int(texelFetch(u_sceneShaderVariants, cellCoord, 0).r + 0.5);
+}
+int worldVariantAtWorld(vec2 worldPos) {
+  return worldVariantAtCell(ivec2(floor(worldPos)));
+}
+`;
+
+/**
+ * Assemble the world-frag GLSL source with per-cell variants
+ * dispatched at fragment time. Mirrors `assembleSpriteSource` but
+ * the variant source is a sampler not an attribute.
+ *
+ *   1. Resolve variant-0 source: pack-default world-frag with M3
+ *      scene-level hooks layered on top (engine identity → pack hooks
+ *      → scene hooks per MATERIALS.md §3.1).
+ *   2. Inject the `u_sceneShaderVariants` sampler + variant-lookup
+ *      helpers into the assembled header.
+ *   3. For each cell-aware hook overridden by ANY variant:
+ *      a. Rename the variant-0 body to `hook_X__v0`.
+ *      b. Emit each variant's override renamed to `hook_X__vN`.
+ *      c. Emit a top-level `hook_X(...)` dispatcher that switches on
+ *         the variant id at the fragment's cell coord.
+ *   4. Scene-only hooks overridden by variants are warned + dropped
+ *      (per MATERIALS.md §8 — they belong on the scene tier, not the
+ *      material tier).
+ *
+ * Mode-1 (pack ships `shaders.worldFrag`) is incompatible with
+ * per-cell variants — the pack's `main()` has no hook call sites to
+ * dispatch into. The variants are silently dropped (the cell texture
+ * still uploads, but no dispatcher exists to read it).
+ */
+export async function assembleWorldSource(
+  pack: AssetPack | undefined,
+  engineBody: string,
+  variants: WorldShaderVariantSet,
+  /** Optional scene-level world hooks (M3). Layers on top of pack. */
+  sceneWorldOverrides?: ReadonlyMap<string, string>,
+): Promise<string> {
+  const packShaders = pack?.manifest.shaders;
+  if (packShaders?.worldFrag) {
+    if (!variants.isEmpty()) {
+      console.warn(
+        `[two_5_d] pack ships shaders.worldFrag (Mode 1) — per-cell preset.shader.worldHooks overrides are dropped for this pack. See MATERIALS.md §3.3.`,
+      );
+    }
+    return assembleShaderSource("worldFrag", pack, engineBody, sceneWorldOverrides);
+  }
+
+  // Variant-0 source — pack hooks merged with scene hooks.
+  const variantZeroSource = pack
+    ? await assembleShaderSource("worldFrag", pack, engineBody, sceneWorldOverrides)
+    : sceneWorldOverrides && sceneWorldOverrides.size > 0
+      ? substitutePreludeOverrides("worldFrag", engineBody, sceneWorldOverrides, "scene")
+      : buildFragmentSource("worldFrag", engineBody);
+
+  if (variants.isEmpty()) return variantZeroSource;
+
+  // Filter to cell-aware hooks. Scene-only hooks declared in variants
+  // get a warning + are dropped — they don't make sense per-cell.
+  const overriddenHooks = new Set<string>();
+  for (const v of variants.variants) {
+    for (const name of v.worldHookBodies.keys()) {
+      if (!WORLD_CELL_AWARE_HOOKS.has(name)) {
+        console.warn(
+          `[two_5_d] preset shader.worldHooks declares ${name}, which is a scene-only hook (not cell-aware). Move it to scene.shaders.worldHooks. Ignored for variant ${v.id}.`,
+        );
+        v.worldHookBodies.delete(name);
+        continue;
+      }
+      overriddenHooks.add(name);
+    }
+  }
+
+  if (overriddenHooks.size === 0) return variantZeroSource;
+
+  // Inject the variant-lookup helpers BEFORE the hook prelude so the
+  // dispatchers (which replace identity-default hooks inside the
+  // prelude) can call `u_sceneShaderVariants` / `worldVariantAt*` —
+  // those need to be declared first in GLSL. Anchor on the prelude's
+  // leading comment marker.
+  const preludeMarker = "/* --- Hook prelude — worldFrag";
+  let out = variantZeroSource.replace(preludeMarker, `${WORLD_VARIANT_HEADER}\n${preludeMarker}`);
+
+  // For each overridden hook: rename variant 0 to __v0, append each
+  // variant's __vN, append a dispatcher that reads the cell variant
+  // and routes to the right __vN.
+  for (const hookName of overriddenHooks) {
+    const range = findHookRange(out, hookName);
+    if (!range) {
+      console.warn(
+        `[two_5_d] world variant assembly: could not locate ${hookName} in the assembled source. Skipping.`,
+      );
+      continue;
+    }
+    const originalSrc = out.slice(range.start, range.end);
+    const sig = parseHookSignature(originalSrc);
+    if (!sig) {
+      console.warn(
+        `[two_5_d] world variant assembly: could not parse signature for ${hookName}. Skipping.`,
+      );
+      continue;
+    }
+    const v0Renamed = renameHookDefinition(originalSrc, hookName, 0);
+
+    const cellArgName = WORLD_CELL_AWARE_HOOKS.get(hookName)!;
+    // Look up which parameter index carries the cell arg (must exist
+    // — the hook's in the cell-aware table). The dispatcher reads
+    // that arg, computes the variant id, and routes.
+    const cellArgIdx = sig.paramNames.indexOf(cellArgName);
+    if (cellArgIdx < 0) {
+      console.warn(
+        `[two_5_d] world variant assembly: ${hookName} signature missing expected '${cellArgName}' parameter. Skipping.`,
+      );
+      continue;
+    }
+
+    const variantBlocks: string[] = [];
+    const switchCases: string[] = [];
+    for (const v of variants.variants) {
+      const override = v.worldHookBodies.get(hookName);
+      if (!override) continue;
+      const renamed = renameHookDefinition(override, hookName, v.id);
+      variantBlocks.push(renamed);
+      const callArgs = sig.paramNames.join(", ");
+      switchCases.push(`    case ${v.id}: return ${hookName}__v${v.id}(${callArgs});`);
+    }
+
+    // Pick the right variant-lookup helper based on the cell arg.
+    // `cellCoord` may be ivec2 OR vec2 in the prelude — match
+    // accordingly. The param's type is whatever the prelude declared
+    // (we don't reparse it here; the helper signatures cover both).
+    const cellArgRef = sig.paramNames[cellArgIdx]!;
+    // ivec2-cellCoord hooks (`hook_isOccluder`, `hook_modifySurfaceAo`)
+    // pass an `ivec2` directly. Everything else (`vec2 worldPos`,
+    // `vec2 cellCoord`, `vec2 capWorld`) is a `vec2` we floor to ivec2.
+    const isIvec2 = hookName === "hook_isOccluder" || hookName === "hook_modifySurfaceAo";
+    const lookup = isIvec2
+      ? `worldVariantAtCell(${cellArgRef})`
+      : cellArgName === "cellCoord"
+        ? `worldVariantAtCell(ivec2(${cellArgRef}))`
+        : `worldVariantAtWorld(${cellArgRef})`;
+
+    const callArgs = sig.paramNames.join(", ");
+    const dispatcher =
+      `${sig.retType} ${hookName}(${parseHookSignatureToString(originalSrc)}) {\n` +
+      `  int variant = ${lookup};\n` +
+      `  switch (variant) {\n` +
+      `${switchCases.join("\n")}\n` +
+      `  }\n` +
+      `  return ${hookName}__v0(${callArgs});\n` +
+      `}\n`;
+
+    const replacement =
+      `${v0Renamed}\n` +
+      variantBlocks.join("\n") +
+      `\n` +
+      dispatcher;
+
+    out = out.slice(0, range.start) + replacement + out.slice(range.end);
+  }
+
+  return out;
 }

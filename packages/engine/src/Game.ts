@@ -3,7 +3,14 @@ import Engine from "Engine";
 import { Scene } from "Scene";
 import { World } from "ECS";
 import { KeyboardController, MouseController } from "Controllers";
-import { TwoDRenderer, WebGLRenderer, type SceneRenderer } from "Renderers";
+import {
+  TwoDRenderer,
+  WebGLRenderer,
+  type SceneRenderer,
+  collectSpriteVariants,
+  collectWorldVariants,
+  collectSceneShaderLayer,
+} from "Renderers";
 import {
   LightCollectionSystem,
   SpriteRenderSystem,
@@ -227,6 +234,76 @@ export class Game {
     // entities and attach extra components without "if entity exists
     // yet" guards.
     this.api.runWorldReadyCallbacks();
+  }
+
+  /**
+   * Material-variant collection + program recompiles (M1 + M2 + M3 of
+   * MATERIALS.md). Three things happen here:
+   *
+   *  1. **Per-entity sprite variants** (M1) — every entity carrying a
+   *     `Shader` component contributes a unique combination of hook-
+   *     file paths. Each unique value gets a non-zero variant id; the
+   *     sprite-frag dispatcher routes per-fragment by per-vertex
+   *     `a_variant`.
+   *  2. **Per-cell world variants** (M2) — every tile preset whose
+   *     `shader.worldHooks` is set gets a non-zero variant id. The
+   *     world-frag dispatcher routes per-fragment by sampling
+   *     `u_sceneShaderVariants` at the cell coord.
+   *  3. **Scene-level overrides** (M3) — if the active scene's JSON
+   *     declares a `shaders` field, those hooks merge on top of pack-
+   *     level overrides to form variant 0. M1 + M2 variants build on
+   *     top of THAT, inheriting scene-level for hooks they don't
+   *     explicitly redefine.
+   *
+   * Fast paths:
+   *
+   *  - No `Shader` entities + no `preset.shader` + no `scene.shaders`
+   *    → the renderer's `rebuildSpriteProgram` / `rebuildWorldProgram`
+   *    no-op and the constructor's pack-default programs stay bound
+   *    (byte-identical to pre-MATERIALS rendering).
+   *  - Canvas2D backend → both rebuilds skip (the backend ignores
+   *    per-fragment shaders entirely).
+   *
+   * Live-edit of `Shader` components / preset shaders after this
+   * point falls back to variant 0 at render time. Reload the scene
+   * to compile new variants — see MATERIALS.md §7.
+   */
+  async collectShaderVariants(): Promise<void> {
+    // Material smoke-test gate. M1 + M2 + M3 share the
+    // `materialsSmokeTest` manifest flag so the default pack ships
+    // with the wet-floor preset + scene-fog hooks present but
+    // visually inert. Flipping the flag to `true` enables every
+    // attached `Shader` component, every preset `shader.*` field,
+    // and every scene-level `shaders` block. With it off, the
+    // renderer compiles its pack-default programs and rendering is
+    // byte-identical to pre-MATERIALS today.
+    const flag = (this.pack.manifest as unknown as { materialsSmokeTest?: boolean })
+      .materialsSmokeTest === true;
+
+    // Sprite + world rebuilds both come from the same scene-level
+    // shader layer so the merge order stays consistent (engine →
+    // pack → scene → material).
+    const sceneLayer = flag
+      ? await collectSceneShaderLayer(this.pack, this.scene.shaders)
+      : undefined;
+
+    if (this.renderer.rebuildSpriteProgram !== undefined) {
+      const spriteVariants = flag
+        ? await collectSpriteVariants(this.world, this.pack)
+        : null;
+      if (spriteVariants !== null) {
+        await this.renderer.rebuildSpriteProgram(
+          spriteVariants,
+          sceneLayer?.spriteHookBodies,
+        );
+      }
+    }
+
+    if (this.renderer.rebuildWorldProgram !== undefined && flag) {
+      const resolver = await this.pack.presets();
+      const worldVariants = await collectWorldVariants(resolver, this.pack);
+      await this.renderer.rebuildWorldProgram(worldVariants, sceneLayer?.worldHookBodies);
+    }
   }
 
   /** Begin the frame loop. */

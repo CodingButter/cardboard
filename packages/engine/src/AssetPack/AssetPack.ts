@@ -33,13 +33,20 @@ export abstract class AssetPack {
         (path) => this.textBody(path),
       ).then((resolver) => {
         // Surface preset-load diagnostics once, immediately after the
-        // resolver builds. Hard errors abort the pack-chain load
-        // upstream; soft errors only log.
+        // resolver builds. The pack-builder is the hard gate (T3 of
+        // TILE_PRESETS.md §13): if errors got through to runtime the
+        // pack was loaded without going through `bun run build-packs`,
+        // so we still load the pack but loudly console.error each
+        // problem so developers see them while iterating.
         if (resolver.errors.length > 0) {
           for (const e of resolver.errors) {
-            const where = e.presetId ? `${e.file}:${e.presetId}` : e.file;
-            const hint = e.hint ? `  — ${e.hint}` : "";
-            console.warn(`[preset] ${e.packId} ${where}: ${e.message}${hint}`);
+            const keyPath = e.keyPath && e.keyPath.length > 0 ? e.keyPath.join(".") : "(file)";
+            const where = e.presetId
+              ? `${e.file}:${e.presetId}:${keyPath}`
+              : `${e.file}:${keyPath}`;
+            const suggestion = e.suggestion ?? e.hint;
+            const hint = suggestion ? `  (did you mean "${suggestion}"?)` : "";
+            console.error(`[preset] ${e.packId} ${where}: ${e.message}${hint}`);
           }
         }
         return resolver;

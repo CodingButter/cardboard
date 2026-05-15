@@ -52,6 +52,14 @@ import {
   type WallSegmentInput,
   type StructuredFloorSpec,
 } from "@two_5_d/engine";
+import {
+  collectShaderReferences,
+  formatValidationError,
+  resolveShaderBackend,
+  validateShaderFile,
+  type ShaderValidationError,
+  type ShaderRefToValidate,
+} from "@two_5_d/engine";
 
 interface ManifestLightingBlock {
   lightmapResolution?: number;
@@ -338,6 +346,141 @@ function expandSceneForBake(scene: SceneJSON, resolver: PresetResolver): SceneJS
   return expanded;
 }
 
+/* --- M5: shader validation ----------------------------------------------- */
+
+/**
+ * Walk every `.glsl` reference in the pack and validate it. Returns
+ * the flat error list — empty when the pack passes. Each error is
+ * pre-rendered by `formatValidationError` at the call site so the
+ * build's logging stays in `build-packs.ts`.
+ *
+ * Reference sources (in order, deduplicated by path):
+ *   - `manifest.shaders.{worldFrag, worldHooks, spriteFrag,
+ *      spriteHooks, skyFrag, skyHooks}` (Mode 1 / Mode 3).
+ *   - Per-preset `preset.shader` (M2 schema add — string or
+ *     `{worldHooks, spriteHooks, skyHooks}` block). The validator
+ *     is defensive: it reads `shader` off `ResolvedPresetData` even
+ *     if the engine hasn't shipped the schema field yet.
+ *   - Per-scene `scene.shaders.{worldHooks, spriteHooks, skyHooks}`
+ *     (M3 schema add). Same defensive read.
+ *
+ * Resolves the headless-GL backend lazily — when the optional `gl`
+ * native binding isn't installed (e.g. ARM Linux without X11 dev
+ * headers, this dev box), Path B (syntactic-only) is used and a
+ * single advisory line is printed.
+ */
+async function validatePackShaders(
+  packRoot: string,
+  manifest: PackManifest,
+  resolver: PresetResolver | null,
+  sceneJsons: Map<string, SceneJSON>,
+): Promise<ShaderValidationError[]> {
+  // Build the iterable of preset shader refs from the resolver. The
+  // resolver's `ResolvedPresetData` doesn't expose `shader` today
+  // (M2 schema add is in parallel) — we use a defensive `unknown`
+  // cast so the validator is forward-compatible without forcing a
+  // dep on M2's not-yet-merged types.
+  const presetRefs: { id: string; file: string; shader?: unknown }[] = [];
+  if (resolver) {
+    for (const p of resolver) {
+      // sourcePath is the file the preset was authored in; surface it
+      // verbatim in error breadcrumbs.
+      const data = p.data as unknown as { shader?: unknown };
+      if (data.shader !== undefined) {
+        presetRefs.push({ id: p.id, file: p.sourcePath, shader: data.shader });
+      }
+    }
+  }
+
+  // Scenes' `shaders` block: same defensive read — M3 hasn't added
+  // it to `SceneJSON` yet, but the JSON-on-disk may carry it for
+  // packs that pre-adopt the schema.
+  const sceneRefs: { path: string; shaders?: Record<string, string> }[] = [];
+  for (const [path, scene] of sceneJsons) {
+    const sh = (scene as unknown as { shaders?: Record<string, unknown> }).shaders;
+    if (sh && typeof sh === "object") {
+      const filtered: Record<string, string> = {};
+      for (const [k, v] of Object.entries(sh)) {
+        if (typeof v === "string") filtered[k] = v;
+      }
+      if (Object.keys(filtered).length > 0) {
+        sceneRefs.push({ path, shaders: filtered });
+      }
+    }
+  }
+
+  // Cast `presetRefs[].shader` to the shape `collectShaderReferences`
+  // expects (`string | { worldHooks?, spriteHooks?, skyHooks? }`).
+  // Anything else (a typo'd object, a number) is silently dropped —
+  // M2's own preset-schema validator catches the type error.
+  const presetIter = presetRefs.map((p) => ({
+    id: p.id,
+    file: p.file,
+    shader:
+      typeof p.shader === "string" || (typeof p.shader === "object" && p.shader !== null)
+        ? (p.shader as string | Record<"worldHooks" | "spriteHooks" | "skyHooks", string>)
+        : undefined,
+  }));
+
+  const refs: ShaderRefToValidate[] = collectShaderReferences(
+    manifest,
+    presetIter,
+    sceneRefs,
+  );
+
+  if (refs.length === 0) return [];
+
+  const { backend, status } = await resolveShaderBackend();
+  if (!backend) {
+    console.log(
+      `    shader-validate: using syntactic-only fallback ` +
+        `(optional 'gl' package not available${status.fallbackReason ? `: ${status.fallbackReason}` : ""}).`,
+    );
+  } else {
+    console.log(`    shader-validate: headless-GL backend ready`);
+  }
+
+  // Group refs by path so a file referenced from N places is read +
+  // validated once. Each origin is reported separately so the
+  // pack author sees every breadcrumb that pointed at the bad file.
+  const byPath = new Map<string, ShaderRefToValidate[]>();
+  for (const r of refs) {
+    const arr = byPath.get(r.path) ?? [];
+    arr.push(r);
+    byPath.set(r.path, arr);
+  }
+
+  const errors: ShaderValidationError[] = [];
+  const readFile = (relPath: string) => Bun.file(join(packRoot, relPath)).text();
+  for (const [path, origins] of byPath) {
+    // First origin drives the actual validation pass; remaining
+    // origins clone the errors with the alternate breadcrumb so the
+    // pack author sees every path that depends on the bad file.
+    const primary = origins[0]!;
+    const result = await validateShaderFile(
+      {
+        shaderPath: primary.path,
+        role: primary.role,
+        manifestKey: primary.manifestKey,
+        source: primary.source,
+      },
+      readFile,
+      { backend },
+    );
+    for (const e of result.errors) errors.push(e);
+    for (const extra of origins.slice(1)) {
+      for (const e of result.errors) {
+        errors.push({ ...e, origin: { ...e.origin, source: extra.source } });
+      }
+    }
+    if (path !== primary.path) {
+      // unreachable — grouped by path — defensive.
+    }
+  }
+
+  return errors;
+}
+
 /* --- Per-pack build ------------------------------------------------------ */
 
 async function buildPack(
@@ -375,10 +518,27 @@ async function buildPack(
         Bun.file(join(packRoot, p)).text(),
       )
     : null;
+  // ── T3: preset-validation gate ───────────────────────────────────
+  // After resolver build, fail the pack-build if ANY preset error was
+  // collected (schema typos, unknown fields, bad enum values, cycles,
+  // missing texture, …). See `docs/plans/TILE_PRESETS.md` §13. Pack-
+  // builder is the hard gate; the engine runtime keeps loading on
+  // error and prints them via console.error for dev visibility.
   if (resolver && resolver.errors.length > 0) {
+    console.error(`\nPreset validation failed for pack "${dirName}":`);
     for (const e of resolver.errors) {
-      console.warn(`    preset ${e.file}${e.presetId ? ":" + e.presetId : ""}: ${e.message}`);
+      const keyPath = e.keyPath.length > 0 ? e.keyPath.join(".") : "(file)";
+      const where = e.presetId
+        ? `${e.file}:${e.presetId}:${keyPath}`
+        : `${e.file}:${keyPath}`;
+      console.error(`  ❌ ${where}: ${e.message}`);
+      if (e.suggestion) {
+        console.error(`     suggestion: ${e.suggestion}`);
+      }
     }
+    throw new Error(
+      `pack "${dirName}" has ${resolver.errors.length} preset error(s); fix before build`,
+    );
   }
 
   // ── Collect scenes for the T2 build-merge step ────────────────────
@@ -396,6 +556,33 @@ async function buildPack(
       } catch (err) {
         throw new Error(`Failed to parse ${inZip}: ${(err as Error).message}`);
       }
+    }
+  }
+
+  // ── M5: GLSL shader validation gate ──────────────────────────────
+  // Walk every `.glsl` reference (manifest.shaders, preset.shader,
+  // scene.shaders) and validate before zipping. Fails the pack-build
+  // on any error. The validator uses headless WebGL2 (`gl` npm
+  // package) when available, falling back to syntactic-only checks
+  // when the native binding isn't installed. See
+  // `packages/engine/src/Renderers/ShaderValidator.ts`.
+  if (manifest) {
+    const shaderErrors = await validatePackShaders(
+      packRoot,
+      manifest,
+      resolver,
+      sceneJsons,
+    );
+    if (shaderErrors.length > 0) {
+      console.error(`\nShader validation failed for pack "${dirName}":`);
+      for (const e of shaderErrors) {
+        for (const line of formatValidationError(e).split("\n")) {
+          console.error(`  ${line}`);
+        }
+      }
+      throw new Error(
+        `pack "${dirName}" has ${shaderErrors.length} shader error(s); fix before build`,
+      );
     }
   }
 

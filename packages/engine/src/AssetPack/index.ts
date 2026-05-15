@@ -26,6 +26,7 @@ export {
   type PresetError,
   type PresetEmissive,
   type PresetPartialWall,
+  type PresetShaderData,
   type PresetWallFace,
   type ResolvedPresetData,
 } from "./PresetResolver";

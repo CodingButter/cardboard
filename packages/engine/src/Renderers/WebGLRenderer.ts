@@ -8,7 +8,8 @@ import { Texture } from "./Texture";
 import type { LightInstance, SceneRenderer, SpriteDrawRequest } from "./SceneRenderer";
 import type { AssetPack, SheetEntry, ShaderRole } from "AssetPack";
 import { getShaderSource, SHADER_ROLES } from "./ShaderRoleRegistry";
-import { buildFragmentSource } from "./ShaderInjection";
+import { assembleSpriteSource, assembleWorldSource, buildFragmentSource } from "./ShaderInjection";
+import type { ShaderVariantSet, WorldShaderVariantSet } from "./ShaderVariants";
 
 export interface WebGLRendererProps {
   canvas: HTMLCanvasElement;
@@ -83,18 +84,68 @@ in vec2 a_uv;
 in float a_layer;
 in float a_camY;
 in vec2 a_worldPos;
+in float a_variant;
 out vec2 v_uv;
 flat out float v_layer;
 flat out float v_camY;
 flat out vec2 v_worldPos;
+flat out int v_variant;
 void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
   v_uv = a_uv;
   v_layer = a_layer;
   v_camY = a_camY;
   v_worldPos = a_worldPos;
+  // Per-entity shader-variant id (M1 of MATERIALS.md). 0 = pack
+  // default; non-zero routes through the fragment dispatcher when
+  // any entity in the scene carries a Shader component. The VS
+  // unconditionally forwards this — the variant attribute is
+  // streamed at 0 when no variants are registered, which leaves
+  // the frag's behaviour byte-identical to pre-M1.
+  v_variant = int(a_variant + 0.5);
 }
 `;
+
+/**
+ * Bind every sprite-VBO attribute against the supplied (presumably
+ * just-linked) sprite program. Lives at module scope so the
+ * constructor and `rebuildSpriteProgram` both reach it; the VAO is
+ * already bound + the VBO is the active ARRAY_BUFFER when this runs.
+ *
+ * Per-vertex layout: 9 floats × 4 bytes = 36 bytes/vertex.
+ *
+ *   [posX, posY, u, v, layer, camY, worldX, worldY, variantId]
+ *
+ * Variant id is M1 of MATERIALS.md — the per-entity shader-variant
+ * the fragment dispatcher switches on. Defaults to 0 when an entity
+ * has no `Shader` component.
+ */
+function bindSpriteAttribs(gl: WebGL2RenderingContext, program: WebGLProgram): void {
+  const stride = 9 * 4;
+  const posLoc = gl.getAttribLocation(program, "a_position");
+  const uvLoc = gl.getAttribLocation(program, "a_uv");
+  const layerLoc = gl.getAttribLocation(program, "a_layer");
+  const camYLoc = gl.getAttribLocation(program, "a_camY");
+  const worldLoc = gl.getAttribLocation(program, "a_worldPos");
+  const variantLoc = gl.getAttribLocation(program, "a_variant");
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
+  gl.enableVertexAttribArray(uvLoc);
+  gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 2 * 4);
+  gl.enableVertexAttribArray(layerLoc);
+  gl.vertexAttribPointer(layerLoc, 1, gl.FLOAT, false, stride, 4 * 4);
+  gl.enableVertexAttribArray(camYLoc);
+  gl.vertexAttribPointer(camYLoc, 1, gl.FLOAT, false, stride, 5 * 4);
+  gl.enableVertexAttribArray(worldLoc);
+  gl.vertexAttribPointer(worldLoc, 2, gl.FLOAT, false, stride, 6 * 4);
+  // The variant attribute is allowed to be optimized out — when no
+  // variant exists the fragment shader doesn't reference `v_variant`
+  // and GLSL strips it. Guard via the -1 sentinel from getAttribLocation.
+  if (variantLoc >= 0) {
+    gl.enableVertexAttribArray(variantLoc);
+    gl.vertexAttribPointer(variantLoc, 1, gl.FLOAT, false, stride, 8 * 4);
+  }
+}
 
 /**
  * Engine default body for `spriteFrag`. S2 promoted helpers to the
@@ -609,8 +660,13 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly skyTopLoc: WebGLUniformLocation;
   private readonly skyBottomLoc: WebGLUniformLocation;
 
-  private readonly worldProgram: WebGLProgram;
-  private readonly u: Record<string, WebGLUniformLocation | null>;
+  // ── World pass program ────────────────────────────────────────────
+  // Mutable because M2/M3 of MATERIALS.md may recompile it once per
+  // scene load when presets carry `shader.worldHooks` or the scene
+  // ships its own `shaders` field. `u` rebinds against the new
+  // program. Outside scene-load this is effectively const.
+  private worldProgram: WebGLProgram;
+  private u: Record<string, WebGLUniformLocation | null>;
 
   private readonly quadVAO: WebGLVertexArrayObject;
 
@@ -636,6 +692,21 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly columnsEmissiveTex: WebGLTexture;
   private readonly sceneTilesTex: WebGLTexture;
   private readonly sceneReflTex: WebGLTexture;
+  /**
+   * Per-cell world-shader variant id (M2 of MATERIALS.md §8.2).
+   * RGBA32F SW×SH where channel R carries the variant id for the cell
+   * at `(x, y)`. Variant 0 = pack/scene default; non-zero ids route
+   * the world-frag dispatcher to that variant's hook bodies. Filled
+   * once per scene-load (or per `rebuildWorldProgram` call) from the
+   * preset resolver; static after that.
+   *
+   * The texture is always bound (sampler-completeness) — seeded with
+   * a 1×1 zero pixel at construction. The world frag only reads it
+   * when at least one variant is registered AND the program has a
+   * dispatcher; otherwise the GLSL compiler strips the uniform and
+   * the upload is a no-op.
+   */
+  private readonly sceneShaderVariantsTex: WebGLTexture;
   /**
    * Per-cell floor / ceiling emissive (RGBA32F each). RGB is the
    * pre-multiplied `color × intensity`; alpha is unused. Static
@@ -682,7 +753,11 @@ export class WebGLRenderer implements SceneRenderer {
   private uploadedSceneH: number = 1;
 
   // ── Sprite pass state ──────────────────────────────────────────────────
-  private readonly spriteProgram: WebGLProgram;
+  // `spriteProgram` is mutable because M1 of MATERIALS.md may recompile
+  // it once per scene load when entities carry `Shader` components.
+  // `spriteUniforms` rebinds against the new program. Outside scene
+  // load it's effectively const.
+  private spriteProgram: WebGLProgram;
   private readonly spriteVAO: WebGLVertexArrayObject;
   private readonly spriteVBO: WebGLBuffer;
   private readonly spritesTex: WebGLTexture;
@@ -691,8 +766,42 @@ export class WebGLRenderer implements SceneRenderer {
   /** Set of sprite ids we've warned about (unknown / unloaded), one log each. */
   private readonly warnedSpriteIds: Set<string> = new Set();
   /** CPU-side scratch VBO; one quad = 6 verts × 8 floats (pos2, uv2, layer, camY, worldPos2). */
-  private readonly spriteVertexData: Float32Array = new Float32Array(MAX_SPRITES_PER_FRAME * 6 * 8);
-  private readonly spriteUniforms: Record<string, WebGLUniformLocation | null>;
+  /**
+   * Per-vertex layout (9 floats — see `drawSprites` for the matching
+   * fill loop): `[posX, posY, u, v, layer, camY, worldX, worldY,
+   * variantId]`. M1 of MATERIALS.md grew this by one float — the
+   * `a_variant` attribute carrying the entity's shader-variant id.
+   * Streams 0 when no entity has a `Shader` component (= today's
+   * behaviour).
+   */
+  private readonly spriteVertexData: Float32Array = new Float32Array(MAX_SPRITES_PER_FRAME * 6 * 9);
+  // Mutable — re-resolved against `this.spriteProgram` whenever the
+  // sprite program is rebuilt (M1 of MATERIALS.md).
+  private spriteUniforms: Record<string, WebGLUniformLocation | null>;
+  /**
+   * Tracks the active sprite-variant set so per-vertex
+   * `a_variant` writes can map a `Shader` component → variant id.
+   * Null while no scene-load has handed us a set; cleared when a
+   * scene loads with no `Shader` components anywhere (= byte-
+   * identical to pre-M1 behaviour). Stored as the readonly handle
+   * so `drawSprites` doesn't need to import the class.
+   */
+  private spriteVariants: ShaderVariantSet | null = null;
+  /**
+   * Tracks the active world-variant set so `ensureSceneUploaded`
+   * can upload the per-cell variant id texture. Null = no preset
+   * carries a world shader and the per-cell texture stays at its
+   * 1×1 zero seed.
+   */
+  private worldVariants: WorldShaderVariantSet | null = null;
+  /**
+   * Identity of the last preset-resolver instance the variant texture
+   * was uploaded against. Defends against same-dimension scene swaps
+   * with a fresh resolver (e.g. live editor pack reload) by
+   * re-uploading when the resolver reference changes even if the
+   * scene size key matches.
+   */
+  private uploadedVariantTextureKey: string = "";
   /** Diagnostic: log sprite-pass stats once per session, then never again. */
   private spriteDiagLogged: boolean = false;
 
@@ -708,6 +817,14 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly dynamicLightCol: Float32Array = new Float32Array(MAX_DYNAMIC_LIGHTS_GL * 4);
   /** How many of the slots above are populated this frame. `0` means "no dynamic lights". */
   private dynamicLightCount: number = 0;
+
+  /**
+   * Kept on the renderer so `rebuildSpriteProgram` can re-resolve
+   * pack-shipped shader hooks without the caller re-passing them.
+   * Stored from the constructor.
+   */
+  private readonly pack: AssetPack;
+  private readonly shaderSources?: Partial<Record<ShaderRole, string>>;
 
   /**
    * Resolve every role's fragment source for a given pack, applying
@@ -746,6 +863,8 @@ export class WebGLRenderer implements SceneRenderer {
     canvas.width = width;
     canvas.height = height;
     this.canvas = canvas;
+    this.pack = pack;
+    this.shaderSources = shaderSources;
 
     const gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: false });
     if (!gl) throw new Error("WebGL2 not supported in this browser");
@@ -800,55 +919,7 @@ export class WebGLRenderer implements SceneRenderer {
     // Engine-default shaders still hard-throw — a missing uniform there
     // means the shader source drifted from this lookup table.
     const isPackWorldFrag = shaderSources?.worldFrag !== undefined;
-    const ul = (name: string): WebGLUniformLocation | null => {
-      const loc = gl.getUniformLocation(this.worldProgram, name);
-      if (loc === null) {
-        if (isPackWorldFrag) {
-          console.warn(`[cardboard] pack worldFrag does not reference ${name}; uniform set calls will no-op`);
-          return null;
-        }
-        throw new Error(`Uniform ${name} not found (optimized out?)`);
-      }
-      return loc;
-    };
-    this.u = {
-      tiles: ul("u_tiles"),
-      columns: ul("u_columns"),
-      columnsSeg: ul("u_columnsSeg"),
-      columnsCap: ul("u_columnsCap"),
-      columnsCell: ul("u_columnsCell"),
-      columnsEmissive: ul("u_columnsEmissive"),
-      sceneTiles: ul("u_sceneTiles"),
-      sceneRefl: ul("u_sceneRefl"),
-      sceneEmissiveFloor: ul("u_sceneEmissiveFloor"),
-      sceneEmissiveCeil: ul("u_sceneEmissiveCeil"),
-      lightmapFloor: ul("u_lightmapFloor"),
-      lightmapCeiling: ul("u_lightmapCeiling"),
-      lightmapResolution: ul("u_lightmapResolution"),
-      resolution: ul("u_resolution"),
-      sceneSize: ul("u_sceneSize"),
-      fogInv: ul("u_fogInv"),
-      position: ul("u_position"),
-      forward: ul("u_forward"),
-      right: ul("u_right"),
-      planeScale: ul("u_planeScale"),
-      horizonOffset: ul("u_horizonOffset"),
-      cameraZ: ul("u_cameraZ"),
-      wallAoBotDarken: ul("u_wallAoBotDarken"),
-      wallAoBotBand: ul("u_wallAoBotBand"),
-      wallAoTopDarken: ul("u_wallAoTopDarken"),
-      wallAoTopBand: ul("u_wallAoTopBand"),
-      floorAoBand: ul("u_floorAoBand"),
-      floorAoDarken: ul("u_floorAoDarken"),
-      reflTileScale: ul("u_reflTileScale"),
-      wallReflStrength: ul("u_wallReflStrength"),
-      wallReflBand: ul("u_wallReflBand"),
-      fallbackFloor: ul("u_fallbackFloor"),
-      fallbackCeiling: ul("u_fallbackCeiling"),
-      lightCount: ul("u_lightCount"),
-      lightPos: ul("u_lightPos[0]"),
-      lightCol: ul("u_lightCol[0]"),
-    };
+    this.u = this.resolveWorldUniforms(isPackWorldFrag);
 
     // ── Fullscreen quad VAO ────────────────────────────────────────────
     const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
@@ -919,37 +990,16 @@ export class WebGLRenderer implements SceneRenderer {
 
     // ── Sprite program + VAO + atlas ───────────────────────────────────
     this.spriteProgram = buildProgram(gl, VERT_SPRITE_SRC, fragSprite);
-    const isPackSpriteFrag = shaderSources?.spriteFrag !== undefined;
-    const sul = (name: string): WebGLUniformLocation | null => {
-      const loc = gl.getUniformLocation(this.spriteProgram, name);
-      if (loc === null) {
-        if (isPackSpriteFrag) {
-          console.warn(`[cardboard] pack spriteFrag does not reference ${name}; uniform set calls will no-op`);
-          return null;
-        }
-        throw new Error(`Sprite uniform ${name} not found`);
-      }
-      return loc;
-    };
-    this.spriteUniforms = {
-      sprites: sul("u_sprites"),
-      columns: sul("u_columns"),
-      columnsSeg: sul("u_columnsSeg"),
-      lightmapFloor: sul("u_lightmapFloor"),
-      lightmapResolution: sul("u_lightmapResolution"),
-      sceneTiles: sul("u_sceneTiles"),
-      resolution: sul("u_resolution"),
-      sceneSize: sul("u_sceneSize"),
-      horizonOffset: sul("u_horizonOffset"),
-      cameraZ: sul("u_cameraZ"),
-      planeScale: sul("u_planeScale"),
-      fogInv: sul("u_fogInv"),
-      lightCount: sul("u_lightCount"),
-      lightPos: sul("u_lightPos[0]"),
-      lightCol: sul("u_lightCol[0]"),
-    };
+    this.spriteUniforms = this.resolveSpriteUniforms(
+      shaderSources?.spriteFrag !== undefined,
+    );
 
-    // Sprite VAO — per-vertex layout is [posX, posY, u, v, layer, camY, worldX, worldY].
+    // Sprite VAO — per-vertex layout is
+    //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId]
+    // (9 floats × 4 bytes = 36-byte stride). The trailing variantId
+    // is M1 of MATERIALS.md — per-entity shader-variant attribute.
+    // The VAO layout always carries it; `drawSprites` writes 0 when
+    // no Shader component is present.
     const svao = gl.createVertexArray();
     if (!svao) throw new Error("Failed to create sprite VAO");
     gl.bindVertexArray(svao);
@@ -957,24 +1007,7 @@ export class WebGLRenderer implements SceneRenderer {
     if (!svbo) throw new Error("Failed to create sprite VBO");
     gl.bindBuffer(gl.ARRAY_BUFFER, svbo);
     gl.bufferData(gl.ARRAY_BUFFER, this.spriteVertexData.byteLength, gl.DYNAMIC_DRAW);
-    const stride = 8 * 4; // 8 floats × 4 bytes
-    // Bind attribute locations by index; the vertex shader uses
-    // `layout`-less `in`s so we set them via getAttribLocation.
-    const posLoc = gl.getAttribLocation(this.spriteProgram, "a_position");
-    const uvLoc = gl.getAttribLocation(this.spriteProgram, "a_uv");
-    const layerLoc = gl.getAttribLocation(this.spriteProgram, "a_layer");
-    const camYLoc = gl.getAttribLocation(this.spriteProgram, "a_camY");
-    const worldLoc = gl.getAttribLocation(this.spriteProgram, "a_worldPos");
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(uvLoc);
-    gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 2 * 4);
-    gl.enableVertexAttribArray(layerLoc);
-    gl.vertexAttribPointer(layerLoc, 1, gl.FLOAT, false, stride, 4 * 4);
-    gl.enableVertexAttribArray(camYLoc);
-    gl.vertexAttribPointer(camYLoc, 1, gl.FLOAT, false, stride, 5 * 4);
-    gl.enableVertexAttribArray(worldLoc);
-    gl.vertexAttribPointer(worldLoc, 2, gl.FLOAT, false, stride, 6 * 4);
+    bindSpriteAttribs(gl, this.spriteProgram);
     gl.bindVertexArray(null);
     this.spriteVAO = svao;
     this.spriteVBO = svbo;
@@ -1006,11 +1039,13 @@ export class WebGLRenderer implements SceneRenderer {
     this.sceneReflTex = gl.createTexture()!;
     this.sceneEmissiveFloorTex = gl.createTexture()!;
     this.sceneEmissiveCeilTex = gl.createTexture()!;
+    this.sceneShaderVariantsTex = gl.createTexture()!;
     for (const tex of [
       this.sceneTilesTex,
       this.sceneReflTex,
       this.sceneEmissiveFloorTex,
       this.sceneEmissiveCeilTex,
+      this.sceneShaderVariantsTex,
     ]) {
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -1018,10 +1053,16 @@ export class WebGLRenderer implements SceneRenderer {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
-    // Seed the emissive textures with a 1×1 zero pixel so they're
-    // sampler-complete from construction. `ensureSceneUploaded` will
-    // resize-and-fill them on first draw.
-    for (const tex of [this.sceneEmissiveFloorTex, this.sceneEmissiveCeilTex]) {
+    // Seed the emissive + variant textures with a 1×1 zero pixel so
+    // they're sampler-complete from construction. `ensureSceneUploaded`
+    // resizes-and-fills the emissive grids; `rebuildWorldProgram`
+    // resizes-and-fills the variant grid when at least one preset
+    // ships `shader.worldHooks`.
+    for (const tex of [
+      this.sceneEmissiveFloorTex,
+      this.sceneEmissiveCeilTex,
+      this.sceneShaderVariantsTex,
+    ]) {
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -1297,6 +1338,15 @@ export class WebGLRenderer implements SceneRenderer {
     gl.activeTexture(gl.TEXTURE10);
     gl.bindTexture(gl.TEXTURE_2D, this.columnsCellTex);
     gl.uniform1i(this.u.columnsCell!, 10);
+    // M2: per-cell variant id texture. Optional — `null` when no
+    // preset ships a `shader.worldHooks` (the GLSL compiler stripped
+    // the uniform). `gl.uniform1i` on `null` is a silent no-op.
+    const variantsLoc = this.u.sceneShaderVariants;
+    if (variantsLoc != null) {
+      gl.activeTexture(gl.TEXTURE12);
+      gl.bindTexture(gl.TEXTURE_2D, this.sceneShaderVariantsTex);
+      gl.uniform1i(variantsLoc, 12);
+    }
 
     gl.uniform2f(this.u.resolution!, width, height);
     gl.uniform2f(this.u.sceneSize!, scene.size.x, scene.size.y);
@@ -1370,6 +1420,8 @@ export class WebGLRenderer implements SceneRenderer {
       yOffset: number;
       worldX: number;
       worldY: number;
+      /** Per-entity shader-variant id, M1 of MATERIALS.md. 0 = pack default. */
+      variant: number;
     };
     const items: Item[] = [];
     for (const req of requests) {
@@ -1394,6 +1446,7 @@ export class WebGLRenderer implements SceneRenderer {
         yOffset: req.yOffset,
         worldX: req.x,
         worldY: req.y,
+        variant: req.shaderVariant ?? 0,
       });
     }
     if (items.length === 0) return;
@@ -1414,7 +1467,8 @@ export class WebGLRenderer implements SceneRenderer {
       }
     }
 
-    // Build vertex data — 6 verts per quad, 6 floats per vert.
+    // Build vertex data — 6 verts per quad, 9 floats per vert
+    // (trailing float is the variant id, M1 of MATERIALS.md).
     const data = this.spriteVertexData;
     const invW = 1 / width;
     const invH = 1 / height;
@@ -1442,14 +1496,15 @@ export class WebGLRenderer implements SceneRenderer {
       const Y = it.camY;
       const WX = it.worldX;
       const WY = it.worldY;
+      const V = it.variant;
       // Tri 1: TL, TR, BL
-      data[off++] = clipL; data[off++] = clipT; data[off++] = 0; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
-      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
-      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
+      data[off++] = clipL; data[off++] = clipT; data[off++] = 0; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
       // Tri 2: TR, BR, BL
-      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
-      data[off++] = clipR; data[off++] = clipB; data[off++] = 1; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
-      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY;
+      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipR; data[off++] = clipB; data[off++] = 1; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
     }
 
     // Upload only the bytes we filled.
@@ -1492,6 +1547,252 @@ export class WebGLRenderer implements SceneRenderer {
     gl.drawArrays(gl.TRIANGLES, 0, drawCount * 6);
     gl.bindVertexArray(null);
     gl.disable(gl.BLEND);
+  }
+
+  /**
+   * Look up the variant id the sprite-pass should write for a given
+   * entity's `Shader` component value. Returns 0 (= pack default)
+   * when no variant set is registered, when the value is undefined,
+   * or when the value doesn't match any collected variant.
+   *
+   * The CPU-side `SpriteRenderSystem` reads this to populate the
+   * per-vertex `a_variant` attribute. M1 of MATERIALS.md.
+   */
+  spriteVariantIdFor(data: { worldHooks?: string; spriteHooks?: string; skyHooks?: string } | undefined): number {
+    if (!this.spriteVariants || this.spriteVariants.isEmpty()) return 0;
+    return this.spriteVariants.variantIdForShaderData(data);
+  }
+
+  /**
+   * Swap the sprite-frag program for one that includes a per-variant
+   * dispatcher. M1 of MATERIALS.md — called by `Game` after
+   * `runPackScripts` + `spawnInitialEntities` so the new program sees
+   * every `Shader` component the scene needs.
+   *
+   * - `variants.isEmpty()` is the no-op fast path: the existing
+   *   pack-default program stays bound (byte-identical to today).
+   * - Otherwise we assemble a new fragment source via
+   *   `assembleSpriteSource`, delete the old program, rebuild attribs
+   *   against the new one, and re-resolve uniform locations.
+   *
+   * The pack reference is kept on the renderer so this method doesn't
+   * need it passed in.
+   */
+  async rebuildSpriteProgram(
+    variants: ShaderVariantSet,
+    sceneSpriteOverrides?: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    this.spriteVariants = variants;
+    const hasSceneLayer = sceneSpriteOverrides !== undefined && sceneSpriteOverrides.size > 0;
+    if (variants.isEmpty() && !hasSceneLayer) return;
+
+    const gl = this.gl;
+    // Re-resolve the sprite-frag default body the same way the
+    // constructor did. We re-import the constant lazily to avoid a
+    // top-level circular dep with the engine-default body —
+    // `FRAG_SPRITE_SRC` is local to this module.
+    const newSource = await assembleSpriteSource(
+      this.pack,
+      FRAG_SPRITE_SRC,
+      variants,
+      sceneSpriteOverrides,
+    );
+    const oldProgram = this.spriteProgram;
+    let newProgram: WebGLProgram;
+    try {
+      newProgram = buildProgram(gl, VERT_SPRITE_SRC, newSource);
+    } catch (err) {
+      console.error(
+        `[two_5_d] sprite-variant program failed to compile — falling back to pack default.`,
+        err,
+      );
+      this.spriteVariants = null;
+      return;
+    }
+
+    this.spriteProgram = newProgram;
+    // Re-bind the VBO attributes against the new program (the
+    // attribute locations may have shifted).
+    gl.bindVertexArray(this.spriteVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.spriteVBO);
+    bindSpriteAttribs(gl, newProgram);
+    gl.bindVertexArray(null);
+
+    this.spriteUniforms = this.resolveSpriteUniforms(
+      this.shaderSources?.spriteFrag !== undefined,
+    );
+
+    gl.deleteProgram(oldProgram);
+  }
+
+  /**
+   * Swap the world-frag program for one that includes a per-cell
+   * variant dispatcher (M2) + scene-level hook overrides (M3) of
+   * MATERIALS.md. Called by `Game.collectShaderVariants` after the
+   * pack scripts + initial entities have populated the world.
+   *
+   * - `variants.isEmpty()` + no `sceneWorldOverrides` → no-op fast
+   *   path. The existing pack-default program stays bound (byte-
+   *   identical to pre-M2).
+   * - Otherwise: assemble a new fragment source via
+   *   `assembleWorldSource`, recompile, re-resolve uniforms, and
+   *   stash the variant set so `ensureSceneUploaded` uploads the
+   *   per-cell variant id texture on next draw.
+   */
+  async rebuildWorldProgram(
+    variants: WorldShaderVariantSet,
+    sceneWorldOverrides?: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    this.worldVariants = variants;
+    // Invalidate the variant-texture cache so the next
+    // `ensureSceneUploaded` re-uploads from the new variant set.
+    this.uploadedVariantTextureKey = "";
+
+    const hasSceneLayer = sceneWorldOverrides !== undefined && sceneWorldOverrides.size > 0;
+    if (variants.isEmpty() && !hasSceneLayer) return;
+
+    const gl = this.gl;
+    const newSource = await assembleWorldSource(
+      this.pack,
+      FRAG_WORLD_SRC,
+      variants,
+      sceneWorldOverrides,
+    );
+    const oldProgram = this.worldProgram;
+    let newProgram: WebGLProgram;
+    try {
+      newProgram = buildProgram(gl, VERT_SRC, newSource);
+    } catch (err) {
+      console.error(
+        `[two_5_d] world-variant program failed to compile — falling back to pack default.`,
+        err,
+      );
+      this.worldVariants = null;
+      return;
+    }
+
+    this.worldProgram = newProgram;
+    // Re-resolve uniforms against the new program. Pack-shipped
+    // worldFrag (Mode 1) is allowed to omit engine uniforms; for
+    // Mode-3 assemblies (the path we're in here, since Mode 1 short-
+    // circuits in `assembleWorldSource`) every engine uniform is
+    // still present so the strict-throw branch is appropriate.
+    const isPackWorldFrag = this.shaderSources?.worldFrag !== undefined;
+    this.u = this.resolveWorldUniforms(isPackWorldFrag);
+
+    gl.deleteProgram(oldProgram);
+  }
+
+  /**
+   * Resolve every world-program uniform location into a flat record.
+   * Extracted so both the constructor and `rebuildWorldProgram` can
+   * reuse it. The `u_sceneShaderVariants` uniform is OPTIONAL — when
+   * no preset ships world hooks the dispatcher is absent and GLSL
+   * strips the uniform. `null` here is fine; the texture binding is
+   * a silent no-op for null locations.
+   */
+  private resolveWorldUniforms(
+    isPackWorldFrag: boolean,
+  ): Record<string, WebGLUniformLocation | null> {
+    const gl = this.gl;
+    const ul = (name: string): WebGLUniformLocation | null => {
+      const loc = gl.getUniformLocation(this.worldProgram, name);
+      if (loc === null) {
+        if (isPackWorldFrag) {
+          console.warn(`[cardboard] pack worldFrag does not reference ${name}; uniform set calls will no-op`);
+          return null;
+        }
+        throw new Error(`Uniform ${name} not found (optimized out?)`);
+      }
+      return loc;
+    };
+    // Optional uniform — present only when at least one variant
+    // exists. We try-get + fall back without warning when absent.
+    const optionalUl = (name: string): WebGLUniformLocation | null => {
+      return gl.getUniformLocation(this.worldProgram, name);
+    };
+    return {
+      tiles: ul("u_tiles"),
+      columns: ul("u_columns"),
+      columnsSeg: ul("u_columnsSeg"),
+      columnsCap: ul("u_columnsCap"),
+      columnsCell: ul("u_columnsCell"),
+      columnsEmissive: ul("u_columnsEmissive"),
+      sceneTiles: ul("u_sceneTiles"),
+      sceneRefl: ul("u_sceneRefl"),
+      sceneEmissiveFloor: ul("u_sceneEmissiveFloor"),
+      sceneEmissiveCeil: ul("u_sceneEmissiveCeil"),
+      lightmapFloor: ul("u_lightmapFloor"),
+      lightmapCeiling: ul("u_lightmapCeiling"),
+      lightmapResolution: ul("u_lightmapResolution"),
+      resolution: ul("u_resolution"),
+      sceneSize: ul("u_sceneSize"),
+      fogInv: ul("u_fogInv"),
+      position: ul("u_position"),
+      forward: ul("u_forward"),
+      right: ul("u_right"),
+      planeScale: ul("u_planeScale"),
+      horizonOffset: ul("u_horizonOffset"),
+      cameraZ: ul("u_cameraZ"),
+      wallAoBotDarken: ul("u_wallAoBotDarken"),
+      wallAoBotBand: ul("u_wallAoBotBand"),
+      wallAoTopDarken: ul("u_wallAoTopDarken"),
+      wallAoTopBand: ul("u_wallAoTopBand"),
+      floorAoBand: ul("u_floorAoBand"),
+      floorAoDarken: ul("u_floorAoDarken"),
+      reflTileScale: ul("u_reflTileScale"),
+      wallReflStrength: ul("u_wallReflStrength"),
+      wallReflBand: ul("u_wallReflBand"),
+      fallbackFloor: ul("u_fallbackFloor"),
+      fallbackCeiling: ul("u_fallbackCeiling"),
+      lightCount: ul("u_lightCount"),
+      lightPos: ul("u_lightPos[0]"),
+      lightCol: ul("u_lightCol[0]"),
+      // M2 — optional. Only present when `assembleWorldSource` emitted
+      // a per-cell dispatcher.
+      sceneShaderVariants: optionalUl("u_sceneShaderVariants"),
+    };
+  }
+
+  /**
+   * Resolve every sprite-program uniform location into the
+   * `spriteUniforms` record. Extracted so both the constructor and
+   * `rebuildSpriteProgram` can use it. `isPackSpriteFrag` controls
+   * whether missing uniforms throw (engine-owned) or warn (pack-
+   * supplied — pack code may have stripped uniforms).
+   */
+  private resolveSpriteUniforms(
+    isPackSpriteFrag: boolean,
+  ): Record<string, WebGLUniformLocation | null> {
+    const gl = this.gl;
+    const sul = (name: string): WebGLUniformLocation | null => {
+      const loc = gl.getUniformLocation(this.spriteProgram, name);
+      if (loc === null) {
+        if (isPackSpriteFrag) {
+          console.warn(`[cardboard] pack spriteFrag does not reference ${name}; uniform set calls will no-op`);
+          return null;
+        }
+        throw new Error(`Sprite uniform ${name} not found`);
+      }
+      return loc;
+    };
+    return {
+      sprites: sul("u_sprites"),
+      columns: sul("u_columns"),
+      columnsSeg: sul("u_columnsSeg"),
+      lightmapFloor: sul("u_lightmapFloor"),
+      lightmapResolution: sul("u_lightmapResolution"),
+      sceneTiles: sul("u_sceneTiles"),
+      resolution: sul("u_resolution"),
+      sceneSize: sul("u_sceneSize"),
+      horizonOffset: sul("u_horizonOffset"),
+      cameraZ: sul("u_cameraZ"),
+      planeScale: sul("u_planeScale"),
+      fogInv: sul("u_fogInv"),
+      lightCount: sul("u_lightCount"),
+      lightPos: sul("u_lightPos[0]"),
+      lightCol: sul("u_lightCol[0]"),
+    };
   }
 
   endFrame(): void {
@@ -1743,6 +2044,46 @@ export class WebGLRenderer implements SceneRenderer {
         this.uploadedCeilingLightmapBuffer = lm.ceilingRGB;
         gl.bindTexture(gl.TEXTURE_2D, this.sceneLightmapCeilingTex);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, lmW, lmH, 0, gl.RGBA, gl.FLOAT, pack(lm.ceilingRGB));
+      }
+    }
+
+    // Per-cell world-shader variant id texture (M2 of MATERIALS.md
+    // §8.2). Only emitted when `rebuildWorldProgram` registered a
+    // variant set — otherwise the 1×1 zero seed (set in the
+    // constructor) stays bound and the GLSL compiler has stripped
+    // the `u_sceneShaderVariants` uniform anyway.
+    //
+    // Keyed by (sceneSize, variantSet identity). Invalidated by
+    // `rebuildWorldProgram` clearing `uploadedVariantTextureKey`.
+    const wv = this.worldVariants;
+    if (wv !== null && !wv.isEmpty()) {
+      const variantKey = `${scene.size.x}x${scene.size.y}|${wv.variants.length}`;
+      if (this.uploadedVariantTextureKey !== variantKey) {
+        this.uploadedVariantTextureKey = variantKey;
+        const w = scene.size.x;
+        const h = scene.size.y;
+        // RGBA32F mirrors the other scene-cell textures; only R is
+        // read in-shader. G/B/A reserved for future per-cell-per-
+        // surface routing (`floor / ceiling / wall` variant split).
+        const variantData = new Float32Array(w * h * 4);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const cell = scene.getCell(x, y);
+            // Per-cell variant id resolution. M2 attaches one shader
+            // per preset; we pick the wall preset's id when the cell
+            // is a wall, else the floor preset's id (covers the
+            // common "wet floor" smoke test). A future enhancement
+            // could pack floor/ceiling/wall variants into G/B/A.
+            const presetId =
+              cell.wallPresetId ?? cell.floorPresetId ?? cell.ceilingPresetId;
+            const variantId = wv.variantIdForPresetId(presetId);
+            const idx = (y * w + x) * 4;
+            variantData[idx] = variantId;
+            // G/B/A reserved — leave zero.
+          }
+        }
+        gl.bindTexture(gl.TEXTURE_2D, this.sceneShaderVariantsTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, variantData);
       }
     }
   }

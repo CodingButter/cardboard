@@ -1,5 +1,6 @@
 import { Vec2 } from "Libs/Vector";
 import type { PresetResolver, ResolvedPresetData } from "AssetPack/PresetResolver";
+import type { ShaderData } from "Components/Shader";
 
 /**
  * Which face of a cell a wall segment lies on. A wall is a 1-D segment in
@@ -132,10 +133,34 @@ export interface Cell {
   walls: ReadonlyArray<WallSegment>;
   floor: FloorData;
   ceiling: CeilingData;
+  /**
+   * Preset id that produced this cell's wall, if the scene used
+   * `idMap` resolution. `undefined` for legacy bare-int scenes and
+   * for open cells. M2 of MATERIALS.md uses this to map each cell
+   * to its world-shader variant id; non-`idMap` scenes always render
+   * with variant 0.
+   */
+  wallPresetId?: string;
+  /** Preset id for this cell's floor. See `wallPresetId`. */
+  floorPresetId?: string;
+  /** Preset id for this cell's ceiling. See `wallPresetId`. */
+  ceilingPresetId?: string;
 }
 
 /** The internal cell grid. `grid[row][col]`. */
 export type SceneGrid = ReadonlyArray<ReadonlyArray<Cell>>;
+
+/**
+ * Per-cell preset id triple captured during `idMap` resolution. M2 of
+ * MATERIALS.md routes per-cell world-shader variants via these ids.
+ * All three fields optional — open cells leave `wall` undefined, and
+ * legacy scenes without `idMap` leave every field undefined.
+ */
+export interface CellPresetIds {
+  wall?: string;
+  floor?: string;
+  ceiling?: string;
+}
 
 /** Where the player spawns when the scene loads. */
 export interface SceneSpawn {
@@ -374,6 +399,15 @@ export class Scene {
    * fully lit. Both renderers sample bilinearly via `sampleLight`.
    */
   readonly lightmap: SceneLightmap;
+  /**
+   * Scene-level shader-hook overrides (M3 of MATERIALS.md §9).
+   * Layered on top of pack-level hooks to form variant 0 for THIS
+   * scene; per-entity / per-preset variants (M1 + M2) build on top.
+   * `undefined` (default) means the scene contributes no overrides
+   * and variant 0 is the pure pack default — byte-identical to
+   * pre-M3 rendering.
+   */
+  readonly shaders?: ShaderData;
 
   constructor(
     walls: ReadonlyArray<ReadonlyArray<WallCellInput>>,
@@ -383,8 +417,18 @@ export class Scene {
     spawn: SceneSpawn = DEFAULT_SPAWN,
     lights: ReadonlyArray<LightDef> = [],
     lightmap: SceneLightmap | undefined = undefined,
+    shaders: ShaderData | undefined = undefined,
+    /**
+     * Per-cell preset ids — `cellPresets[y][x] = { wall?, floor?,
+     * ceiling? }`. Populated by `Scene.fromJSON` when the scene used
+     * `idMap` resolution; absent / sparse for legacy bare-int scenes.
+     * Wired into each `Cell.{wall|floor|ceiling}PresetId` so the
+     * WebGL renderer can map cells to world-shader variants (M2).
+     */
+    cellPresets: ReadonlyArray<ReadonlyArray<CellPresetIds | undefined>> | undefined = undefined,
   ) {
     this.spawn = spawn;
+    this.shaders = shaders;
     const defaultFloor = options.defaultFloor ?? DEFAULT_FLOOR;
     const defaultCeiling = options.defaultCeiling ?? DEFAULT_CEILING;
 
@@ -400,14 +444,19 @@ export class Scene {
       const wallRow = walls[y]!;
       const floorRow = floors[y] ?? [];
       const ceilRow = ceilings[y] ?? [];
+      const presetRow = cellPresets?.[y];
       const row: Cell[] = new Array(width);
       for (let x = 0; x < width; x++) {
         const segments = parseWallCell(wallRow[x]);
+        const presets = presetRow?.[x];
         row[x] = {
           wall: segments[0]?.tile ?? 0,
           walls: segments,
           floor: parseFloorCell(floorRow[x], defaultFloor),
           ceiling: parseFloorCell(ceilRow[x], defaultCeiling),
+          wallPresetId: presets?.wall,
+          floorPresetId: presets?.floor,
+          ceilingPresetId: presets?.ceiling,
         };
       }
       grid[y] = row;
@@ -624,6 +673,10 @@ export class Scene {
     let walls = data.walls as WallCellInput[][];
     let floors = (data.floors ?? []) as FloorCellInput[][];
     let ceilings = (data.ceilings ?? []) as CeilingCellInput[][];
+    // Per-cell preset id grid — M2 of MATERIALS.md uses this to map
+    // each cell to its world-shader variant id. Sparse: only cells
+    // resolved via `idMap` have entries; legacy scenes pass `undefined`.
+    let cellPresets: (CellPresetIds | undefined)[][] | undefined;
     if (data.idMap && resolver) {
       const lookup = (idx: unknown): string | null => {
         // Tolerate either string or number keys in the source map.
@@ -646,6 +699,43 @@ export class Scene {
       ceilings = ((data.ceilings as Array<Array<number | CeilingCellInput>>) ?? []).map(
         (row) => row.map((cell) => translateFloorCell(cell, lookup, resolver, ceilingDefault)),
       );
+
+      // Capture per-cell preset ids alongside the cell-translation
+      // pass above. We re-walk the raw grids — cheap (small int
+      // lookups) — and keep the translation logic above unchanged.
+      const wallRowsRaw = data.walls as Array<Array<number | WallCellInput>>;
+      const floorRowsRaw = (data.floors as Array<Array<number | FloorCellInput>>) ?? [];
+      const ceilRowsRaw = (data.ceilings as Array<Array<number | CeilingCellInput>>) ?? [];
+      cellPresets = wallRowsRaw.map((wallRow, y) => {
+        const floorRow = floorRowsRaw[y] ?? [];
+        const ceilRow = ceilRowsRaw[y] ?? [];
+        return wallRow.map((wallCell, x) => {
+          const ids: CellPresetIds = {};
+          if (typeof wallCell === "number" && wallCell !== 0) {
+            const id = lookup(wallCell);
+            if (id) ids.wall = id;
+          }
+          const floorCell = floorRow[x];
+          if (typeof floorCell === "number" && floorCell !== 0) {
+            const id = lookup(floorCell);
+            if (id) ids.floor = id;
+          } else if (floorCell === 0 && floorDefault) {
+            ids.floor = floorDefault;
+          }
+          const ceilCell = ceilRow[x];
+          if (typeof ceilCell === "number" && ceilCell !== 0) {
+            const id = lookup(ceilCell);
+            if (id) ids.ceiling = id;
+          } else if (ceilCell === 0 && ceilingDefault) {
+            ids.ceiling = ceilingDefault;
+          }
+          return ids.wall !== undefined ||
+            ids.floor !== undefined ||
+            ids.ceiling !== undefined
+            ? ids
+            : undefined;
+        });
+      });
     }
 
     return new Scene(
@@ -656,6 +746,8 @@ export class Scene {
       spawn,
       data.lights ?? [],
       lightmap,
+      data.shaders,
+      cellPresets,
     );
   }
 }
@@ -664,7 +756,10 @@ export class Scene {
  * Translate one `walls[y][x]` value through the resolver.
  *
  * - Small int → idMap[idx] → preset → WallSegmentInput
- * - Bare WallCellInput (legacy structured) → pass through
+ * - Inline WallSegment object → HARD ERROR (per TILE_PRESETS.md §5.3
+ *   T3 — mixing idMap with inlined cell structs is the deprecated
+ *   middle state; pure legacy bare-int scenes without idMap still work
+ *   via the legacy shim).
  *
  * Unknown ids fall through to `null` (open cell) after warning.
  */
@@ -674,10 +769,11 @@ function translateWallCell(
   resolver: PresetResolver,
 ): WallCellInput {
   if (cell === null || cell === undefined) return null;
-  // Inline structured objects are passed through verbatim — they were
-  // authored before the migration. The deprecation path in § 5.3 will
-  // hard-error these in T3; for now we keep parsing them.
-  if (typeof cell === "object") return cell as WallCellInput;
+  if (typeof cell === "object") {
+    throw new Error(
+      `[scene] idMap-bearing scene contains an inline WallSegment object — mixing idMap references with inline cell structs is not allowed (TILE_PRESETS.md §5.3). Move the cell to a named or anonymous preset and reference it via idMap, or drop idMap to fall back to the legacy bare-int format.`,
+    );
+  }
   if (typeof cell !== "number") return null;
   if (cell === 0) return 0;
   const presetId = lookup(cell);
@@ -697,7 +793,11 @@ function translateFloorCell(
   defaultPresetId: string | null,
 ): FloorCellInput {
   if (cell === null || cell === undefined) return null;
-  if (typeof cell === "object") return cell as FloorCellInput;
+  if (typeof cell === "object") {
+    throw new Error(
+      `[scene] idMap-bearing scene contains an inline floor/ceiling object — mixing idMap references with inline cell structs is not allowed (TILE_PRESETS.md §5.3). Move the cell to a preset and reference it via idMap.`,
+    );
+  }
   if (typeof cell === "string") return cell;
   if (typeof cell !== "number") return null;
   // `0` resolves to the layer default preset (if any), else "use layer default".
@@ -929,6 +1029,19 @@ export interface SceneJSON {
    * uniform 1.0 lightmap so legacy scenes look fully lit.
    */
   lightmap?: SceneLightmapJSON;
+  /**
+   * Optional scene-level shader-hook overrides (M3 of MATERIALS.md
+   * §9). Same shape as the `Shader` ECS component / pack-level
+   * `manifest.shaders` — pack-relative paths to `.glsl` files
+   * defining `hook_*` functions for any of the three roles.
+   *
+   * Scene-level overrides layer on top of pack-level (variant 0
+   * for this scene) and underneath per-entity / per-preset variants
+   * (M1 + M2). When absent (typical case for default-pack scenes),
+   * variant 0 stays pure pack-default and rendering is byte-
+   * identical to pre-M3.
+   */
+  shaders?: ShaderData;
 }
 
 /**

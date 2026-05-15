@@ -2,6 +2,8 @@ import type { Scene } from "Scene";
 import type { Vec2 } from "Libs/Vector";
 import type { IPixel } from "Libs/Geometry";
 import type { CameraData } from "Components";
+import type { ShaderData } from "Components";
+import type { ShaderVariantSet, WorldShaderVariantSet } from "./ShaderVariants";
 
 /**
  * One billboarded sprite to draw this frame. The renderer projects the
@@ -22,6 +24,13 @@ export interface SpriteDrawRequest {
   worldHeight: number;
   /** Vertical offset of the sprite's center from eye level (+ = down). */
   yOffset: number;
+  /**
+   * Per-entity shader-variant id (M1 of MATERIALS.md). Defaults to 0
+   * (= pack default). The WebGL backend writes this to the per-vertex
+   * `a_variant` attribute so the sprite's frag program can dispatch
+   * to the right override. The canvas2d backend ignores it.
+   */
+  shaderVariant?: number;
 }
 
 /**
@@ -139,6 +148,51 @@ export interface SceneRenderer {
 
   /** Commit the world pass to the screen and ready the HUD canvas. */
   endFrame(): void;
+
+  /**
+   * Recompile the sprite-frag program against a per-entity variant
+   * set (M1 of MATERIALS.md). Called once per scene-load by `Game`
+   * after pack scripts + initial entities have populated the world.
+   * Optional — the canvas2d backend ignores it; the WebGL backend
+   * fast-paths an empty variant set to a no-op (= pre-M1 byte-
+   * identical behaviour).
+   *
+   * Also caches the variant set so `spriteVariantIdFor` can map a
+   * `Shader` component value back to its variant id at sprite
+   * collection time.
+   */
+  rebuildSpriteProgram?(
+    variants: ShaderVariantSet,
+    sceneSpriteOverrides?: ReadonlyMap<string, string>,
+  ): Promise<void>;
+
+  /**
+   * Recompile the world-frag program against a per-cell variant set
+   * (M2 of MATERIALS.md). Walks every preset; for each unique
+   * `shader.worldHooks` path the engine emits a renamed `__vN`
+   * function copy and a top-level dispatcher that switches on the
+   * per-cell variant id from `u_sceneShaderVariants`.
+   *
+   * `sceneWorldOverrides` (M3) carries the parsed scene-level world
+   * hooks that should be layered on top of pack-level hooks to form
+   * variant 0 for this scene. Empty / undefined = pure pack default.
+   *
+   * Empty variants + empty scene overrides → no-op (= pre-M2 byte-
+   * identical behaviour). Canvas2D ignores entirely.
+   */
+  rebuildWorldProgram?(
+    variants: WorldShaderVariantSet,
+    sceneWorldOverrides?: ReadonlyMap<string, string>,
+  ): Promise<void>;
+
+  /**
+   * Look up the variant id for an entity's `Shader` component value.
+   * Returns 0 (= pack default) when the renderer doesn't implement
+   * variants, or the value doesn't match a collected variant.
+   * Used by `SpriteRenderSystem` to populate `shaderVariant` on each
+   * `SpriteDrawRequest`.
+   */
+  spriteVariantIdFor?(data: ShaderData | undefined): number;
 
   /**
    * Resize the backing pixel buffer to `(width, height)`. Called on

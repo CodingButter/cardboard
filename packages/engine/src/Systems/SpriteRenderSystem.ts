@@ -1,5 +1,5 @@
 import type { World } from "ECS";
-import { Aim, Camera, Facing, Position, Sprite } from "Components";
+import { Aim, Camera, Facing, Position, Shader, Sprite } from "Components";
 import { CONFIG } from "GameConfig";
 import type { SceneRenderer, SpriteDrawRequest } from "Renderers/SceneRenderer";
 
@@ -29,13 +29,21 @@ export default class SpriteRenderSystem {
     const horizonOffset = a ? -a.screenY * CONFIG.camera.pitchFraction : 0;
 
     this.requests.length = 0;
-    world.each(Position, Sprite, (_entity, position, sprite) => {
+    world.each(Position, Sprite, (entity, position, sprite) => {
+      // Per-entity shader-variant lookup (M1 of MATERIALS.md). Entities
+      // without a `Shader` component, or carrying one not registered
+      // as a variant at scene-load, get variant 0 — the pack default.
+      // Renderers that don't implement variants (canvas2d) ignore the
+      // field entirely.
+      const shaderData = Shader.get(entity);
+      const shaderVariant = renderer.spriteVariantIdFor?.(shaderData) ?? 0;
       this.requests.push({
         x: position.x,
         y: position.y,
         imageId: sprite.imageId,
         worldHeight: sprite.worldHeight,
         yOffset: sprite.yOffset,
+        shaderVariant,
       });
     });
 

@@ -20,6 +20,7 @@ import {
   Sprite,
   Pickup,
   Light,
+  Shader,
 } from "Components";
 import {
   BAG_SIZE,
@@ -207,6 +208,12 @@ export interface BuiltInComponents {
   Sprite: typeof Sprite;
   Pickup: typeof Pickup;
   Light: typeof Light;
+  /**
+   * Per-entity shader-hook attachment (M1 of MATERIALS.md). Attach a
+   * `Shader` component to ride pack-supplied `.glsl` hook overrides
+   * for just this entity. Sprites only in M1.
+   */
+  Shader: typeof Shader;
 }
 
 /**

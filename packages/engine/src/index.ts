@@ -102,3 +102,19 @@ export { WallSide } from "./Libs/Raycast";
 
 // Vector — `Vec2` shows up in bake-lights' light-vector construction.
 export { Vec2 } from "./Libs/Vector";
+
+// Shader validation surface (M5 / MATERIALS.md §11). Pack-builder
+// consumes this at build-time. Kept additive — never imported by
+// the runtime renderer. See `Renderers/ShaderValidator.ts`.
+export {
+  collectShaderReferences,
+  formatValidationError,
+  resolveShaderBackend,
+  validateShaderFile,
+  validateShaderSource,
+  type ShaderValidationError,
+  type ShaderValidationResult,
+  type ShaderValidationOrigin,
+  type ShaderRefToValidate,
+  type BackendStatus,
+} from "./Renderers/ShaderValidator";

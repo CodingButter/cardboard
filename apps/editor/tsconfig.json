@@ -8,9 +8,39 @@
     "jsxImportSource": "react",
     "paths": {
       "@two_5_d/engine": ["../../packages/engine/src/index.ts"],
-      "@two_5_d/engine/*": ["../../packages/engine/src/*"]
+      "@two_5_d/engine/*": ["../../packages/engine/src/*"],
+      // The engine package's intra-package bare-name aliases. TS
+      // resolves imports from `../../packages/engine/src/**.ts` against
+      // *this* tsconfig's `paths` map, so the engine's own internal
+      // bare names ("Components", "Scene", ...) have to be reachable
+      // here too. Keep in sync with `packages/engine/tsconfig.json`.
+      "AssetPack": ["../../packages/engine/src/AssetPack/index.ts"],
+      "AssetPack/*": ["../../packages/engine/src/AssetPack/*"],
+      "Components": ["../../packages/engine/src/Components/index.ts"],
+      "Components/*": ["../../packages/engine/src/Components/*"],
+      "Config": ["../../packages/engine/src/Config.ts"],
+      "Controllers": ["../../packages/engine/src/Controllers/index.ts"],
+      "Controllers/*": ["../../packages/engine/src/Controllers/*"],
+      "ECS": ["../../packages/engine/src/ECS/index.ts"],
+      "ECS/*": ["../../packages/engine/src/ECS/*"],
+      "Engine": ["../../packages/engine/src/Engine.ts"],
+      "Game": ["../../packages/engine/src/Game.ts"],
+      "GameConfig": ["../../packages/engine/src/GameConfig.ts"],
+      "ItemImages": ["../../packages/engine/src/ItemImages.ts"],
+      "Libs/*": ["../../packages/engine/src/Libs/*"],
+      "ModalRegistry": ["../../packages/engine/src/ModalRegistry.ts"],
+      "ModAPI": ["../../packages/engine/src/ModAPI/index.ts"],
+      "ModAPI/*": ["../../packages/engine/src/ModAPI/*"],
+      "PreactRuntime": ["../../packages/engine/src/PreactRuntime.ts"],
+      "Renderers": ["../../packages/engine/src/Renderers/index.ts"],
+      "Renderers/*": ["../../packages/engine/src/Renderers/*"],
+      "Scene": ["../../packages/engine/src/Scene.ts"],
+      "Settings": ["../../packages/engine/src/Settings.ts"],
+      "Systems": ["../../packages/engine/src/Systems/index.ts"],
+      "Systems/*": ["../../packages/engine/src/Systems/*"],
+      "UI/*": ["../../packages/engine/src/UI/*"]
     }
   },
-  "include": ["index.tsx", "server.ts", "src/**/*"],
+  "include": ["index.tsx", "server.ts", "src/**/*", "scripts/**/*"],
   "exclude": ["node_modules", "public", "dist"]
 }

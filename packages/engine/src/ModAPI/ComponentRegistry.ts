@@ -12,6 +12,7 @@ import {
   Sprite,
   Pickup,
   Light,
+  Shader,
 } from "Components";
 import type { BuiltInComponents } from "./types";
 
@@ -34,6 +35,7 @@ export class ComponentRegistry {
     Sprite,
     Pickup,
     Light,
+    Shader,
   };
 
   private readonly customComponents = new Map<string, Component<unknown>>();

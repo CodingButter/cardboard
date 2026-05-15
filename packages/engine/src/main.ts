@@ -111,6 +111,15 @@ export async function main(previous?: Partial<GameState>): Promise<GameClass> {
   //     carries a populated world.
   game.spawnInitialEntities();
 
+  // 5c. Collect per-entity shader variants (M1 of MATERIALS.md). Walks
+  //     the world for `Shader` components and asks the renderer to
+  //     recompile the sprite program with a per-variant dispatcher.
+  //     No-op when no entity carries a `Shader` (byte-identical to
+  //     pre-M1) or when the renderer doesn't implement variants
+  //     (canvas2d backend).
+  bootStatus("Compiling shader variants…");
+  await game.collectShaderVariants();
+
   // 6. Wait for tile/sprite/item assets to finish decoding so the
   //    first visible frame doesn't flash the pink fallback. Same await
   //    serves canvas2d + WebGL because `assetsReady` is on the
