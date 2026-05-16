@@ -37,6 +37,43 @@ import { cn } from "../lib/cn";
 
 type LayerName = "walls" | "floors" | "ceiling";
 
+/** Mutation tool the GridEditor is currently in.  Driven by keyboard
+ *  shortcuts (P = paint, E = entity, L = light) plus the toolbar
+ *  buttons.  Defaults to `paint` so E3's behaviour is unchanged. */
+export type EditorTool = "paint" | "entity" | "light";
+
+/** Authored entity record on a scene.  `scene.entities[]` per
+ *  `docs/plans/LIGHTING_ENTITIES_REFACTOR.md` §3.A.  R1 of that plan
+ *  hasn't landed in the engine runtime yet — the editor authors the
+ *  shape that's already in the spec so the engine catches up cleanly.
+ *  Existing engines that don't parse `entities[]` ignore it. */
+export interface SceneEntity {
+  /** Optional stable name. Used by the inspector + future findByName. */
+  name?: string;
+  /** Component bag keyed by component name. Each value is the raw
+   *  component data (`PositionData`, `LightData`, etc.) untouched. */
+  components: Record<string, unknown>;
+}
+
+/** Authored static light record (legacy `scene.lights[]`).  Kept as a
+ *  separate authoring shorthand even though the engine plans to expand
+ *  it into `entities[]` at load time — the bake reads it verbatim. */
+export interface SceneLight {
+  x: number;
+  y: number;
+  z?: number;
+  color?: [number, number, number];
+  intensity?: number;
+  radius?: number;
+  /** Editor-only marker — when `false`, the light is treated as a
+   *  dynamic light (skipped by the bake).  Mirrors the
+   *  `LIGHTING_ENTITIES_REFACTOR` plan's `baked` toggle.  We keep it
+   *  on the JSON so it round-trips; the bake currently bakes every
+   *  `scene.lights[]` entry, so dynamic lights live in `entities[]`
+   *  with a `Light` component (no scene.lights row). */
+  baked?: boolean;
+}
+
 /** Minimal scene shape we need to mutate — kept loose so the editor
  *  can round-trip arbitrary scene-extra fields untouched. */
 export interface MutableScene {
@@ -47,8 +84,140 @@ export interface MutableScene {
   ceiling?: Array<Array<number>>;
   ceilings?: Array<Array<number>>;
   layerDefaults?: { floor?: string; ceiling?: string };
+  /** Baked (or dynamic) lights authored at scene scope. */
+  lights?: SceneLight[];
+  /** Scene-declared entities (LIGHTING_ENTITIES_REFACTOR §3.A). */
+  entities?: SceneEntity[];
+  /** Baked lightmap (set by the bake worker — round-trip only). */
+  lightmap?: unknown;
   // Anything else round-trips verbatim.
   [key: string]: unknown;
+}
+
+/** Built-in component schema descriptor.  Drives the schema-driven
+ *  Inspector sub-forms.  Unknown components fall back to a JSON
+ *  textarea. */
+type ComponentFieldKind =
+  | "number"
+  | "string"
+  | "color3"
+  | "boolean"
+  | "vec2"
+  | "vec3";
+
+interface ComponentFieldSpec {
+  /** Field key on the component data. */
+  key: string;
+  kind: ComponentFieldKind;
+  /** Display label — falls back to the key. */
+  label?: string;
+  /** Inclusive min for number sliders. */
+  min?: number;
+  /** Inclusive max for number sliders. */
+  max?: number;
+  /** Step for number sliders. */
+  step?: number;
+  /** Optional description tooltip. */
+  hint?: string;
+}
+
+interface ComponentSchema {
+  /** Component name as registered (`Position`, `Light`, ...). */
+  name: string;
+  fields: ComponentFieldSpec[];
+  /** Default data used when adding the component from the picker. */
+  defaultData: Record<string, unknown>;
+}
+
+/**
+ * Built-in component schemas.  These cover the components the engine
+ * ships in `packages/engine/src/Components/`; modder-defined
+ * components fall back to a generic JSON editor in the Inspector.
+ *
+ * Each spec is intentionally minimal — we surface the most-edited
+ * fields here, not the full component shape.  Power users can drop
+ * into the JSON editor for the long tail.
+ */
+const BUILT_IN_COMPONENT_SCHEMAS: ComponentSchema[] = [
+  {
+    name: "Position",
+    fields: [
+      { key: "x", kind: "number", step: 0.5, hint: "World x in tile units" },
+      { key: "y", kind: "number", step: 0.5, hint: "World y in tile units" },
+      { key: "z", kind: "number", step: 0.05, min: 0, max: 2, hint: "Height" },
+    ],
+    defaultData: { x: 1.5, y: 1.5, z: 0 },
+  },
+  {
+    name: "Light",
+    fields: [
+      { key: "color", kind: "color3", label: "color (RGB)" },
+      { key: "intensity", kind: "number", min: 0, max: 10, step: 0.1 },
+      { key: "radius", kind: "number", min: 0, max: 20, step: 0.5 },
+      { key: "z", kind: "number", min: 0, max: 2, step: 0.05 },
+    ],
+    defaultData: { color: [1, 1, 1], intensity: 1, radius: 6, z: 0.5 },
+  },
+  {
+    name: "Facing",
+    fields: [
+      { key: "angle", kind: "number", step: 0.05, hint: "Radians, CCW from +x" },
+    ],
+    defaultData: { angle: 0 },
+  },
+  {
+    name: "Movement",
+    fields: [
+      { key: "speed", kind: "number", min: 0, max: 10, step: 0.1 },
+      { key: "rotationSpeed", kind: "number", min: 0, max: 0.05, step: 0.001 },
+      { key: "runMultiplier", kind: "number", min: 1, max: 4, step: 0.1 },
+    ],
+    defaultData: {
+      speed: 3,
+      rotationSpeed: 0.003,
+      runMultiplier: 1.5,
+      isRunning: false,
+      z: 0,
+      vz: 0,
+      crouching: false,
+    },
+  },
+  {
+    name: "Sprite",
+    fields: [
+      { key: "imageId", kind: "string", hint: "manifest sprite key" },
+      { key: "scale", kind: "number", min: 0.1, max: 8, step: 0.1 },
+    ],
+    defaultData: { imageId: "", scale: 1 },
+  },
+  {
+    name: "Shader",
+    fields: [
+      { key: "worldHooks", kind: "string", hint: "path/to.glsl" },
+      { key: "spriteHooks", kind: "string", hint: "path/to.glsl" },
+      { key: "skyHooks", kind: "string", hint: "path/to.glsl" },
+    ],
+    defaultData: {},
+  },
+  {
+    name: "MinimapMarker",
+    fields: [
+      { key: "color", kind: "color3" },
+      { key: "size", kind: "number", min: 0.1, max: 4, step: 0.1 },
+    ],
+    defaultData: { color: [1, 1, 1], size: 1 },
+  },
+  {
+    name: "Camera",
+    fields: [
+      { key: "fov", kind: "number", min: 0.3, max: 2.5, step: 0.05 },
+    ],
+    defaultData: { fov: Math.PI / 3 },
+  },
+];
+
+function findComponentSchema(name: string): ComponentSchema | undefined {
+  return BUILT_IN_COMPONENT_SCHEMAS.find((s) => s.name === name);
 }
 
 export interface GridEditorProps {
@@ -57,7 +226,23 @@ export interface GridEditorProps {
   scene: MutableScene;
   /** Called whenever a paint mutation happens; parent dedupes + persists. */
   onSceneChange: (next: MutableScene) => void;
+  /** Prefab names available for the entity-placement tool.  When the
+   *  list is empty the entity tool's popover surfaces a "No prefabs
+   *  registered" hint with instructions on how to register one. */
+  prefabNames?: ReadonlyArray<string>;
+  /** Optional sprite-id list — drives the Sprite component picker.
+   *  Sourced from `manifest.sprites` by the parent. */
+  spriteIds?: ReadonlyArray<string>;
 }
+
+/** Reasonable default-pack prefabs surfaced when the editor hasn't
+ *  managed to introspect pack scripts (no sandboxed script-run yet —
+ *  see EDITOR.md E5 follow-ups).  These are pulled from the
+ *  `packages/default-pack/scripts/` registerPrefab calls. */
+const FALLBACK_BUILTIN_PREFABS: ReadonlyArray<string> = [
+  "player",
+  "marker",
+];
 
 /** Brand-color palette used as deterministic swatches when a preset
  *  texture hasn't loaded (or the preset has no texture path). */
@@ -163,6 +348,121 @@ function presetForCell(
   return scene.idMap?.[String(cell)] ?? null;
 }
 
+/* --- Entity + light scene helpers --------------------------------------- */
+
+/** Append a new entity to `scene.entities[]`, returning a fresh scene. */
+function addEntityToScene(
+  scene: MutableScene,
+  entity: SceneEntity,
+): MutableScene {
+  const entities = [...(scene.entities ?? []), entity];
+  return { ...scene, entities };
+}
+
+/** Replace `scene.entities[index]` with `entity`, returning a fresh scene. */
+function replaceEntity(
+  scene: MutableScene,
+  index: number,
+  entity: SceneEntity,
+): MutableScene {
+  const entities = [...(scene.entities ?? [])];
+  if (index < 0 || index >= entities.length) return scene;
+  entities[index] = entity;
+  return { ...scene, entities };
+}
+
+/** Remove `scene.entities[index]`, returning a fresh scene. */
+function removeEntity(scene: MutableScene, index: number): MutableScene {
+  const entities = [...(scene.entities ?? [])];
+  if (index < 0 || index >= entities.length) return scene;
+  entities.splice(index, 1);
+  return { ...scene, entities };
+}
+
+/** Append a new light to `scene.lights[]`, returning a fresh scene. */
+function addLightToScene(scene: MutableScene, light: SceneLight): MutableScene {
+  const lights = [...(scene.lights ?? []), light];
+  return { ...scene, lights };
+}
+
+/** Replace `scene.lights[index]` with `light`, returning a fresh scene. */
+function replaceLight(
+  scene: MutableScene,
+  index: number,
+  light: SceneLight,
+): MutableScene {
+  const lights = [...(scene.lights ?? [])];
+  if (index < 0 || index >= lights.length) return scene;
+  lights[index] = light;
+  return { ...scene, lights };
+}
+
+/** Remove `scene.lights[index]`, returning a fresh scene. */
+function removeLight(scene: MutableScene, index: number): MutableScene {
+  const lights = [...(scene.lights ?? [])];
+  if (index < 0 || index >= lights.length) return scene;
+  lights.splice(index, 1);
+  return { ...scene, lights };
+}
+
+/** Pull `Position` out of an entity's component bag — used for both the
+ *  on-canvas glyph and the cell-snap on placement. */
+function getEntityPosition(
+  entity: SceneEntity,
+): { x: number; y: number; z?: number } | null {
+  const pos = entity.components.Position as
+    | { x?: number; y?: number; z?: number }
+    | undefined;
+  if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") {
+    return null;
+  }
+  return { x: pos.x, y: pos.y, z: pos.z };
+}
+
+/** Mutate an entity's Position component to `(x, y[, z])`. */
+function setEntityPosition(
+  entity: SceneEntity,
+  x: number,
+  y: number,
+  z?: number,
+): SceneEntity {
+  const existing = (entity.components.Position ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const next: Record<string, unknown> = { ...existing, x, y };
+  if (z !== undefined) next.z = z;
+  return {
+    ...entity,
+    components: { ...entity.components, Position: next },
+  };
+}
+
+/** Convert a Light component's RGB array to a `#rrggbb` hex string. */
+function rgbToHex(rgb: ReadonlyArray<number>): string {
+  const toByte = (v: number): string => {
+    const clamped = Math.max(0, Math.min(1, v));
+    const byte = Math.round(clamped * 255);
+    return byte.toString(16).padStart(2, "0");
+  };
+  return `#${toByte(rgb[0] ?? 0)}${toByte(rgb[1] ?? 0)}${toByte(rgb[2] ?? 0)}`;
+}
+
+/** Parse a `#rrggbb` (or `#rgb`) string into an RGB triple in [0, 1]. */
+function hexToRgb(hex: string): [number, number, number] | null {
+  let h = hex.trim();
+  if (h.startsWith("#")) h = h.slice(1);
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+    return null;
+  }
+  return [r / 255, g / 255, b / 255];
+}
+
 interface TexturePreviewBundle {
   presetId: string;
   data: ResolvedPresetData;
@@ -263,11 +563,24 @@ function useResolver(
   return state;
 }
 
+/**
+ * Inspector-pane selection state.  The cell selection from E3 is still
+ * the default; entity / light selections come from clicking glyphs in
+ * the canvas or rows in the entities list (TODO E5 — see report).
+ */
+type InspectorSelection =
+  | { kind: "cell"; x: number; y: number }
+  | { kind: "entity"; index: number }
+  | { kind: "light"; index: number }
+  | null;
+
 export function GridEditor({
   projectId,
   scenePath,
   scene,
   onSceneChange,
+  prefabNames,
+  spriteIds,
 }: GridEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -282,9 +595,33 @@ export function GridEditor({
   const [selected, setSelected] = useState<{ x: number; y: number } | null>(
     null,
   );
+  /** Selection-aware inspector slot — supersedes the bare `selected`
+   *  cell state when an entity or light is picked.  We keep `selected`
+   *  in sync (cell coords of the entity / light) so the canvas
+   *  highlight ring still shows the right square. */
+  const [inspector, setInspector] = useState<InspectorSelection>(null);
   const [layer, setLayer] = useState<LayerName>("walls");
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [presetFilter, setPresetFilter] = useState("");
+  /** Active tool — paint / entity / light.  Driven by keyboard
+   *  shortcuts (P / E / L) and the toolbar buttons. */
+  const [tool, setTool] = useState<EditorTool>("paint");
+  /** Prefab-picker popover state — opens on entity-tool click. */
+  const [prefabPopover, setPrefabPopover] = useState<{
+    x: number;
+    y: number;
+    cell: { x: number; y: number };
+  } | null>(null);
+
+  // Resolve prefab list — caller-supplied names win; otherwise fall
+  // back to a small built-in list so the editor's entity tool is
+  // usable against default-pack.  See EDITOR.md §6.3 — full
+  // script-introspected discovery is an E5 follow-up.
+  const resolvedPrefabs = useMemo(() => {
+    const set = new Set<string>(prefabNames ?? []);
+    for (const p of FALLBACK_BUILTIN_PREFABS) set.add(p);
+    return Array.from(set).sort();
+  }, [prefabNames]);
 
   // Drag-paint state — track which button is held + last cell painted
   // so we don't re-paint the same cell mid-stroke (cheaper for big strokes).
@@ -437,9 +774,98 @@ export function GridEditor({
       }
       const cell = screenToCell(e.clientX, e.clientY);
       if (!cell) return;
+
+      // ── Light tool — drop a new light at the clicked cell.
+      // Left-click adds at default values; right-click on an existing
+      // light removes it.
+      if (tool === "light") {
+        if (e.button === 0) {
+          const lights = scene.lights ?? [];
+          // Was an existing light clicked? Snap to its index so the
+          // inspector edits it instead of stacking another one.
+          const hitIdx = lights.findIndex(
+            (l) => Math.floor(l.x) === cell.x && Math.floor(l.y) === cell.y,
+          );
+          if (hitIdx >= 0) {
+            setSelected(cell);
+            setInspector({ kind: "light", index: hitIdx });
+            return;
+          }
+          const newLight: SceneLight = {
+            x: cell.x + 0.5,
+            y: cell.y + 0.5,
+            z: 0.5,
+            color: [1, 1, 1],
+            intensity: 1,
+            radius: 5,
+            baked: true,
+          };
+          const next = addLightToScene(scene, newLight);
+          onSceneChange(next);
+          setSelected(cell);
+          setInspector({
+            kind: "light",
+            index: (next.lights?.length ?? 1) - 1,
+          });
+          return;
+        }
+        if (e.button === 2) {
+          e.preventDefault();
+          const lights = scene.lights ?? [];
+          const hitIdx = lights.findIndex(
+            (l) => Math.floor(l.x) === cell.x && Math.floor(l.y) === cell.y,
+          );
+          if (hitIdx >= 0) {
+            onSceneChange(removeLight(scene, hitIdx));
+            setInspector(null);
+          }
+          return;
+        }
+        return;
+      }
+
+      // ── Entity tool — left-click opens the prefab picker popover.
+      // Right-click on an existing entity removes it.
+      if (tool === "entity") {
+        if (e.button === 0) {
+          // Snap to an existing entity if the user clicked one (lets
+          // them re-open the inspector without removing).
+          const entities = scene.entities ?? [];
+          const hitIdx = entities.findIndex((ent) => {
+            const p = getEntityPosition(ent);
+            return p && Math.floor(p.x) === cell.x && Math.floor(p.y) === cell.y;
+          });
+          if (hitIdx >= 0) {
+            setSelected(cell);
+            setInspector({ kind: "entity", index: hitIdx });
+            return;
+          }
+          // Otherwise open the prefab picker — placement happens via
+          // the popover's click handler.
+          setPrefabPopover({ x: e.clientX, y: e.clientY, cell });
+          return;
+        }
+        if (e.button === 2) {
+          e.preventDefault();
+          const entities = scene.entities ?? [];
+          const hitIdx = entities.findIndex((ent) => {
+            const p = getEntityPosition(ent);
+            return p && Math.floor(p.x) === cell.x && Math.floor(p.y) === cell.y;
+          });
+          if (hitIdx >= 0) {
+            onSceneChange(removeEntity(scene, hitIdx));
+            setInspector(null);
+          }
+          return;
+        }
+        return;
+      }
+
+      // ── Paint tool (E3 default).
       if (e.button === 0) {
         dragRef.current = { button: 0, last: `${cell.x},${cell.y}` };
         setSelected(cell);
+        setInspector({ kind: "cell", x: cell.x, y: cell.y });
         paintCell(cell.x, cell.y, "paint");
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
@@ -449,7 +875,7 @@ export function GridEditor({
         e.preventDefault();
       }
     },
-    [pan, screenToCell, paintCell],
+    [pan, screenToCell, paintCell, tool, scene, onSceneChange],
   );
 
   const onPointerMove = useCallback(
@@ -518,7 +944,13 @@ export function GridEditor({
       if (e.key === "w" || e.key === "W") setLayer("walls");
       else if (e.key === "f" || e.key === "F") setLayer("floors");
       else if (e.key === "c" || e.key === "C") setLayer("ceiling");
-      else if (e.key === "+" || e.key === "=")
+      else if (e.key === "p" || e.key === "P") setTool("paint");
+      else if (e.key === "e" || e.key === "E") setTool("entity");
+      else if (e.key === "l" || e.key === "L") setTool("light");
+      else if (e.key === "Escape") {
+        setPrefabPopover(null);
+        setInspector(null);
+      } else if (e.key === "+" || e.key === "=")
         setZoom((z) => Math.min(6, z * 1.2));
       else if (e.key === "-" || e.key === "_")
         setZoom((z) => Math.max(0.25, z / 1.2));
@@ -636,6 +1068,83 @@ export function GridEditor({
         }
       }
 
+      // ── Light glyphs.  Baked lights get a yellow filled circle;
+      // dynamic lights (baked: false) get a hollow white ring.
+      const lights = scene.lights ?? [];
+      for (let i = 0; i < lights.length; i++) {
+        const L = lights[i]!;
+        const px = pan.x + L.x * cellSize;
+        const py = pan.y + L.y * cellSize;
+        const r = Math.max(3, cellSize * 0.22);
+        const baked = L.baked !== false;
+        if (baked) {
+          ctx.fillStyle = "#fde047"; // amber-300
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // Radius hint while selected.
+        if (
+          inspector &&
+          inspector.kind === "light" &&
+          inspector.index === i &&
+          L.radius
+        ) {
+          ctx.strokeStyle = "rgba(253, 224, 71, 0.35)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(px, py, L.radius * cellSize, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
+      // ── Entity glyphs.  A small square + first-letter label.  Any
+      // entity with a Position component shows up.
+      const entitiesArr = scene.entities ?? [];
+      for (let i = 0; i < entitiesArr.length; i++) {
+        const ent = entitiesArr[i]!;
+        const pos = getEntityPosition(ent);
+        if (!pos) continue;
+        const px = pan.x + pos.x * cellSize;
+        const py = pan.y + pos.y * cellSize;
+        const r = Math.max(4, cellSize * 0.25);
+        ctx.fillStyle = "#06b6d4"; // cyan-500
+        ctx.fillRect(px - r, py - r, r * 2, r * 2);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(px - r, py - r, r * 2, r * 2);
+        // Label — first letter of name OR first letter of first component.
+        const label =
+          ent.name?.[0] ??
+          Object.keys(ent.components)[0]?.[0] ??
+          "?";
+        if (cellSize >= 14) {
+          ctx.fillStyle = "#0c0a09";
+          ctx.font = `${Math.max(8, Math.floor(cellSize * 0.4))}px monospace`;
+          ctx.textBaseline = "middle";
+          ctx.textAlign = "center";
+          ctx.fillText(label.toUpperCase(), px, py);
+        }
+        if (
+          inspector &&
+          inspector.kind === "entity" &&
+          inspector.index === i
+        ) {
+          ctx.strokeStyle = "#f59e0b"; // amber-500
+          ctx.lineWidth = 2;
+          ctx.strokeRect(px - r - 2, py - r - 2, (r + 2) * 2, (r + 2) * 2);
+        }
+      }
+
       // Spawn marker (player position).
       const sx = scene.spawn?.x;
       const sy = scene.spawn?.y;
@@ -694,7 +1203,7 @@ export function GridEditor({
     // draw loop doesn't restart on every render. They're read out of
     // closures that capture the latest refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, layer, pan, cellSize, hover, selected, resolver, size]);
+  }, [scene, layer, pan, cellSize, hover, selected, resolver, size, inspector]);
 
   // Bump trigger for re-render when an image finishes loading mid-draw.
   const bumpRef = useRef<(() => void) | null>(null);
@@ -780,13 +1289,38 @@ export function GridEditor({
       {/* Middle: canvas + toolbar. */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 text-xs">
+          <span className="text-zinc-500 uppercase tracking-wide">Tool</span>
+          {(
+            [
+              { id: "paint" as const, label: "Paint (P)", hint: "Paint tiles" },
+              { id: "entity" as const, label: "Entity (E)", hint: "Place entities" },
+              { id: "light" as const, label: "Light (L)", hint: "Place lights" },
+            ]
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTool(t.id)}
+              className={cn(
+                "px-2 py-1 rounded border",
+                tool === t.id
+                  ? "bg-amber-500 text-zinc-950 border-amber-500"
+                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
+              )}
+              title={t.hint}
+            >
+              {t.label}
+            </button>
+          ))}
+          <div className="mx-2 h-4 w-px bg-zinc-800" />
           <span className="text-zinc-500 uppercase tracking-wide">Layer</span>
           {(["walls", "floors", "ceiling"] as const).map((l) => (
             <button
               key={l}
               onClick={() => setLayer(l)}
+              disabled={tool !== "paint"}
               className={cn(
                 "px-2 py-1 rounded border",
+                tool !== "paint" && "opacity-50 cursor-not-allowed",
                 layer === l
                   ? "bg-amber-500 text-zinc-950 border-amber-500"
                   : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
@@ -845,36 +1379,98 @@ export function GridEditor({
         >
           <canvas
             ref={canvasRef}
-            className="block absolute inset-0 cursor-crosshair"
+            className={cn(
+              "block absolute inset-0",
+              tool === "paint" && "cursor-crosshair",
+              tool === "entity" && "cursor-cell",
+              tool === "light" && "cursor-pointer",
+            )}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerLeave={() => setHover(null)}
             onWheel={onWheel}
-            // Right-click is paint-erase; suppress the browser menu.
+            // Right-click is paint-erase / entity-remove; suppress menu.
             onContextMenu={(e) => e.preventDefault()}
           />
           {/* Hover badge — bottom-left, like the in-game minimap label. */}
           {hover ? (
             <div className="absolute bottom-2 left-2 text-[10px] bg-zinc-950/80 border border-zinc-800 rounded px-2 py-1 font-mono">
               ({hover.x}, {hover.y}) ·{" "}
-              {presetForCell(scene, layer, hover.x, hover.y) ?? "(empty)"}
+              {tool === "paint"
+                ? (presetForCell(scene, layer, hover.x, hover.y) ?? "(empty)")
+                : tool === "entity"
+                  ? "click to place entity"
+                  : "click to place light"}
             </div>
+          ) : null}
+          {/* Prefab picker popover.  Anchored to the click coords; closes
+              on Escape or backdrop click.  Selecting a prefab spawns an
+              entity at the popover's cell + closes the popover. */}
+          {prefabPopover ? (
+            <PrefabPickerPopover
+              x={prefabPopover.x}
+              y={prefabPopover.y}
+              prefabs={resolvedPrefabs}
+              onClose={() => setPrefabPopover(null)}
+              onPick={(name) => {
+                const cell = prefabPopover.cell;
+                const entity: SceneEntity = {
+                  name: `${name}_${(scene.entities?.length ?? 0) + 1}`,
+                  components: {
+                    Position: { x: cell.x + 0.5, y: cell.y + 0.5, z: 0 },
+                  },
+                };
+                // Stamp a prefab marker via a free-form `prefab` field
+                // so the engine + smoke tests can spot the source.
+                (entity as Record<string, unknown>).prefab = name;
+                const next = addEntityToScene(scene, entity);
+                onSceneChange(next);
+                setSelected(cell);
+                setInspector({
+                  kind: "entity",
+                  index: (next.entities?.length ?? 1) - 1,
+                });
+                setPrefabPopover(null);
+              }}
+            />
           ) : null}
         </div>
       </div>
 
-      {/* Right: cell inspector. */}
-      <aside className="w-64 shrink-0 border-l border-zinc-800 flex flex-col text-xs">
+      {/* Right: inspector — switches form on selection kind. */}
+      <aside className="w-72 shrink-0 border-l border-zinc-800 flex flex-col text-xs">
         <div className="px-3 py-2 border-b border-zinc-800">
           <div className="uppercase tracking-wide text-zinc-400">
-            Cell inspector
+            {inspector?.kind === "entity"
+              ? "Entity inspector"
+              : inspector?.kind === "light"
+                ? "Light inspector"
+                : "Cell inspector"}
           </div>
         </div>
         <div className="flex-1 overflow-auto p-3 space-y-3">
-          {!selected ? (
+          {inspector?.kind === "light" ? (
+            <LightInspector
+              index={inspector.index}
+              scene={scene}
+              onSceneChange={onSceneChange}
+              onClose={() => setInspector(null)}
+            />
+          ) : inspector?.kind === "entity" ? (
+            <EntityInspector
+              index={inspector.index}
+              scene={scene}
+              spriteIds={spriteIds}
+              onSceneChange={onSceneChange}
+              onClose={() => setInspector(null)}
+            />
+          ) : !selected ? (
             <div className="text-zinc-500">
               Left-click a cell to inspect it.
+              <div className="mt-2 text-zinc-600">
+                P = paint · E = entity · L = light
+              </div>
             </div>
           ) : (
             <>
@@ -916,33 +1512,6 @@ export function GridEditor({
                       {selectedPreset.sourcePath}
                     </div>
                   </div>
-                  <div className="pt-2 border-t border-zinc-800 space-y-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="w-full"
-                      onClick={() => {
-                        // Deferred to E4 — see report. Surface the
-                        // preset's source file path so a power user can
-                        // edit the JSONC in the manifest "Advanced"
-                        // textarea for now.
-                        alert(
-                          `Edit preset is deferred to E4.\n\nFor now, edit ${selectedPreset.sourcePath} via the manifest "Advanced" pane or the asset list.`,
-                        );
-                      }}
-                    >
-                      Edit preset (E4)
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="w-full text-zinc-500"
-                      disabled
-                      title="Break-link / Promote-to-named land in E4"
-                    >
-                      Break link / Promote (E4)
-                    </Button>
-                  </div>
                 </>
               ) : (
                 <div className="text-zinc-500">
@@ -955,6 +1524,644 @@ export function GridEditor({
         </div>
       </aside>
     </div>
+  );
+}
+
+/* --- Inspector sub-components ----------------------------------------- */
+
+/** RGB swatch + hex input — kept tiny so it slots into both the Light
+ *  inspector and any future "color" component sub-form. */
+function ColorPicker({
+  value,
+  onChange,
+}: {
+  value: ReadonlyArray<number>;
+  onChange: (rgb: [number, number, number]) => void;
+}) {
+  const hex = rgbToHex(value);
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="color"
+        value={hex}
+        onChange={(e) => {
+          const parsed = hexToRgb(e.target.value);
+          if (parsed) onChange(parsed);
+        }}
+        className="h-7 w-9 rounded border border-zinc-700 bg-zinc-900 cursor-pointer"
+      />
+      <input
+        type="text"
+        value={hex}
+        onChange={(e) => {
+          const parsed = hexToRgb(e.target.value);
+          if (parsed) onChange(parsed);
+        }}
+        className="flex-1 h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
+      />
+    </div>
+  );
+}
+
+/** Numeric slider + bound number input. */
+function NumberSlider({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {min !== undefined && max !== undefined ? (
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step ?? 0.01}
+          value={Number.isFinite(value) ? value : 0}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="flex-1 accent-amber-500"
+        />
+      ) : null}
+      <input
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+        min={min}
+        max={max}
+        step={step ?? 0.01}
+        onChange={(e) => {
+          const n = parseFloat(e.target.value);
+          if (Number.isFinite(n)) onChange(n);
+        }}
+        className="w-20 h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
+      />
+    </div>
+  );
+}
+
+function LightInspector({
+  index,
+  scene,
+  onSceneChange,
+  onClose,
+}: {
+  index: number;
+  scene: MutableScene;
+  onSceneChange: (next: MutableScene) => void;
+  onClose: () => void;
+}) {
+  const light = scene.lights?.[index];
+  if (!light) {
+    return <div className="text-zinc-500">Light not found.</div>;
+  }
+  const patch = (p: Partial<SceneLight>): void => {
+    onSceneChange(replaceLight(scene, index, { ...light, ...p }));
+  };
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-zinc-500">Light #{index}</div>
+        <button
+          onClick={onClose}
+          className="text-[10px] text-zinc-400 hover:text-amber-300"
+          title="Close inspector (Escape)"
+        >
+          ✕
+        </button>
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">Position</div>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberSlider
+            value={light.x}
+            onChange={(n) => patch({ x: n })}
+            step={0.5}
+          />
+          <NumberSlider
+            value={light.y}
+            onChange={(n) => patch({ y: n })}
+            step={0.5}
+          />
+        </div>
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">Color (RGB)</div>
+        <ColorPicker
+          value={light.color ?? [1, 1, 1]}
+          onChange={(rgb) => patch({ color: rgb })}
+        />
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">
+          Intensity ({(light.intensity ?? 1).toFixed(2)})
+        </div>
+        <NumberSlider
+          value={light.intensity ?? 1}
+          onChange={(n) => patch({ intensity: n })}
+          min={0}
+          max={10}
+          step={0.1}
+        />
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">
+          Radius ({(light.radius ?? 5).toFixed(1)})
+        </div>
+        <NumberSlider
+          value={light.radius ?? 5}
+          onChange={(n) => patch({ radius: n })}
+          min={0}
+          max={20}
+          step={0.5}
+        />
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">
+          Z height ({(light.z ?? 0.5).toFixed(2)})
+        </div>
+        <NumberSlider
+          value={light.z ?? 0.5}
+          onChange={(n) => patch({ z: n })}
+          min={0}
+          max={2}
+          step={0.05}
+        />
+      </div>
+      <div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={light.baked !== false}
+            onChange={(e) => patch({ baked: e.target.checked })}
+          />
+          <span className="text-zinc-300">
+            Baked{" "}
+            <span className="text-zinc-500">
+              (uncheck for dynamic — skipped by the bake)
+            </span>
+          </span>
+        </label>
+      </div>
+      <div className="pt-2 border-t border-zinc-800">
+        <Button
+          variant="danger"
+          size="sm"
+          className="w-full"
+          onClick={() => {
+            onSceneChange(removeLight(scene, index));
+            onClose();
+          }}
+        >
+          Remove light
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EntityInspector({
+  index,
+  scene,
+  spriteIds,
+  onSceneChange,
+  onClose,
+}: {
+  index: number;
+  scene: MutableScene;
+  spriteIds?: ReadonlyArray<string>;
+  onSceneChange: (next: MutableScene) => void;
+  onClose: () => void;
+}) {
+  const entity = scene.entities?.[index];
+  if (!entity) {
+    return <div className="text-zinc-500">Entity not found.</div>;
+  }
+  const componentNames = Object.keys(entity.components);
+  const availableToAdd = BUILT_IN_COMPONENT_SCHEMAS.map((s) => s.name).filter(
+    (n) => !componentNames.includes(n),
+  );
+
+  const patchComponent = (
+    name: string,
+    next: Record<string, unknown>,
+  ): void => {
+    onSceneChange(
+      replaceEntity(scene, index, {
+        ...entity,
+        components: { ...entity.components, [name]: next },
+      }),
+    );
+  };
+  const removeComponent = (name: string): void => {
+    const copy = { ...entity.components };
+    delete copy[name];
+    onSceneChange(
+      replaceEntity(scene, index, { ...entity, components: copy }),
+    );
+  };
+  const addComponent = (name: string): void => {
+    const schema = findComponentSchema(name);
+    const data = schema ? { ...schema.defaultData } : {};
+    patchComponent(name, data);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-zinc-500">Entity #{index}</div>
+        <button
+          onClick={onClose}
+          className="text-[10px] text-zinc-400 hover:text-amber-300"
+          title="Close inspector (Escape)"
+        >
+          ✕
+        </button>
+      </div>
+      <div>
+        <div className="text-zinc-500 mb-1">Name</div>
+        <input
+          value={entity.name ?? ""}
+          onChange={(e) => {
+            const trimmed = e.target.value;
+            onSceneChange(
+              replaceEntity(scene, index, {
+                ...entity,
+                name: trimmed.length === 0 ? undefined : trimmed,
+              }),
+            );
+          }}
+          placeholder="(unnamed)"
+          className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
+        />
+      </div>
+      {typeof (entity as Record<string, unknown>).prefab === "string" ? (
+        <div>
+          <div className="text-zinc-500">Prefab</div>
+          <div className="font-mono">
+            {(entity as Record<string, unknown>).prefab as string}
+          </div>
+        </div>
+      ) : null}
+      {componentNames.map((name) => (
+        <ComponentSubform
+          key={name}
+          name={name}
+          data={entity.components[name] as Record<string, unknown>}
+          spriteIds={spriteIds}
+          onPatch={(next) => patchComponent(name, next)}
+          onRemove={() => removeComponent(name)}
+        />
+      ))}
+      {availableToAdd.length > 0 ? (
+        <div className="pt-2 border-t border-zinc-800">
+          <div className="text-zinc-500 mb-1">Add component</div>
+          <select
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) {
+                addComponent(v);
+                e.target.value = "";
+              }
+            }}
+            className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px]"
+            defaultValue=""
+          >
+            <option value="" disabled>
+              + add component…
+            </option>
+            {availableToAdd.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <div className="pt-2 border-t border-zinc-800">
+        <Button
+          variant="danger"
+          size="sm"
+          className="w-full"
+          onClick={() => {
+            onSceneChange(removeEntity(scene, index));
+            onClose();
+          }}
+        >
+          Remove entity
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Render the sub-form for one component on the selected entity.
+ *  Known components use their schema; unknown components fall back to
+ *  a JSON textarea so modder-defined shapes are still editable. */
+function ComponentSubform({
+  name,
+  data,
+  spriteIds,
+  onPatch,
+  onRemove,
+}: {
+  name: string;
+  data: Record<string, unknown> | undefined;
+  spriteIds?: ReadonlyArray<string>;
+  onPatch: (next: Record<string, unknown>) => void;
+  onRemove: () => void;
+}) {
+  const schema = findComponentSchema(name);
+  const safe = data ?? {};
+  if (!schema) {
+    // Generic JSON-editor fallback for unknown components.
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="text-zinc-300 font-medium">
+            {name}{" "}
+            <span className="text-[10px] text-zinc-500">(JSON)</span>
+          </div>
+          <button
+            onClick={onRemove}
+            className="text-[10px] text-zinc-500 hover:text-red-400"
+            title="Remove component"
+          >
+            ✕
+          </button>
+        </div>
+        <JsonComponentEditor data={safe} onPatch={onPatch} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 border border-zinc-800 rounded p-2 bg-zinc-950/40">
+      <div className="flex items-center justify-between">
+        <div className="text-zinc-300 font-medium">{name}</div>
+        <button
+          onClick={onRemove}
+          className="text-[10px] text-zinc-500 hover:text-red-400"
+          title="Remove component"
+        >
+          ✕
+        </button>
+      </div>
+      {schema.fields.map((field) => (
+        <ComponentField
+          key={field.key}
+          field={field}
+          value={safe[field.key]}
+          spriteIds={spriteIds}
+          spriteFieldKey={
+            name === "Sprite" && field.key === "imageId" ? true : false
+          }
+          onChange={(v) => onPatch({ ...safe, [field.key]: v })}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ComponentField({
+  field,
+  value,
+  spriteIds,
+  spriteFieldKey,
+  onChange,
+}: {
+  field: ComponentFieldSpec;
+  value: unknown;
+  spriteIds?: ReadonlyArray<string>;
+  spriteFieldKey: boolean;
+  onChange: (next: unknown) => void;
+}) {
+  const label = field.label ?? field.key;
+  switch (field.kind) {
+    case "number": {
+      const n = typeof value === "number" ? value : 0;
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1" title={field.hint}>
+            {label}
+          </div>
+          <NumberSlider
+            value={n}
+            onChange={onChange}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+          />
+        </div>
+      );
+    }
+    case "boolean":
+      return (
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(e) => onChange(e.target.checked)}
+          />
+          <span className="text-zinc-300">{label}</span>
+        </label>
+      );
+    case "color3":
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1">{label}</div>
+          <ColorPicker
+            value={
+              Array.isArray(value) && value.length === 3
+                ? (value as number[])
+                : [1, 1, 1]
+            }
+            onChange={onChange}
+          />
+        </div>
+      );
+    case "string": {
+      const s = typeof value === "string" ? value : "";
+      // Sprite imageId fields get a dropdown when the manifest exposes
+      // sprites; otherwise fall back to a free-form text input.
+      if (spriteFieldKey && spriteIds && spriteIds.length > 0) {
+        return (
+          <div>
+            <div className="text-zinc-500 mb-1" title={field.hint}>
+              {label}
+            </div>
+            <select
+              value={s}
+              onChange={(e) => onChange(e.target.value)}
+              className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px]"
+            >
+              <option value="">(none)</option>
+              {spriteIds.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      }
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1" title={field.hint}>
+            {label}
+          </div>
+          <input
+            value={s}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.hint}
+            className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
+          />
+        </div>
+      );
+    }
+    case "vec2": {
+      const v = (value as { x?: number; y?: number }) ?? {};
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1">{label}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumberSlider
+              value={v.x ?? 0}
+              onChange={(n) => onChange({ ...v, x: n })}
+            />
+            <NumberSlider
+              value={v.y ?? 0}
+              onChange={(n) => onChange({ ...v, y: n })}
+            />
+          </div>
+        </div>
+      );
+    }
+    case "vec3": {
+      const v = (value as { x?: number; y?: number; z?: number }) ?? {};
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1">{label}</div>
+          <div className="grid grid-cols-3 gap-2">
+            <NumberSlider
+              value={v.x ?? 0}
+              onChange={(n) => onChange({ ...v, x: n })}
+            />
+            <NumberSlider
+              value={v.y ?? 0}
+              onChange={(n) => onChange({ ...v, y: n })}
+            />
+            <NumberSlider
+              value={v.z ?? 0}
+              onChange={(n) => onChange({ ...v, z: n })}
+            />
+          </div>
+        </div>
+      );
+    }
+  }
+}
+
+/** JSON-textarea fallback for unknown (modder-defined) components. */
+function JsonComponentEditor({
+  data,
+  onPatch,
+}: {
+  data: Record<string, unknown>;
+  onPatch: (next: Record<string, unknown>) => void;
+}) {
+  const [text, setText] = useState(() => JSON.stringify(data, null, 2));
+  const [error, setError] = useState<string | null>(null);
+  // Re-sync when the underlying data changes (e.g. another component
+  // added on the same entity).
+  useEffect(() => {
+    setText(JSON.stringify(data, null, 2));
+    setError(null);
+  }, [data]);
+  return (
+    <div className="space-y-1">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+              setError("must be a JSON object");
+              return;
+            }
+            setError(null);
+            onPatch(parsed as Record<string, unknown>);
+          } catch (err) {
+            setError((err as Error).message);
+          }
+        }}
+        className="w-full min-h-[80px] rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-mono"
+        spellCheck={false}
+      />
+      {error ? <div className="text-red-400 text-[10px]">{error}</div> : null}
+    </div>
+  );
+}
+
+/** Floating popover anchored at (x, y).  Lists prefabs; click selects. */
+function PrefabPickerPopover({
+  x,
+  y,
+  prefabs,
+  onClose,
+  onPick,
+}: {
+  x: number;
+  y: number;
+  prefabs: ReadonlyArray<string>;
+  onClose: () => void;
+  onPick: (name: string) => void;
+}) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
+      <div
+        className="fixed z-50 w-56 rounded border border-zinc-700 bg-zinc-900 shadow-xl text-xs"
+        style={{ left: x + 8, top: y + 8 }}
+      >
+        <div className="px-3 py-2 border-b border-zinc-800 text-zinc-400 uppercase tracking-wide">
+          Place prefab
+        </div>
+        <div className="max-h-64 overflow-auto py-1">
+          {prefabs.length === 0 ? (
+            <div className="px-3 py-2 text-zinc-500">
+              No prefabs registered.
+              <div className="mt-1 text-[10px] text-zinc-600">
+                Pack scripts must call <code>api.registerPrefab</code>.
+              </div>
+            </div>
+          ) : (
+            prefabs.map((name) => (
+              <button
+                key={name}
+                className="w-full text-left px-3 py-1.5 hover:bg-zinc-800 text-zinc-200"
+                onClick={() => onPick(name)}
+              >
+                {name}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 

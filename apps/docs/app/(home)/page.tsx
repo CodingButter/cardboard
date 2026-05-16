@@ -129,6 +129,21 @@ export default function HomePage() {
               Write your first script
               <ArrowRight aria-hidden="true" className="h-4 w-4" />
             </Link>
+            {/*
+             * Editor lives under `/cardboard/editor/` (staged into
+             * `apps/docs/public/editor/` by `scripts/build-editor-for-docs.ts`
+             * during the docs `prebuild` step). Use a plain `<a>` here —
+             * Next's `<Link>` would prepend `basePath` to a path that's
+             * already absolute (under the public output), causing a double
+             * `/cardboard/cardboard/editor/`.
+             */}
+            <a
+              href="/cardboard/editor/"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border bg-fd-card px-5 py-2.5 text-sm font-semibold text-fd-foreground shadow-sm transition-colors hover:bg-fd-accent/40"
+            >
+              <PenTool aria-hidden="true" className="h-4 w-4" />
+              Open the editor
+            </a>
             <Link
               href="/docs/api"
               className="inline-flex items-center justify-center gap-2 rounded-lg border bg-fd-card px-5 py-2.5 text-sm font-semibold text-fd-foreground shadow-sm transition-colors hover:bg-fd-accent/40"
@@ -173,6 +188,44 @@ export default function HomePage() {
             <code className="rounded bg-fd-muted/60 px-1 py-0.5 font-mono text-xs">Esc</code>{' '}
             to release. Loading the demo pack (~26 MB) — first load may take a moment.
           </p>
+        </div>
+      </section>
+
+      {/* ──────────── 1c. Open the editor ──────────── */}
+      <section className="border-b">
+        <div className="mx-auto w-full max-w-5xl px-6 py-14 sm:py-20">
+          <div className="flex flex-col items-start gap-6 rounded-2xl border bg-fd-card p-8 shadow-sm sm:flex-row sm:items-center sm:p-10">
+            <span
+              aria-hidden="true"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-fd-primary/10 text-fd-primary [&_svg]:h-6 [&_svg]:w-6"
+            >
+              <PenTool />
+            </span>
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-fd-primary">
+                Build packs in your browser
+              </span>
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                Open the editor
+              </h2>
+              <p className="max-w-2xl text-fd-muted-foreground">
+                In-browser pack editor — IndexedDB-backed, live engine preview.
+                Build your own packs without leaving the browser.
+              </p>
+            </div>
+            {/*
+             * `/cardboard/editor/` is served by GitHub Pages from
+             * `apps/docs/public/editor/` (staged at build time). See note
+             * in the hero CTA above re: why this is a plain anchor.
+             */}
+            <a
+              href="/cardboard/editor/"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-semibold text-fd-primary-foreground shadow-sm transition-colors hover:bg-fd-primary/90 sm:ml-auto"
+            >
+              Open editor
+              <ArrowRight aria-hidden="true" className="h-4 w-4" />
+            </a>
+          </div>
         </div>
       </section>
 

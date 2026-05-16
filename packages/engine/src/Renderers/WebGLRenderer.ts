@@ -8,7 +8,12 @@ import { Texture } from "./Texture";
 import type { LightInstance, SceneRenderer, SpriteDrawRequest } from "./SceneRenderer";
 import type { AssetPack, SheetEntry, ShaderRole } from "AssetPack";
 import { getShaderSource, SHADER_ROLES } from "./ShaderRoleRegistry";
-import { assembleSpriteSource, assembleWorldSource, buildFragmentSource } from "./ShaderInjection";
+import {
+  assembleShaderSourceFromChain,
+  assembleSpriteSource,
+  assembleWorldSource,
+  buildFragmentSource,
+} from "./ShaderInjection";
 import type { ShaderVariantSet, WorldShaderVariantSet } from "./ShaderVariants";
 import { PostPassChain } from "./PostPassChain";
 
@@ -19,12 +24,23 @@ export interface WebGLRendererProps {
   height?: number;
   /**
    * Pre-resolved shader source per role, as produced by
-   * `WebGLRenderer.prefetchShaderSources(pack)`. When omitted, the
-   * renderer uses its built-in defaults — equivalent to passing the
-   * result of a `prefetchShaderSources` call on a pack with no
-   * `shaders` field. Phase S1 of `ENGINE_PACK_SHADERS.md`.
+   * `WebGLRenderer.prefetchShaderSources(pack)` (single pack) or
+   * `WebGLRenderer.prefetchShaderSourcesFromChain(chain)` (M4 of
+   * MATERIALS.md §10). When omitted, the renderer uses its built-in
+   * defaults — equivalent to passing the result of a prefetch on a
+   * pack / chain with no `shaders` field. Phase S1 of
+   * `ENGINE_PACK_SHADERS.md`; M4 widens the producer to a chain.
    */
   shaderSources?: Partial<Record<ShaderRole, string>>;
+  /**
+   * Optional ordered pack chain (deps-first → root-last) — M4 of
+   * `docs/plans/MATERIALS.md` §10. When provided, the renderer reads
+   * `manifest.shaders` from EVERY pack in the chain (post-pass
+   * cascade, hook cascade, Mode 1 last-wins) instead of just the
+   * root pack. Length-1 chains (or omission) keep the pre-M4 single-
+   * pack behaviour byte-identical.
+   */
+  chain?: ReadonlyArray<AssetPack>;
 }
 
 /* --- Tile texture array --------------------------------------------------- */
@@ -825,6 +841,14 @@ export class WebGLRenderer implements SceneRenderer {
    * Stored from the constructor.
    */
   private readonly pack: AssetPack;
+  /**
+   * Full ordered pack chain (deps-first → root-last) when consumers
+   * opt into M4 (MATERIALS.md §10). Defaults to a length-1 array
+   * holding just `pack` so chain-aware paths can treat both modes
+   * uniformly without null checks. Single-pack callers see no
+   * behaviour change.
+   */
+  private readonly chain: ReadonlyArray<AssetPack>;
   private readonly shaderSources?: Partial<Record<ShaderRole, string>>;
 
   // ── Post-process chain (Mode 2, S4) ───────────────────────────────────
@@ -885,17 +909,55 @@ export class WebGLRenderer implements SceneRenderer {
     return out;
   }
 
+  /**
+   * Chain-aware variant — M4 of `docs/plans/MATERIALS.md` §10.
+   *
+   * Walks the ordered chain (deps-first → root-last) and resolves
+   * every role's fragment source against the cascaded manifests:
+   *
+   *  - Mode 1 (`shaders.{role}`) is last-wins per role across packs.
+   *  - Mode 3 (`shaders.{role}Hooks`) cascades per-hook across packs;
+   *    later packs overwrite earlier on hook-name collision (a
+   *    console warning surfaces the conflict so modders can audit
+   *    shadowing).
+   *
+   * Length-1 chains delegate to the single-pack `prefetchShaderSources`
+   * path so the (already-tested) single-pack diagnostics keep their
+   * pack-name prefix verbatim. Empty chains produce engine defaults
+   * for every role.
+   */
+  static async prefetchShaderSourcesFromChain(
+    chain: ReadonlyArray<AssetPack>,
+  ): Promise<Partial<Record<ShaderRole, string>>> {
+    if (chain.length === 1) return WebGLRenderer.prefetchShaderSources(chain[0]!);
+    const out: Partial<Record<ShaderRole, string>> = {};
+    const defaults: Record<ShaderRole, string> = {
+      skyFrag: FRAG_SKY_SRC,
+      worldFrag: FRAG_WORLD_SRC,
+      spriteFrag: FRAG_SPRITE_SRC,
+    };
+    for (const role of SHADER_ROLES) {
+      out[role] = await assembleShaderSourceFromChain(role, chain, defaults[role]);
+    }
+    return out;
+  }
+
   constructor({
     canvas,
     pack,
     width = canvas.clientWidth,
     height = canvas.clientHeight,
     shaderSources,
+    chain,
   }: WebGLRendererProps) {
     canvas.width = width;
     canvas.height = height;
     this.canvas = canvas;
     this.pack = pack;
+    // Default the chain to a length-1 array around `pack` so every
+    // chain-aware code path can iterate without null checks. Single-
+    // pack callers see no behaviour change (length-1 short-circuits).
+    this.chain = chain && chain.length > 0 ? chain : [pack];
     this.shaderSources = shaderSources;
 
     const gl = canvas.getContext("webgl2", { antialias: false, preserveDrawingBuffer: false });
@@ -1638,6 +1700,7 @@ export class WebGLRenderer implements SceneRenderer {
       FRAG_SPRITE_SRC,
       variants,
       sceneSpriteOverrides,
+      this.chain,
     );
     const oldProgram = this.spriteProgram;
     let newProgram: WebGLProgram;
@@ -1699,6 +1762,7 @@ export class WebGLRenderer implements SceneRenderer {
       FRAG_WORLD_SRC,
       variants,
       sceneWorldOverrides,
+      this.chain,
     );
     const oldProgram = this.worldProgram;
     let newProgram: WebGLProgram;
@@ -1880,9 +1944,14 @@ export class WebGLRenderer implements SceneRenderer {
    */
   async initPostPasses(): Promise<void> {
     if (this.postPasses) return;
-    this.postPasses = await PostPassChain.create(
+    // M4 — when a chain is bound, concatenate every pack's
+    // postPasses in chain order (deps-first → root-last). Single-
+    // pack callers (chain length 1) hit the same code path as
+    // pre-M4 via `PostPassChain.createFromChain`'s length-1 fast
+    // path. See MATERIALS.md §10 + ENGINE_PACK_SHADERS.md §10.3.
+    this.postPasses = await PostPassChain.createFromChain(
       this.gl,
-      this.pack,
+      this.chain,
       this.canvas.width,
       this.canvas.height,
     );

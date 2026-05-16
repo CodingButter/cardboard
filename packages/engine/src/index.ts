@@ -107,6 +107,13 @@ export { WallSide } from "./Libs/Raycast";
 // Vector — `Vec2` shows up in bake-lights' light-vector construction.
 export { Vec2 } from "./Libs/Vector";
 
+// Lightmap bake — engine-side `bakeScene`, consumed by BOTH the CLI
+// `apps/pack-builder/build-packs.ts` and the editor's Web Worker
+// (`apps/editor/src/workers/bake.worker.ts`). Per EDITOR.md Q11.2 the
+// bake lives in the engine so the two callers stay in sync.
+export { bakeScene } from "./Lighting";
+export type { BakeOpts, BakeResult, BakeStats } from "./Lighting";
+
 // Shader validation surface (M5 / MATERIALS.md §11). Pack-builder
 // consumes this at build-time. Kept additive — never imported by
 // the runtime renderer. See `Renderers/ShaderValidator.ts`.
@@ -122,3 +129,16 @@ export {
   type ShaderRefToValidate,
   type BackendStatus,
 } from "./Renderers/ShaderValidator";
+
+// ── M4 — pack-chain shader cascade (MATERIALS.md §10) ─────────────────
+// Exposed for the multi-pack smoke test + the future P2 conflict-
+// report UI in Settings → Packs. Kept additive in its own section so
+// the parallel engine-pack-split work (R3/R4) doesn't collide on this
+// barrel. Single-pack callers don't need to import these.
+export {
+  cascadeHooks,
+  cascadePostPasses,
+  chainHasMode1ForRole,
+  findMode1WinnerForRole,
+  type CascadedPostPass,
+} from "./Renderers/ShaderChainCascade";

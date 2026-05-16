@@ -35,7 +35,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import JSZip from "jszip";
-import { bakeScene, type BakeOpts } from "./bake-lights";
+import { bakeScene, type BakeOpts } from "@two_5_d/engine";
 import {
   buildPackScript,
   compiledPackScriptPath,

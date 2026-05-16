@@ -59,6 +59,20 @@ export class Game {
   readonly itemImages: ItemImages;
   readonly api: ModAPIImpl;
   readonly pack: AssetPack;
+  /**
+   * Ordered pack chain (deps-first → root-last) — M4 of
+   * `docs/plans/MATERIALS.md` §10. `pack` is the chain's last entry
+   * (root); earlier entries are transitive dependencies whose
+   * `manifest.shaders` files cascade into the assembled shader
+   * programs. Stored on Game so post-load passes (variant rebuild,
+   * post-pass compile) can reach the full cascade without re-
+   * threading the chain through every call site.
+   *
+   * Defaults to `[pack]` for single-pack callers — length-1 chains
+   * short-circuit the cascade machinery so behaviour is byte-
+   * identical to pre-M4.
+   */
+  readonly chain: ReadonlyArray<AssetPack>;
 
   private readonly canvas: HTMLCanvasElement;
   /**
@@ -78,13 +92,24 @@ export class Game {
     packConfig: PartialGameConfig = {},
     /**
      * Pre-resolved per-role fragment shaders, produced by
-     * `WebGLRenderer.prefetchShaderSources(pack)`. Forwarded to the
-     * WebGL renderer; the canvas2d renderer ignores it (pack shaders
-     * are a WebGL-only feature — `ENGINE_PACK_SHADERS.md` § 2).
+     * `WebGLRenderer.prefetchShaderSources(pack)` or
+     * `WebGLRenderer.prefetchShaderSourcesFromChain(chain)` (M4).
+     * Forwarded to the WebGL renderer; the canvas2d renderer ignores
+     * it (pack shaders are a WebGL-only feature —
+     * `ENGINE_PACK_SHADERS.md` § 2).
      */
     shaderSources?: Partial<Record<ShaderRole, string>>,
+    /**
+     * Optional ordered pack chain (deps-first → root-last) — M4 of
+     * `docs/plans/MATERIALS.md` §10. When omitted, defaults to
+     * `[pack]` so single-pack callers see no behaviour change.
+     * Multi-pack chains feed the renderer's hook / Mode 1 / post-pass
+     * cascades.
+     */
+    chain?: ReadonlyArray<AssetPack>,
   ) {
     this.pack = pack;
+    this.chain = chain && chain.length > 0 ? chain : [pack];
     this.canvas = canvas;
     this.fitCanvasToWindow();
     window.addEventListener("resize", this.fitCanvasToWindow);
@@ -101,7 +126,7 @@ export class Game {
     const rendererProps = { canvas, pack, width: CANVAS_SIZE.x, height: CANVAS_SIZE.y };
     this.renderer =
       CONFIG.rendering.backend === "webgl"
-        ? new WebGLRenderer({ ...rendererProps, shaderSources })
+        ? new WebGLRenderer({ ...rendererProps, shaderSources, chain: this.chain })
         : new TwoDRenderer(rendererProps);
     // Now that the renderer is ready, size the pixel buffer to the
     // actual window (was a no-op on the earlier `fitCanvasToWindow`

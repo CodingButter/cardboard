@@ -132,11 +132,19 @@ export async function main(
   // in memory after step 1, so this is microseconds.
   const { CONFIG } = await import("GameConfig");
   const { WebGLRenderer } = await import("Renderers");
+  // M4 of MATERIALS.md §10 — when more than one pack is loaded, the
+  // engine resolves each role's shader source from the cascaded
+  // chain (hooks merged per-pack, Mode 1 last-wins, post-passes
+  // appended in load order). Single-pack callers still take the
+  // single-pack fast path.
+  const anyPackShipsShaders = chain.some((p) => p.manifest.shaders !== undefined);
   const shaderSources =
-    CONFIG.rendering.backend === "webgl" && pack.manifest.shaders
-      ? await WebGLRenderer.prefetchShaderSources(pack)
+    CONFIG.rendering.backend === "webgl" && anyPackShipsShaders
+      ? chain.length > 1
+        ? await WebGLRenderer.prefetchShaderSourcesFromChain(chain)
+        : await WebGLRenderer.prefetchShaderSources(pack)
       : undefined;
-  const game = new Game(canvas, pack, scene, previous, packConfig, shaderSources);
+  const game = new Game(canvas, pack, scene, previous, packConfig, shaderSources, chain);
 
   // 5. Mod scripts — must run BEFORE we spawn the player, because the
   //    "player" prefab is pack-side content. The default pack's

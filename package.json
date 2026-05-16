@@ -9,6 +9,7 @@
     "docs:dev": "cd apps/docs && bun run dev",
     "docs:build": "cd apps/docs && bun run build",
     "build:game-for-docs": "bun scripts/build-game-for-docs.ts",
+    "build:editor-for-docs": "bun scripts/build-editor-for-docs.ts",
     "build": "cd apps/game && bun run build",
     "build-packs": "cd apps/pack-builder && bun run build-packs",
     "generate-scene": "cd apps/pack-builder && bun run generate-scene",

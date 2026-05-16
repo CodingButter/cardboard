@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "bun run sync:plans && bun run gen:api && bun run stage:game",
+    "prebuild": "bun run sync:plans && bun run gen:api && bun run stage:game && bun run stage:editor",
     "stage:game": "bun ../../scripts/build-game-for-docs.ts",
+    "stage:editor": "bun ../../scripts/build-editor-for-docs.ts",
     "build": "next build --webpack",
     "dev": "next dev",
     "start": "serve out",

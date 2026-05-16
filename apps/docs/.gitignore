@@ -8,6 +8,8 @@
 /content/docs/api/
 # staged static game bundle (built by scripts/build-game-for-docs.ts)
 /public/play/
+# staged static editor bundle (built by scripts/build-editor-for-docs.ts)
+/public/editor/
 
 # test & build
 /coverage
