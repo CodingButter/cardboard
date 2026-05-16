@@ -37,6 +37,11 @@ import type {
   DeclarativePrefab,
   PackManifest,
 } from "@two_5_d/engine";
+import {
+  buildAnimationComponentFromSuggestion,
+  computeAnimationWiringState,
+} from "../src/lib/prefabAnimationWiring";
+import { findComponentSchema } from "../src/lib/componentSchemas";
 
 let passed = 0;
 let failed = 0;
@@ -205,7 +210,181 @@ async function main() {
     "manifest.startScene preserved",
   );
 
-  // ── 8. Cleanup ──
+  // ── 8. AE3 — Sprite → Animation auto-wire prompt ──
+  //
+  // The EntitiesEditor surfaces an inline suggestion under the Sprite
+  // subform when the prefab points at a sheet-based sprite (one with
+  // `animations` declared in the manifest) but has no Animation
+  // component yet. Pure analysis lives in `prefabAnimationWiring`;
+  // the React tree consumes it without adding state.
+  //
+  // Seed a fresh project + manifest with a sheet-based sprite. We
+  // can reuse the same fake-IDB instance.
+  const wireProj = await EditorProjectStore.createProject("anim-wire smoke");
+  const wireId = wireProj.id;
+  await EditorProjectStore.saveManifest(wireId, {
+    name: "anim wire smoke",
+    version: "0.0.1",
+    tileTextures: {},
+    tileSheets: [],
+    startScene: "scenes/start.json",
+    sprites: {
+      zombie: {
+        image: "images/sprites/zombie-sheet.png",
+        frameWidth: 32,
+        frameHeight: 32,
+        cols: 4,
+        rows: 5,
+        angles: 1,
+        animations: {
+          idle: { frames: [0, 1, 2, 3], frameDuration: 0.2, loop: true },
+          walk: { frames: [0, 1, 2, 3], frameDuration: 0.1, loop: true },
+          attack: { frames: [0, 1, 2, 3], frameDuration: 0.08, loop: false, next: "idle" },
+        },
+      },
+      // A second sprite with no animations — should NOT trigger the prompt.
+      crate: { image: "images/sprites/crate.png" },
+    },
+  });
+  const wireMf = (await EditorProjectStore.loadManifest(wireId))!;
+
+  // ── 8a. Sprite with animations + no Animation component → suggest. ──
+  const draftWithSprite: DeclarativePrefab = {
+    name: "zombie_prefab",
+    components: {
+      Position: { x: 1, y: 1, z: 0 },
+      Sprite: { imageId: "zombie", scale: 1 },
+    },
+  };
+  const wiringSuggest = computeAnimationWiringState(
+    draftWithSprite,
+    wireMf.sprites ?? {},
+  );
+  assert(
+    wiringSuggest.suggestAnimation,
+    "AE3 — sprite with animations + no Animation component → suggestAnimation true",
+  );
+  assertEqual(
+    [...wiringSuggest.spriteAnimationNames],
+    ["idle", "walk", "attack"],
+    "AE3 — spriteAnimationNames reflects sprite's animations dict (insertion order)",
+  );
+  assert(
+    !wiringSuggest.animationMismatch,
+    "AE3 — no Animation component → no mismatch warning",
+  );
+
+  // ── 8b. Click "+ Add Animation component" → component is added ──
+  const animPayload = buildAnimationComponentFromSuggestion(
+    wiringSuggest.spriteAnimationNames,
+  );
+  assert(animPayload !== null, "AE3 — suggestion produces a payload");
+  if (animPayload) {
+    assertEqual(
+      animPayload.current,
+      "idle",
+      "AE3 — auto-wired Animation uses the FIRST animation name as `current`",
+    );
+    assertEqual(animPayload.frame, 0, "AE3 — auto-wired Animation has frame=0");
+    assertEqual(animPayload.elapsed, 0, "AE3 — auto-wired Animation has elapsed=0");
+  }
+
+  // Simulate the editor mutation — add the Animation component to the
+  // prefab draft. After the mutation, the suggestion should disappear
+  // and the dropdown options should match the sprite's animations.
+  const draftWithAnim: DeclarativePrefab = {
+    ...draftWithSprite,
+    components: {
+      ...draftWithSprite.components,
+      Animation: animPayload ?? { current: "", frame: 0, elapsed: 0 },
+    },
+  };
+  const wiringAfterAdd = computeAnimationWiringState(
+    draftWithAnim,
+    wireMf.sprites ?? {},
+  );
+  assert(
+    !wiringAfterAdd.suggestAnimation,
+    "AE3 — after adding Animation component the suggestion disappears",
+  );
+  assert(
+    !wiringAfterAdd.animationMismatch,
+    "AE3 — current=idle is valid for the sprite → no mismatch",
+  );
+  assertEqual(
+    [...wiringAfterAdd.spriteAnimationNames],
+    ["idle", "walk", "attack"],
+    "AE3 — dropdown options match the sprite's animations (current=idle case)",
+  );
+
+  // ── 8c. Animation `current` dropdown — schema is in BUILT_IN list ──
+  // The schema-driven form needs the Animation component schema
+  // surfaced from componentSchemas. Verify it exists + the `current`
+  // field is the new `animationName` kind that drives the dropdown.
+  const animSchema = findComponentSchema("Animation");
+  assert(animSchema !== undefined, "AE3 — Animation component schema is registered");
+  if (animSchema) {
+    const current = animSchema.fields.find((f) => f.key === "current");
+    assert(
+      current?.kind === "animationName",
+      "AE3 — Animation.current uses the context-aware `animationName` field kind",
+    );
+  }
+
+  // ── 8d. Mismatch — current=foo not in animations → warning ──
+  const draftMismatch: DeclarativePrefab = {
+    ...draftWithSprite,
+    components: {
+      ...draftWithSprite.components,
+      Animation: { current: "foo", frame: 0, elapsed: 0 },
+    },
+  };
+  const wiringMismatch = computeAnimationWiringState(
+    draftMismatch,
+    wireMf.sprites ?? {},
+  );
+  assert(
+    wiringMismatch.animationMismatch,
+    "AE3 — current=foo (not in sprite's animations) → mismatch warning",
+  );
+
+  // ── 8e. Sprite cleared / removed → Animation mismatch ──
+  const draftNoSprite: DeclarativePrefab = {
+    name: "zombie_prefab",
+    components: {
+      Position: { x: 1, y: 1, z: 0 },
+      Animation: { current: "idle", frame: 0, elapsed: 0 },
+    },
+  };
+  const wiringNoSprite = computeAnimationWiringState(
+    draftNoSprite,
+    wireMf.sprites ?? {},
+  );
+  assert(
+    wiringNoSprite.animationMismatch,
+    "AE3 — Animation component without Sprite → mismatch warning",
+  );
+
+  // ── 8f. Sprite without animations → no suggestion ──
+  const draftCrate: DeclarativePrefab = {
+    name: "crate_prefab",
+    components: {
+      Position: { x: 1, y: 1, z: 0 },
+      Sprite: { imageId: "crate", scale: 1 },
+    },
+  };
+  const wiringCrate = computeAnimationWiringState(
+    draftCrate,
+    wireMf.sprites ?? {},
+  );
+  assert(
+    !wiringCrate.suggestAnimation,
+    "AE3 — sprite without animations → no suggestion (crate is just a static image)",
+  );
+
+  await EditorProjectStore.deleteProject(wireId);
+
+  // ── 9. Cleanup ──
   await EditorProjectStore.deleteProject(projectId);
   const gone = await EditorProjectStore.loadManifest(projectId);
   assert(gone === null, "project deletion cascades to manifest");

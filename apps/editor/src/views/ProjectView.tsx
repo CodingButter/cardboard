@@ -412,6 +412,13 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
               }}
               onPersistScene={persistScene}
               iframeRef={viewportFrameRef}
+              // Surface every prefab the engine will register at boot —
+              // declarative ones (manifest.prefabs[name]) AND sprite IDs
+              // — so the GridEditor entity tool's prefab picker stays in
+              // sync with the Entities tab. JS-detected prefabs ride on
+              // the fallback list inside GridEditor (player, marker).
+              prefabNames={Object.keys(manifest?.prefabs ?? {})}
+              spriteIds={Object.keys(manifest?.sprites ?? {})}
             />
           </div>
 

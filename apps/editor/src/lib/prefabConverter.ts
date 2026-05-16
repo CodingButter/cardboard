@@ -209,6 +209,14 @@ interface RegistrationFound {
   factory: ArrowFunctionExpression | FunctionExpression;
   /** The `registerPrefab(...)` call node — for span info. */
   callNode: CallExpression;
+  /**
+   * Sibling statements from the surrounding `export default (api) => { ... }`
+   * body that ran BEFORE this `registerPrefab` call. These hold the
+   * closure-captured bindings (e.g. `const defaultCamera = () => ({...})`
+   * in default-pack's `player.js`) that the factory body references.
+   * Hoisted into the residual init script when needed.
+   */
+  closureSiblings: Statement[];
 }
 
 /**
@@ -235,10 +243,11 @@ function collectRegistrations(
 function collectFromStatement(
   stmt: Statement,
   out: RegistrationFound[],
+  siblings: Statement[] = [],
 ): void {
   switch (stmt.type) {
     case "ExpressionStatement":
-      collectFromExpression(stmt.expression, out);
+      collectFromExpression(stmt.expression, out, siblings);
       return;
     case "ExportDefaultDeclaration": {
       const decl = stmt.declaration;
@@ -247,25 +256,38 @@ function collectFromStatement(
         decl.type === "FunctionExpression" ||
         decl.type === "FunctionDeclaration"
       ) {
-        // Descend into the function body.
+        // Descend into the function body. Each child statement that
+        // PRECEDES a `registerPrefab(...)` is a sibling — its bindings
+        // may close over the factory body and need hoisting into the
+        // residual init script. We accumulate the prefix list as we
+        // walk so each registration sees only the siblings declared
+        // ahead of it (later siblings can't be referenced by an
+        // earlier factory anyway in the canonical default-export
+        // shape, but we keep order to be safe).
         const body = decl.body;
         if (body.type === "BlockStatement") {
-          for (const inner of body.body) collectFromStatement(inner, out);
+          const prefix: Statement[] = [];
+          for (const inner of body.body) {
+            collectFromStatement(inner, out, prefix);
+            // After processing, this inner statement becomes part of
+            // the closure prefix available to subsequent siblings.
+            prefix.push(inner);
+          }
         } else {
           // Implicit-return arrow body — `(api) => api.registerPrefab(...)`.
-          collectFromExpression(body, out);
+          collectFromExpression(body, out, siblings);
         }
       }
       return;
     }
     case "VariableDeclaration": {
       for (const d of stmt.declarations) {
-        if (d.init) collectFromExpression(d.init, out);
+        if (d.init) collectFromExpression(d.init, out, siblings);
       }
       return;
     }
     case "BlockStatement": {
-      for (const inner of stmt.body) collectFromStatement(inner, out);
+      for (const inner of stmt.body) collectFromStatement(inner, out, siblings);
       return;
     }
     default:
@@ -276,10 +298,14 @@ function collectFromStatement(
 function collectFromExpression(
   expr: Expression,
   out: RegistrationFound[],
+  siblings: Statement[] = [],
 ): void {
   if (expr.type === "CallExpression") {
     const reg = matchRegisterPrefabCall(expr);
-    if (reg) out.push(reg);
+    if (reg) {
+      reg.closureSiblings = siblings.slice();
+      out.push(reg);
+    }
   }
 }
 
@@ -317,6 +343,7 @@ function matchRegisterPrefabCall(
     name: nameArg.value,
     factory: factoryArg,
     callNode: call,
+    closureSiblings: [],
   };
 }
 
@@ -328,8 +355,20 @@ interface AddCallInfo {
   componentName: string;
   /** The chain element node whose 3rd arg is the value. */
   valueExpr: Node;
-  /** Original source text for the entire statement holding the chain. */
+  /**
+   * Original source text for the entire statement holding the chain.
+   * Kept for diagnostics; the residual emitter prefers the per-link
+   * `valueSource` so a 9-link chain with only 1 extractable call
+   * doesn't get 8 copies of the entire statement in the residual.
+   */
   statementSource: string;
+  /**
+   * Original source text of just the 3rd argument (the value
+   * expression) for this individual chain link. The residual emitter
+   * uses this to synthesise a clean per-link `world.add(...)` line
+   * for each non-extractable call.
+   */
+  valueSource: string;
   /** Leading comment (single block joined) attached to the statement. */
   leadingComment?: string;
 }
@@ -376,6 +415,11 @@ function classifyRegistration(
   //     wholesale in the residual.
   const flatAdds: AddCallInfo[] = [];
   const residualStatements: string[] = [];
+  // Closure-binding source text from the surrounding `export default
+  // (api) => { ... }` body (e.g. top-level `const defaultCamera = …`
+  // in default-pack's player.js). Hoisted into the residual init
+  // script when the factory body references the binding identifier.
+  const closureHoists: string[] = [];
 
   for (const stmt of body.body) {
     if (stmt.type === "ReturnStatement") {
@@ -404,6 +448,14 @@ function classifyRegistration(
         isWorldSpawnInit(d.init),
       );
       if (allTrivial) continue;
+      // Drop `const world = api.world;` / `const C = api.components;`
+      // — the init-script wrapper re-declares these aliases, so leaving
+      // them in the residual produces a `SyntaxError: Identifier
+      // 'world' has already been declared`. See Phase #196 follow-up.
+      const allRedundantAlias = stmt.declarations.every((d) =>
+        isRedundantWrapperAlias(d),
+      );
+      if (allRedundantAlias) continue;
     }
     residualStatements.push(stmtSource(stmt, source));
   }
@@ -427,7 +479,35 @@ function classifyRegistration(
     .filter((c) => !c.extractable)
     .map((c) => c.residualSource)
     .join("\n");
-  const residualBody = [residualStatements.join("\n"), residualAdds]
+
+  // Hoist closure-captured const declarations from the wrapping
+  // `export default (api) => { ... }` body when the residual JS
+  // references their bound identifiers. Without this, helpers like
+  // `defaultCamera()` in default-pack's player.js end up with no
+  // binding in the init script and crash at first spawn.
+  const residualText = [residualStatements.join("\n"), residualAdds].join("\n");
+  for (const sib of reg.closureSiblings) {
+    if (sib.type !== "VariableDeclaration") continue;
+    for (const d of sib.declarations) {
+      if (d.id.type !== "Identifier") continue;
+      const name = d.id.name;
+      // Skip references to `api` (the wrapper supplies it as a param).
+      if (name === "api") continue;
+      // Cheap reference check — identifier appears as a whole word in
+      // the residual text. Avoids importing a full scope analyser.
+      const wordRe = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+      if (wordRe.test(residualText)) {
+        closureHoists.push(stmtSource(sib, source));
+        break;
+      }
+    }
+  }
+
+  const residualBody = [
+    closureHoists.join("\n"),
+    residualStatements.join("\n"),
+    residualAdds,
+  ]
     .filter((s) => s.trim().length > 0)
     .join("\n");
 
@@ -441,6 +521,34 @@ function classifyRegistration(
     totalCalls: calls.length,
     extractedCount: Object.keys(staticComponents).length,
   };
+}
+
+/**
+ * `true` when a `VariableDeclarator` re-declares an alias the
+ * init-script wrapper already provides — `const world = api.world` or
+ * `const C = api.components`. Stripping these from the residual avoids
+ * the duplicate-binding SyntaxError that crashes module load.
+ */
+function isRedundantWrapperAlias(
+  d: { id: Node; init?: Expression | null },
+): boolean {
+  if (!d.init) return false;
+  if (d.id.type !== "Identifier") return false;
+  const name = d.id.name;
+  if (name !== "world" && name !== "C") return false;
+  const init = d.init;
+  if (init.type !== "MemberExpression" || init.computed) return false;
+  if (init.object.type !== "Identifier" || init.object.name !== "api") {
+    return false;
+  }
+  if (init.property.type !== "Identifier") return false;
+  if (name === "world") return init.property.name === "world";
+  if (name === "C") return init.property.name === "components";
+  return false;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isWorldSpawnInit(init: Expression | null | undefined): boolean {
@@ -502,6 +610,7 @@ function flattenAddChain(
       componentName: compName,
       valueExpr: valArg,
       statementSource: stmtSource(stmt, source),
+      valueSource: nodeSource(valArg as Located, source),
     });
 
     // Step inwards: the next outer call wraps the chain target.
@@ -556,6 +665,7 @@ function matchAddCall(
     componentName: compName,
     valueExpr: valArg,
     statementSource: nodeSource(expr, source),
+    valueSource: nodeSource(valArg as Located, source),
   };
 }
 
@@ -564,7 +674,7 @@ function classifyOneAdd(
   valueExpr: Expression,
 ): PrefabComponentCall {
   const evaluated = tryEvaluateLiteral(valueExpr);
-  if (evaluated.ok) {
+  if (evaluated.ok && isJsonSafe(evaluated.value)) {
     return {
       componentName: add.componentName,
       extractable: true,
@@ -573,13 +683,54 @@ function classifyOneAdd(
       leadingComment: add.leadingComment,
     };
   }
+  // Non-extractable — synthesise a standalone `world.add(entity, C.X, <expr>)`
+  // line from the per-link value source. Falling back to the full
+  // statement source would duplicate the entire chain for every
+  // non-extractable link in the chain. See Phase #196 follow-up.
+  const residualSource = `world.add(entity, C.${add.componentName}, ${add.valueSource});`;
   return {
     componentName: add.componentName,
     extractable: false,
-    reason: evaluated.reason,
-    residualSource: add.statementSource,
+    reason: evaluated.ok
+      ? "non-JSON-safe literal (Infinity/NaN)"
+      : evaluated.reason,
+    residualSource,
     leadingComment: add.leadingComment,
   };
+}
+
+/**
+ * `JSON.stringify` collapses `Infinity` / `-Infinity` / `NaN` to `null`
+ * (silently), which would corrupt static component values that fall
+ * through to `manifest.prefabs[...].components`. Reject them at the
+ * extraction seam so the residual init script preserves the original
+ * runtime value via the regular `world.add(...)` path.
+ *
+ * Objects + arrays are checked recursively because pack authors love
+ * sentinel values like `{ lastFireTime: -Infinity }` (default-pack's
+ * `player.js` Weapon defaults).
+ */
+function isJsonSafe(value: unknown): boolean {
+  if (value === null) return true;
+  switch (typeof value) {
+    case "number":
+      return Number.isFinite(value);
+    case "string":
+    case "boolean":
+      return true;
+    case "undefined":
+      // undefined drops the key on JSON.stringify — fine as a static
+      // value because the engine's prefab loader skips undefined.
+      return true;
+    case "object":
+      if (Array.isArray(value)) return value.every(isJsonSafe);
+      for (const v of Object.values(value as Record<string, unknown>)) {
+        if (!isJsonSafe(v)) return false;
+      }
+      return true;
+    default:
+      return false;
+  }
 }
 
 /* -------------------------------------------------------------------- */

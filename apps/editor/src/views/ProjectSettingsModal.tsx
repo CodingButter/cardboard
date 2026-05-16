@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PackManifest, PackRequiresEntry } from "@two_5_d/engine";
+import { clearChainCache } from "@two_5_d/engine";
 import { EditorProjectStore, type AssetMeta } from "../lib/EditorProjectStore";
 import { Button, Input, Label, Textarea } from "../components/ui";
 import { cn } from "../lib/cn";
@@ -16,6 +17,12 @@ import {
   verifyIntegrity,
   type VerifyResult,
 } from "../lib/dependencyManager";
+import {
+  detectConflicts,
+  type Conflict,
+  type ConflictReport,
+} from "../lib/chainConflictDetector";
+import { resolveDepChain } from "../lib/resolveDepChain";
 
 /**
  * Project Settings modal — the occasional-configuration surface for
@@ -476,6 +483,88 @@ function DependenciesTab({
   /** Dragged row index, or null. */
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
+  // ── Conflict detection ────────────────────────────────────────
+  //
+  // Conflicts re-compute after every change to the dependency list
+  // (add / remove / reorder / enable / disable). The compute path
+  // fetches every parent pack via `ChainResolver.resolveChain`, which
+  // can be slow on first run (cold cache, ~25MB packs) but cheap on
+  // subsequent runs (cache hits). Debounce so rapid edits don't
+  // queue up N back-to-back resolves.
+  const [report, setReport] = useState<ConflictReport | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  /** Row indexes whose details panels are currently expanded. */
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  /** Token to invalidate stale async results when manifest changes. */
+  const scanToken = useRef(0);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runScan = useCallback(async (opts?: { force?: boolean }) => {
+    const myToken = ++scanToken.current;
+    setScanning(true);
+    setScanError(null);
+    if (opts?.force) clearChainCache();
+    try {
+      const { chain, errors } = await resolveDepChain(rows);
+      if (myToken !== scanToken.current) return;
+      const r = await detectConflicts(chain);
+      if (myToken !== scanToken.current) return;
+      setReport(r);
+      if (errors.length > 0) {
+        setScanError(
+          `Scan finished with ${errors.length} unresolvable dep(s): ` +
+            errors.map((e) => `${hostnameOf(e.url) || e.url} (${e.message})`).join("; "),
+        );
+      }
+    } catch (err) {
+      if (myToken !== scanToken.current) return;
+      setScanError((err as Error).message);
+      setReport(null);
+    } finally {
+      if (myToken === scanToken.current) setScanning(false);
+    }
+  }, [rows]);
+
+  // Debounced auto-rescan on dependency-list changes.
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (rows.length === 0) {
+      setReport({ conflicts: [], countsByDep: new Map() });
+      setScanError(null);
+      setScanning(false);
+      return;
+    }
+    debounceTimer.current = setTimeout(() => {
+      runScan();
+    }, 350);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [runScan, rows.length, JSON.stringify(rows)]);
+
+  const conflictsByDep = useMemo(() => {
+    const map = new Map<string, Conflict[]>();
+    if (!report) return map;
+    for (const c of report.conflicts) {
+      const involved = [c.winner, ...c.losers];
+      for (const url of involved) {
+        const arr = map.get(url) ?? [];
+        arr.push(c);
+        map.set(url, arr);
+      }
+    }
+    return map;
+  }, [report]);
+
+  const toggleExpand = (i: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
   // ---- Add flow ----
 
   const handleStartFetch = async () => {
@@ -613,14 +702,38 @@ function DependenciesTab({
             PACK_CHAIN.md). Disabled entries are skipped by the resolver.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setAdd({ ...INITIAL_ADD_STATE, open: true })}
-        >
-          + Add dependency
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => runScan({ force: true })}
+            disabled={scanning || rows.length === 0}
+            title="Re-fetch parent packs and re-scan for chain conflicts"
+          >
+            {scanning ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                Scanning…
+              </span>
+            ) : (
+              "Re-scan conflicts"
+            )}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setAdd({ ...INITIAL_ADD_STATE, open: true })}
+          >
+            + Add dependency
+          </Button>
+        </div>
       </div>
+
+      {scanError ? (
+        <div className="rounded border border-amber-700 bg-amber-900/20 px-3 py-2 text-xs text-amber-200">
+          {scanError}
+        </div>
+      ) : null}
 
       {rows.length === 0 ? (
         <div className="rounded border border-dashed border-zinc-800 px-4 py-6 text-sm text-zinc-500 text-center">
@@ -631,83 +744,108 @@ function DependenciesTab({
         <ul className="rounded border border-zinc-800 divide-y divide-zinc-800">
           {rows.map((row, i) => {
             const enabled = row.enabled !== false;
+            const url = row.url ?? "";
+            const depConflicts = url ? conflictsByDep.get(url) ?? [] : [];
+            const conflictCount = depConflicts.length;
+            const isExpanded = expanded.has(i);
             return (
-              <li
-                key={`${row.url ?? row.id ?? i}-${i}`}
-                draggable
-                onDragStart={() => setDragIdx(i)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => handleDropOn(i)}
-                className={cn(
-                  "px-3 py-2 flex items-center gap-3 transition-colors",
-                  dragIdx === i
-                    ? "bg-amber-900/20"
-                    : "hover:bg-zinc-800/30",
-                  !enabled && "opacity-60",
-                )}
-              >
-                <span
-                  className="cursor-grab text-zinc-500 select-none"
-                  title="Drag to reorder (bottom = highest precedence)"
-                >
-                  ⋮⋮
-                </span>
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(e) => handleToggle(i, e.target.checked)}
-                  title={enabled ? "Disable this dependency" : "Enable this dependency"}
-                  className="cursor-pointer"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-zinc-100 truncate">
-                    {row.id || hostnameOf(row.url) || "(unnamed)"}
-                  </div>
-                  <div
-                    className="text-[11px] text-zinc-500 truncate font-mono"
-                    title={row.url}
-                  >
-                    {row.url || "(no url)"}
-                  </div>
-                </div>
-                <Input
-                  value={row.version ?? ""}
-                  onChange={(e) => handlePatchVersion(i, e.target.value)}
-                  placeholder="^0.1.0"
-                  className="w-28 h-7 text-xs"
-                  title="Semver range constraint"
-                />
-                <div
-                  className="font-mono text-[11px] text-zinc-400 w-44 truncate"
-                  title={row.integrity ?? "(no integrity)"}
-                >
-                  {row.integrity ? (
-                    <span title={row.integrity}>
-                      ✓ {truncateIntegrity(row.integrity)}
-                    </span>
-                  ) : (
-                    <span className="text-amber-500" title="No integrity pinned">
-                      ⚠ no integrity
-                    </span>
+              <React.Fragment key={`${row.url ?? row.id ?? i}-${i}`}>
+                <li
+                  draggable
+                  onDragStart={() => setDragIdx(i)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDropOn(i)}
+                  className={cn(
+                    "px-3 py-2 flex items-center gap-3 transition-colors",
+                    dragIdx === i
+                      ? "bg-amber-900/20"
+                      : "hover:bg-zinc-800/30",
+                    !enabled && "opacity-60",
                   )}
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleRefresh(i)}
-                  disabled={refreshing === i || !row.url}
-                  title="Re-fetch and re-hash this dependency"
                 >
-                  {refreshing === i ? "…" : "Refresh"}
-                </Button>
-                <button
-                  onClick={() => handleRemove(i)}
-                  className="text-zinc-500 hover:text-red-400 text-sm"
-                  title="Remove dependency"
-                >
-                  ×
-                </button>
-              </li>
+                  <span
+                    className="cursor-grab text-zinc-500 select-none"
+                    title="Drag to reorder (bottom = highest precedence)"
+                  >
+                    ⋮⋮
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => handleToggle(i, e.target.checked)}
+                    title={enabled ? "Disable this dependency" : "Enable this dependency"}
+                    className="cursor-pointer"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-zinc-100 truncate">
+                      {row.id || hostnameOf(row.url) || "(unnamed)"}
+                    </div>
+                    <div
+                      className="text-[11px] text-zinc-500 truncate font-mono"
+                      title={row.url}
+                    >
+                      {row.url || "(no url)"}
+                    </div>
+                  </div>
+                  {enabled && report ? (
+                    <ConflictBadge
+                      count={conflictCount}
+                      expanded={isExpanded}
+                      onClick={() => toggleExpand(i)}
+                    />
+                  ) : enabled && scanning ? (
+                    <span className="text-[11px] text-zinc-500 italic w-24 text-right">
+                      scanning…
+                    </span>
+                  ) : null}
+                  <Input
+                    value={row.version ?? ""}
+                    onChange={(e) => handlePatchVersion(i, e.target.value)}
+                    placeholder="^0.1.0"
+                    className="w-28 h-7 text-xs"
+                    title="Semver range constraint"
+                  />
+                  <div
+                    className="font-mono text-[11px] text-zinc-400 w-44 truncate"
+                    title={row.integrity ?? "(no integrity)"}
+                  >
+                    {row.integrity ? (
+                      <span title={row.integrity}>
+                        ✓ {truncateIntegrity(row.integrity)}
+                      </span>
+                    ) : (
+                      <span className="text-amber-500" title="No integrity pinned">
+                        ⚠ no integrity
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleRefresh(i)}
+                    disabled={refreshing === i || !row.url}
+                    title="Re-fetch and re-hash this dependency"
+                  >
+                    {refreshing === i ? "…" : "Refresh"}
+                  </Button>
+                  <button
+                    onClick={() => handleRemove(i)}
+                    className="text-zinc-500 hover:text-red-400 text-sm"
+                    title="Remove dependency"
+                  >
+                    ×
+                  </button>
+                </li>
+                {isExpanded && enabled ? (
+                  <li className="bg-zinc-950/50 px-6 py-3 border-l-2 border-amber-700/60">
+                    <ConflictDetailsPanel
+                      depUrl={url}
+                      depLabel={row.id || hostnameOf(row.url) || "(unnamed)"}
+                      conflicts={depConflicts}
+                    />
+                  </li>
+                ) : null}
+              </React.Fragment>
             );
           })}
         </ul>
@@ -937,6 +1075,121 @@ function AdvancedTab() {
 /* ──────────────────────────────────────────────────────────────────
  * Local primitives
  * ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Conflict count badge for a single dep row. Amber when conflicts
+ * exist, subtle when none — the "all-clear" state stays out of the
+ * way unless the modder hovers.
+ */
+function ConflictBadge({
+  count,
+  expanded,
+  onClick,
+}: {
+  count: number;
+  expanded: boolean;
+  onClick: () => void;
+}) {
+  if (count === 0) {
+    return (
+      <span
+        className="text-[11px] text-zinc-600 hover:text-zinc-300 cursor-default w-24 text-right"
+        title="No chain conflicts detected for this dep"
+      >
+        ✓ no conflicts
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={
+        expanded
+          ? "Collapse conflict details"
+          : "Show this dep's chain-conflict details"
+      }
+      className={cn(
+        "px-2 h-6 rounded text-[11px] font-medium border w-24",
+        "bg-amber-900/30 border-amber-700/60 text-amber-200",
+        "hover:bg-amber-800/40 transition-colors",
+      )}
+    >
+      {expanded ? "▾" : "▸"} {count} conflict{count === 1 ? "" : "s"}
+    </button>
+  );
+}
+
+const CONFLICT_KIND_LABEL: Record<Conflict["kind"], string> = {
+  "asset-path": "asset",
+  "manifest-sprite": "sprite",
+  "manifest-item": "item",
+  "manifest-prefab": "prefab",
+  "manifest-sound": "sound",
+  "tile-preset": "preset",
+  "shader-material": "material",
+  "manifest-script": "script",
+};
+
+/** Inline panel showing every conflict this dep is involved in. */
+function ConflictDetailsPanel({
+  depUrl,
+  depLabel,
+  conflicts,
+}: {
+  depUrl: string;
+  depLabel: string;
+  conflicts: Conflict[];
+}) {
+  if (conflicts.length === 0) {
+    return (
+      <div className="text-xs text-zinc-500">
+        No conflicts for <span className="font-mono">{depLabel}</span>.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs text-amber-300 font-semibold">
+        Conflicts for {depLabel}:
+      </div>
+      <ul className="text-[11px] font-mono space-y-1">
+        {conflicts.map((c, idx) => {
+          const isWinner = c.winner === depUrl;
+          const others = isWinner ? c.losers : [c.winner];
+          return (
+            <li
+              key={`${c.kind}-${c.identifier}-${idx}`}
+              className="flex items-baseline gap-2"
+              title={c.details ?? ""}
+            >
+              <span
+                className={cn(
+                  "px-1.5 py-px rounded text-[10px] uppercase tracking-wide font-sans",
+                  isWinner
+                    ? "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
+                    : "bg-zinc-800 text-zinc-400 border border-zinc-700",
+                )}
+              >
+                {isWinner ? "WINS" : "LOST"}
+              </span>
+              <span className="text-zinc-500 text-[10px]">
+                [{CONFLICT_KIND_LABEL[c.kind]}]
+              </span>
+              <span className="text-zinc-200 break-all">{c.identifier}</span>
+              <span className="text-zinc-500">
+                {isWinner ? "over" : "to"}
+              </span>
+              <span className="text-zinc-400 break-all">
+                {others.map((u) => hostnameOf(u) || u).join(", ")}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function FormField({
   label,

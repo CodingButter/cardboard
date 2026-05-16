@@ -123,12 +123,21 @@ export function ComponentField({
   value,
   spriteIds,
   spriteFieldKey,
+  animationNames,
   onChange,
 }: {
   field: ComponentFieldSpec;
   value: unknown;
   spriteIds?: ReadonlyArray<string>;
   spriteFieldKey: boolean;
+  /**
+   * Context-aware animation choices — supplied by the parent prefab
+   * editor based on the prefab's `Sprite.imageId` + `manifest.sprites`.
+   * When undefined (or empty) the `animationName` field falls back to
+   * a free-text input so the modder can hand-type a name without
+   * being blocked by missing schema context.
+   */
+  animationNames?: ReadonlyArray<string>;
   onChange: (next: unknown) => void;
 }) {
   const label = field.label ?? field.key;
@@ -252,6 +261,56 @@ export function ComponentField({
         </div>
       );
     }
+    case "animationName": {
+      const s = typeof value === "string" ? value : "";
+      // No animationNames context (no Sprite component / sprite has no
+      // animations) → fall back to free text so the modder isn't
+      // blocked. The Animation subform in EntitiesEditor surfaces a
+      // warning when this happens.
+      if (!animationNames || animationNames.length === 0) {
+        return (
+          <div>
+            <div className="text-zinc-500 mb-1" title={field.hint}>
+              {label}
+            </div>
+            <input
+              value={s}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={field.hint}
+              className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
+            />
+            <div className="text-[10px] text-amber-400 mt-1">
+              No animations resolvable — add a Sprite component with an
+              imageId pointing at a sheet-based sprite.
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div>
+          <div className="text-zinc-500 mb-1" title={field.hint}>
+            {label}
+          </div>
+          <select
+            value={s}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px]"
+          >
+            <option value="">(none)</option>
+            {animationNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+          {s && !animationNames.includes(s) ? (
+            <div className="text-[10px] text-amber-400 mt-1">
+              "{s}" is not in the sprite's animations list.
+            </div>
+          ) : null}
+        </div>
+      );
+    }
   }
 }
 
@@ -299,17 +358,28 @@ export function JsonComponentEditor({
  * Render the editable sub-form for one component on an entity / prefab.
  * Known components use their schema; unknown components fall back to a
  * JSON textarea so modder-defined shapes are still editable.
+ *
+ * `animationNames` is context-aware metadata supplied by the parent —
+ * derived from the prefab's `Sprite.imageId` + `manifest.sprites[id]`.
+ * Used by the `Animation.current` dropdown.
+ *
+ * `header` lets the parent inject UI between the component name and
+ * its fields — e.g. the "Sprite has animations" auto-wire prompt.
  */
 export function ComponentSubform({
   name,
   data,
   spriteIds,
+  animationNames,
+  header,
   onPatch,
   onRemove,
 }: {
   name: string;
   data: Record<string, unknown> | undefined;
   spriteIds?: ReadonlyArray<string>;
+  animationNames?: ReadonlyArray<string>;
+  header?: React.ReactNode;
   onPatch: (next: Record<string, unknown>) => void;
   onRemove?: () => void;
 }) {
@@ -351,6 +421,7 @@ export function ComponentSubform({
           </button>
         ) : null}
       </div>
+      {header ?? null}
       {schema.fields.map((field) => (
         <ComponentField
           key={field.key}
@@ -360,6 +431,7 @@ export function ComponentSubform({
           spriteFieldKey={
             name === "Sprite" && field.key === "imageId" ? true : false
           }
+          animationNames={animationNames}
           onChange={(v) => onPatch({ ...safe, [field.key]: v })}
         />
       ))}

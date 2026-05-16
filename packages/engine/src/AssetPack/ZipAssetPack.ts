@@ -108,4 +108,8 @@ export class ZipAssetPack extends AssetPack {
   has(path: string): boolean {
     return this.files.has(path);
   }
+
+  override listPaths(): string[] {
+    return Array.from(this.files.keys());
+  }
 }

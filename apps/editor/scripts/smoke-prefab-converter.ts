@@ -337,6 +337,203 @@ export default (api) => {
   assertEqual(file.prefabs.length, 0, "no prefabs reported");
 }
 
+// ── Test 9: -Infinity / NaN reject from static extraction ─────────
+
+console.log(
+  "\nTest 9 — non-JSON-safe literals (Infinity / -Infinity / NaN) stay residual.",
+);
+{
+  const source = `
+export default (api) => {
+  api.registerPrefab("infin", () => {
+    const world = api.world;
+    const C = api.components;
+    const e = world.spawn();
+    world.add(e, C.Sentinel, { lastFire: -Infinity, count: 0 });
+    return e;
+  });
+};
+`.trim();
+  const file = await parsePrefabFile("scripts/prefabs/infin.js", source);
+  const r = file.prefabs[0]!;
+  assert(
+    !("Sentinel" in r.staticComponents),
+    "Sentinel rejected because reloadStart is -Infinity",
+  );
+  assert(
+    r.residualBody.includes("Sentinel"),
+    "Sentinel call survives in residual body for runtime execution",
+  );
+}
+
+// ── Test 10: chain de-duplication ────────────────────────────────
+
+console.log(
+  "\nTest 10 — long add-chain with mixed extractable / non-extractable links" +
+    " emits ONE world.add per non-extractable link, not N copies of the chain.",
+);
+{
+  const source = `
+export default (api) => {
+  api.registerPrefab("chain", (opts) => {
+    const world = api.world;
+    const C = api.components;
+    const e = world.spawn();
+    world
+      .add(e, C.Position, new api.Vec2(opts.x, opts.y))
+      .add(e, C.Facing, opts.facing)
+      .add(e, C.Sprite, { imageId: "x", scale: 1 })
+      .add(e, C.Movement, { speed: opts.speed })
+      .add(e, C.Health, { hp: opts.hp ?? 100 });
+    return e;
+  });
+};
+`.trim();
+  const file = await parsePrefabFile("scripts/prefabs/chain.js", source);
+  const r = file.prefabs[0]!;
+  // Sprite should extract; the others should land in residual once each.
+  assert(
+    "Sprite" in r.staticComponents,
+    "Sprite extracted (only purely-literal link in the chain)",
+  );
+  // Count occurrences of `world.add(` in the residual — should be 4
+  // (Position, Facing, Movement, Health), NOT 16 (4 non-extractable
+  // links × 4 copies of the chain, which is what the pre-fix output
+  // produced).
+  const addCount = (r.residualBody.match(/world\.add\(/g) ?? []).length;
+  assertEqual(
+    addCount,
+    4,
+    "residual contains exactly one world.add per non-extractable chain link",
+  );
+}
+
+// ── Test 11: world/C redundant aliases stripped ──────────────────
+
+console.log(
+  "\nTest 11 — `const world = api.world` / `const C = api.components`" +
+    " redeclarations stripped from residual (init wrapper provides them).",
+);
+{
+  const source = `
+export default (api) => {
+  api.registerPrefab("alias", (opts) => {
+    const world = api.world;
+    const C = api.components;
+    const e = world.spawn();
+    world.add(e, C.Health, { hp: opts.hp });
+    return e;
+  });
+};
+`.trim();
+  const file = await parsePrefabFile("scripts/prefabs/alias.js", source);
+  const r = file.prefabs[0]!;
+  const initSrc = serializeInitScript(r);
+  // The wrapper's own `const world = api.world;` line is fine — but
+  // the residual must NOT have a SECOND one or module load throws
+  // SyntaxError "Identifier 'world' has already been declared".
+  const worldDecls = (
+    initSrc.match(/const\s+world\s*=\s*api\.world/g) ?? []
+  ).length;
+  const cDecls = (initSrc.match(/const\s+C\s*=\s*api\.components/g) ?? [])
+    .length;
+  assertEqual(worldDecls, 1, "exactly one `const world = api.world` in init");
+  assertEqual(cDecls, 1, "exactly one `const C = api.components` in init");
+}
+
+// ── Test 12: closure-captured const hoisted into init ─────────────
+
+console.log(
+  "\nTest 12 — closure-captured top-level consts referenced by the" +
+    " factory body hoist into the residual init script.",
+);
+{
+  const source = `
+export default (api) => {
+  const defaultHealth = () => ({ hp: api.config.player.maxHp });
+  api.registerPrefab("hoist", (opts) => {
+    const world = api.world;
+    const C = api.components;
+    const e = world.spawn();
+    world.add(e, C.Health, defaultHealth());
+    return e;
+  });
+};
+`.trim();
+  const file = await parsePrefabFile("scripts/prefabs/hoist.js", source);
+  const r = file.prefabs[0]!;
+  assert(
+    r.residualBody.includes("defaultHealth"),
+    "factory references defaultHealth in residual",
+  );
+  assert(
+    r.residualBody.includes("const defaultHealth"),
+    "defaultHealth declaration hoisted into residual from outer closure",
+  );
+}
+
+// ── Test 13: real default-pack player.js fixture ─────────────────
+
+console.log(
+  "\nTest 13 — default-pack's actual player.js fixture round-trips cleanly.",
+);
+{
+  // Load the checked-in original. This survives any in-flight
+  // migration of `packages/default-pack/scripts/prefabs/player.js` to
+  // a declarative-only shape — the fixture stays stable so the
+  // converter's regression coverage doesn't shift under us.
+  const fixturePath = new URL(
+    "./fixtures/player.js.original",
+    import.meta.url,
+  );
+  const fixtureSrc = await Bun.file(fixturePath).text();
+  const file = await parsePrefabFile(
+    "scripts/prefabs/player.js",
+    fixtureSrc,
+  );
+  assert(!file.parseError, "fixture parses without error");
+  assertEqual(file.prefabs.length, 1, "exactly one prefab in player.js");
+  const r = file.prefabs[0]!;
+  assertEqual(r.name, "player", "prefab name is `player`");
+  assertEqual(
+    r.totalCalls,
+    9,
+    "9 world.add chain links discovered (Position/Facing/Movement/" +
+      "PlayerInput/Aim/Weapon/Inventory/Camera/MinimapMarker)",
+  );
+  // At least Aim extracts; nothing else does (every other call reads
+  // opts or config). Aim is the only purely-literal one.
+  assert(
+    "Aim" in r.staticComponents,
+    "Aim ({ screenY: 0 }) extracts as static",
+  );
+  // Weapon must NOT extract — its sentinel `reloadStart: -Infinity`
+  // can't roundtrip through JSON.
+  assert(
+    !("Weapon" in r.staticComponents),
+    "Weapon stays in residual because reloadStart is -Infinity",
+  );
+  // The init script must be well-formed: ONE `const world = api.world`,
+  // ONE `const C = api.components`, and the residual contains exactly
+  // one world.add per non-extractable call (8 of them).
+  const initSrc = serializeInitScript(r);
+  const worldDecls = (
+    initSrc.match(/const\s+world\s*=\s*api\.world/g) ?? []
+  ).length;
+  const cDecls = (initSrc.match(/const\s+C\s*=\s*api\.components/g) ?? [])
+    .length;
+  assertEqual(worldDecls, 1, "one `const world` binding in emitted init");
+  assertEqual(cDecls, 1, "one `const C` binding in emitted init");
+  // Closure-captured `defaultCamera` hoists in.
+  assert(
+    initSrc.includes("const defaultCamera"),
+    "defaultCamera helper hoisted from outer closure",
+  );
+  // The init script's residual references opts (x/y/facing
+  // destructuring) — proves the dynamic spawn-time deps survive.
+  assert(initSrc.includes("opts"), "init script references opts");
+}
+
 console.log();
 console.log(`Prefab-converter smoke test: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

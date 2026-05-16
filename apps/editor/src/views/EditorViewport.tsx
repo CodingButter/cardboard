@@ -55,6 +55,12 @@ export interface EditorViewportProps {
    * accessor.
    */
   iframeRef?: React.MutableRefObject<HTMLIFrameElement | null>;
+  /** Prefab names available to the GridEditor entity tool. Sourced
+   *  from `manifest.prefabs` by the parent. */
+  prefabNames?: ReadonlyArray<string>;
+  /** Sprite IDs available to the GridEditor Sprite component picker.
+   *  Sourced from `manifest.sprites` by the parent. */
+  spriteIds?: ReadonlyArray<string>;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
@@ -74,6 +80,8 @@ export function EditorViewport({
   onEditSceneChange,
   onPersistScene,
   iframeRef: externalIframeRef,
+  prefabNames,
+  spriteIds,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror the iframe element through the parent-supplied ref so the
@@ -254,6 +262,8 @@ export function EditorViewport({
             scenePath={editScenePath}
             scene={editScene}
             onSceneChange={onEditSceneChange}
+            prefabNames={prefabNames}
+            spriteIds={spriteIds}
           />
         </div>
       ) : mode === "edit" ? (

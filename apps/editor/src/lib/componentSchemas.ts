@@ -20,7 +20,16 @@ export type ComponentFieldKind =
   | "color3"
   | "boolean"
   | "vec2"
-  | "vec3";
+  | "vec3"
+  /**
+   * Sibling-aware dropdown: choices come from the prefab's Sprite
+   * component (specifically, its `imageId` and the manifest's
+   * `sprites[imageId].animations`). Rendered as a `<select>` of the
+   * sprite's animation names — falls back to a text input when the
+   * editor can't resolve the sprite (no Sprite component / no
+   * animations on the chosen sprite). Used by `Animation.current`.
+   */
+  | "animationName";
 
 export interface ComponentFieldSpec {
   /** Field key on the component data. */
@@ -102,6 +111,41 @@ export const BUILT_IN_COMPONENT_SCHEMAS: ComponentSchema[] = [
       { key: "scale", kind: "number", min: 0.1, max: 8, step: 0.1 },
     ],
     defaultData: { imageId: "", scale: 1 },
+  },
+  {
+    name: "Animation",
+    fields: [
+      {
+        key: "current",
+        kind: "animationName",
+        label: "current",
+        hint: "Animation name from the sprite's `animations` dict",
+      },
+      {
+        key: "frame",
+        kind: "number",
+        min: 0,
+        step: 1,
+        hint: "Index into the animation's frames[] array",
+      },
+      {
+        key: "elapsed",
+        kind: "number",
+        min: 0,
+        step: 0.01,
+        hint: "Seconds elapsed in the current frame",
+      },
+      { key: "paused", kind: "boolean" },
+      {
+        key: "playbackRate",
+        kind: "number",
+        min: 0,
+        max: 4,
+        step: 0.1,
+        hint: "Multiplier on dt for this entity",
+      },
+    ],
+    defaultData: { current: "", frame: 0, elapsed: 0 },
   },
   {
     name: "Shader",

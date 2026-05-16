@@ -8,6 +8,7 @@ import type {
   DeclarativePrefab,
   PackManifest,
 } from "@two_5_d/engine";
+import type { SpriteDef } from "@two_5_d/engine/AssetPack";
 import { EditorProjectStore } from "../lib/EditorProjectStore";
 import {
   ComponentSubform,
@@ -19,6 +20,10 @@ import {
 import { Button, Input, Label, Textarea } from "../components/ui";
 import { cn } from "../lib/cn";
 import type { PrefabConversionResult } from "../lib/prefabConverter";
+import {
+  buildAnimationComponentFromSuggestion,
+  computeAnimationWiringState,
+} from "../lib/prefabAnimationWiring";
 
 /**
  * E-ENT — Entities workflow tab. EDITOR.md §6.3.
@@ -265,6 +270,16 @@ export function EntitiesEditor({
     return Object.keys(manifest.sprites).sort();
   }, [manifest]);
 
+  /**
+   * Manifest's sprites dict — handed to the prefab form so the
+   * Animation auto-wire prompt + the `current` dropdown can resolve
+   * animation names from `Sprite.imageId`. Memoized so the form's
+   * `useMemo` lookups don't re-run on unrelated state changes.
+   */
+  const spritesById = useMemo<Readonly<Record<string, SpriteDef>>>(() => {
+    return manifest?.sprites ?? {};
+  }, [manifest]);
+
   // ── JSON preview ──
   const jsonPreview = useMemo(() => {
     if (!activeRow || activeRow.kind !== "declarative") return "";
@@ -373,6 +388,7 @@ export function EntitiesEditor({
             <DeclarativeForm
               prefab={activeRow.data!}
               spriteIds={spriteIds}
+              spritesById={spritesById}
               onRename={(next) => handleRename(activeRow.name, next)}
               onSetDescription={(d) =>
                 patchActive((cur) => ({ ...cur, description: d || undefined }))
@@ -494,6 +510,7 @@ export function EntitiesEditor({
 function DeclarativeForm({
   prefab,
   spriteIds,
+  spritesById,
   onRename,
   onSetDescription,
   onSetTags,
@@ -503,6 +520,7 @@ function DeclarativeForm({
 }: {
   prefab: DeclarativePrefab;
   spriteIds: ReadonlyArray<string>;
+  spritesById: Readonly<Record<string, SpriteDef>>;
   onRename: (next: string) => void;
   onSetDescription: (next: string) => void;
   onSetTags: (next: string[]) => void;
@@ -519,6 +537,38 @@ function DeclarativeForm({
   const availableToAdd = BUILT_IN_COMPONENT_SCHEMAS.map((s) => s.name).filter(
     (n) => !presentComponents.includes(n),
   );
+
+  // ── Animation auto-wire context ────────────────────────────────
+  //
+  // Pure analysis of the prefab vs. the manifest's sprite dict —
+  // surfaces a suggestion when the prefab has a sheet-based Sprite
+  // but no Animation component, and a mismatch warning when an
+  // Animation component points at an animation the sprite doesn't
+  // define. Same helper the smoke test runs against.
+  const wiring = useMemo(
+    () => computeAnimationWiringState(prefab, spritesById),
+    [prefab, spritesById],
+  );
+  const {
+    spriteAnimationNames,
+    suggestAnimation,
+    animationMismatch,
+    animationCurrent,
+  } = wiring;
+
+  /**
+   * Wire the inline "+ Add Animation component" button to the same
+   * addComponent path the picker uses, then patch `current` to the
+   * first animation name so the modder lands in a runnable state.
+   */
+  const addAnimationFromSuggestion = () => {
+    const payload = buildAnimationComponentFromSuggestion(
+      spriteAnimationNames,
+    );
+    if (!payload) return;
+    onAddComponent("Animation");
+    onPatchComponent("Animation", payload);
+  };
 
   return (
     <div className="p-4 space-y-4 max-w-2xl mx-auto">
@@ -611,16 +661,60 @@ function DeclarativeForm({
           </div>
         ) : (
           <div className="space-y-3 text-xs">
-            {presentComponents.map((name) => (
-              <ComponentSubform
-                key={name}
-                name={name}
-                data={prefab.components[name] as Record<string, unknown>}
-                spriteIds={spriteIds}
-                onPatch={(next) => onPatchComponent(name, next)}
-                onRemove={() => onRemoveComponent(name)}
-              />
-            ))}
+            {presentComponents.map((name) => {
+              // Component-specific header: under Sprite, surface the
+              // "this sprite has animations → add an Animation
+              // component" prompt. Under Animation, surface the
+              // mismatch warning when the sprite no longer offers
+              // the chosen animation.
+              let header: React.ReactNode = null;
+              if (name === "Sprite" && suggestAnimation) {
+                header = (
+                  <div
+                    data-testid="anim-suggestion"
+                    className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"
+                  >
+                    <span>
+                      ⚡ This sprite has {spriteAnimationNames.length}{" "}
+                      animation
+                      {spriteAnimationNames.length === 1 ? "" : "s"}
+                      {" "}defined.
+                    </span>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={addAnimationFromSuggestion}
+                      title="Add an Animation component pre-filled with the first animation"
+                    >
+                      + Add Animation component
+                    </Button>
+                  </div>
+                );
+              } else if (name === "Animation" && animationMismatch) {
+                header = (
+                  <div className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200">
+                    {spriteAnimationNames.length === 0
+                      ? `No Sprite component (or imageId points at a sprite without animations) — the Animation component is inert.`
+                      : `current = "${animationCurrent}" is not in the sprite's animations: ${spriteAnimationNames.join(", ")}.`}
+                  </div>
+                );
+              }
+              return (
+                <ComponentSubform
+                  key={name}
+                  name={name}
+                  data={prefab.components[name] as Record<string, unknown>}
+                  spriteIds={spriteIds}
+                  // Only the Animation subform consumes animationNames;
+                  // passing it everywhere is harmless (the field type
+                  // filter inside ComponentField gates the dropdown).
+                  animationNames={spriteAnimationNames}
+                  header={header}
+                  onPatch={(next) => onPatchComponent(name, next)}
+                  onRemove={() => onRemoveComponent(name)}
+                />
+              );
+            })}
           </div>
         )}
       </section>

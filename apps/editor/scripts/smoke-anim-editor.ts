@@ -411,6 +411,65 @@ async function main() {
   );
 
   // ── 10. spriteSources cascade on project delete ──
+  // (deferred below so the new AE3 assertions can keep operating on
+  //  the live project.)
+
+  // ── 11. AE3 — Sprite list categories (Baked vs Sources) ──
+  //
+  // The AnimationEditor's left rail now splits into two sections:
+  // "Baked sprites" (every entry in manifest.sprites) and "Sources"
+  // (every spriteSources row). Clicking a baked entry routes to the
+  // read-only preview pane; clicking a source row routes to the
+  // re-edit flow. Both lists are derived from the same IDB rows the
+  // smoke test already exercises — assert the categorization works
+  // by reading the manifest + spriteSources back directly.
+  const railMf = await EditorProjectStore.loadManifest(projectId);
+  const railSources = await EditorProjectStore.listSpriteSources(projectId);
+
+  // The zombie sprite landed in BOTH lists — manifest entry from
+  // saveBakedSprite + spriteSources row from the same call.
+  const bakedIds = Object.keys(railMf?.sprites ?? {}).sort();
+  const sourceIds = railSources.map((s) => s.spriteId).sort();
+  assert(
+    bakedIds.includes("zombie"),
+    "AE3 — zombie shows up in Baked sprites list",
+  );
+  assert(
+    bakedIds.includes("ammo_pack"),
+    "AE3 — ammo_pack (no source row) shows up in Baked sprites list",
+  );
+  assert(
+    sourceIds.includes("zombie"),
+    "AE3 — zombie shows up in Sources list",
+  );
+  assert(
+    !sourceIds.includes("ammo_pack"),
+    "AE3 — ammo_pack does NOT show up in Sources list (no spriteSources row)",
+  );
+
+  // The "open baked" routing should produce a preview-state, not an
+  // edit-state. We can't render the React tree headless, but we CAN
+  // verify the precondition the routing code relies on: the
+  // manifest entry + the baked PNG asset are present.
+  const bakedAsset = await EditorProjectStore.loadAsset(
+    projectId,
+    railMf!.sprites!["zombie"]!.image,
+  );
+  assert(
+    bakedAsset instanceof Blob,
+    "AE3 — clicking a baked sprite has a PNG asset to feed the preview pane",
+  );
+
+  // Source detection — the editor decides "FBX vs spritesheet" by
+  // reading `spriteSources[id].kind`. Verify the kind round-trips
+  // (this powers the FBX/sheet badge on the Baked sprites list).
+  const zombieSource = railSources.find((s) => s.spriteId === "zombie");
+  assert(
+    zombieSource?.kind === "spritesheet",
+    "AE3 — Path A source persists kind: spritesheet (drives the [sheet] badge)",
+  );
+
+  // ── 12. spriteSources cascade on project delete ──
   await EditorProjectStore.deleteProject(projectId);
   const dangling = await EditorProjectStore.listSpriteSources(projectId);
   assert(

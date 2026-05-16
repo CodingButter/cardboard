@@ -12,6 +12,7 @@ import {
   EditorProjectStore,
   type SpriteSourceMeta,
 } from "../lib/EditorProjectStore";
+import { BakedSpritePreview } from "./BakedSpritePreview";
 import {
   ALLOWED_ANGLES,
   buildCompositePlan,
@@ -122,6 +123,26 @@ export function AnimationEditor({
   const [activeAnim, setActiveAnim] = useState<string | null>(null);
   const [loadedImage, setLoadedImage] = useState<LoadedImage | null>(null);
 
+  /**
+   * Center-pane mode selector. The same workflow now hosts three
+   * surfaces:
+   *   "edit"    — the spritesheet cell-picker (Path A re-edit)
+   *   "preview" — the read-only baked-PNG preview (default for any
+   *               baked sprite the user clicks; opens via openBaked)
+   *   "import"  — the import modal (Path A new sprite) — handled
+   *               separately via `importOpen`
+   * `null` = empty pane (no sprite selected yet).
+   *
+   * Per the source-vs-baked split: clicking a baked-sprite row routes
+   * to "preview", clicking a source row routes to "edit" (or hands off
+   * to the FbxImporter for FBX sources).
+   */
+  const [centerMode, setCenterMode] = useState<"edit" | "preview" | null>(
+    null,
+  );
+  /** PNG blob loaded from the baked sheet — feeds BakedSpritePreview. */
+  const [bakedPngBlob, setBakedPngBlob] = useState<Blob | null>(null);
+
   /** Roundtrip badge — set when the sprite was opened from the manifest
    *  but no `spriteSources` row existed. Tells the UI to surface
    *  "Imported externally — round-trip not available." */
@@ -214,10 +235,58 @@ export function AnimationEditor({
   }, []);
 
   /**
+   * Load a baked sprite for read-only preview. Reads the canonical PNG
+   * from the manifest entry (`images/sprites/<id>-sheet.png` by
+   * default) and switches the center pane into "preview" mode. This
+   * is the default click target for any sprite that already has a
+   * baked PNG — keeps the FBX importer / spritesheet editor off the
+   * default path so users don't accidentally drop into the source
+   * editor when they just wanted to inspect their bake.
+   */
+  const openBaked = useCallback(
+    async (spriteId: string) => {
+      setSaveError(null);
+      setActiveAnim(null);
+      setPlaying(false);
+      const mf =
+        manifest ?? (await EditorProjectStore.loadManifest(projectId));
+      const def = mf?.sprites?.[spriteId];
+      if (!def) {
+        setSaveError(`Sprite "${spriteId}" not in manifest`);
+        return;
+      }
+      const blob = await EditorProjectStore.loadAsset(projectId, def.image);
+      if (!(blob instanceof Blob)) {
+        setSaveError(
+          `Baked PNG missing for "${spriteId}" (${def.image}). ` +
+            `Re-bake from the Sources section.`,
+        );
+        return;
+      }
+      // Tear down any stale loadedImage state — preview pane manages
+      // its own object URL. Switch modes only AFTER the asset is
+      // resolved so a failure leaves the prior view intact.
+      if (loadedImage) {
+        URL.revokeObjectURL(loadedImage.objectUrl);
+        loadedImage.bitmap.close?.();
+        setLoadedImage(null);
+      }
+      setBakedPngBlob(blob);
+      setActiveId(spriteId);
+      setCenterMode("preview");
+    },
+    [projectId, manifest, loadedImage],
+  );
+
+  /**
    * Load a sprite into the editor by id. If a spriteSources row
    * exists, restore the saved state; otherwise treat the canonical
    * sheet (`images/sprites/<id>-sheet.png`) as the source and surface
    * the "external import" badge.
+   *
+   * NOTE: This is the LEGACY entry point — for AE3 the default click
+   * target is `openBaked`. `openSource` (declared below) is what
+   * wraps this for the "Sources" section of the rail.
    */
   const openSprite = useCallback(
     async (spriteId: string) => {
@@ -264,6 +333,7 @@ export function AnimationEditor({
           spriteId,
         });
         setActiveId(spriteId);
+        setCenterMode(null);
         return;
       }
       if (source) {
@@ -287,6 +357,7 @@ export function AnimationEditor({
           fromSpriteSourceMeta(source, img.width, img.height),
         );
         setActiveId(spriteId);
+        setCenterMode("edit");
         return;
       }
       // No source row — treat the canonical sheet as the source.
@@ -371,8 +442,67 @@ export function AnimationEditor({
       }
       setEditorState(synthesized);
       setActiveId(spriteId);
+      setCenterMode("edit");
     },
     [projectId, manifest, loadedImage],
+  );
+
+  /**
+   * Open the source side of a baked sprite for re-edit. Routes FBX
+   * sources to the dedicated FBX importer; spritesheet sources hand
+   * off to `openSprite` (the legacy cell-picker). Mirrors the
+   * original behaviour but is now explicitly opt-in: the rail's
+   * "Sources" section, the FBX badge on baked sprites, and the
+   * baked preview's "Open source" footer button.
+   */
+  const openSource = useCallback(
+    async (spriteId: string) => {
+      setSaveError(null);
+      setExternalImport(false);
+      setActiveAnim(null);
+      setPlaying(false);
+      const source = await EditorProjectStore.loadSpriteSource(
+        projectId,
+        spriteId,
+      );
+      if (!source) {
+        setSaveError(`No source recorded for "${spriteId}".`);
+        return;
+      }
+      if (source.kind === "fbx" && source.fbx) {
+        const fbxBlob = await EditorProjectStore.loadAsset(
+          projectId,
+          source.sourcePath,
+        );
+        if (!(fbxBlob instanceof Blob)) {
+          setSaveError(
+            `Source FBX missing for "${spriteId}" (${source.sourcePath}). ` +
+              `Re-upload via "+ New sprite" → "From FBX".`,
+          );
+          return;
+        }
+        const { restoreFbxBakeConfig } = await import("../lib/fbxBaker");
+        const config = restoreFbxBakeConfig(
+          spriteId,
+          source.fbx,
+          source.animationsMeta,
+          source.animationOrder ?? Object.keys(source.animationsMeta),
+          source.angles,
+          {},
+        );
+        setFbxImporterState({
+          blob: fbxBlob,
+          config,
+          spriteId,
+        });
+        setActiveId(spriteId);
+        setCenterMode(null);
+        return;
+      }
+      // Path A — spritesheet source. Use the legacy cell-picker.
+      await openSprite(spriteId);
+    },
+    [projectId, openSprite],
   );
 
   // ── Import flow ──
@@ -419,6 +549,7 @@ export function AnimationEditor({
       setImportOpen(false);
       setImportFile(null);
       setImportIdDraft("");
+      setCenterMode("edit");
       await refresh();
     } catch (err) {
       setImportError((err as Error).message);
@@ -567,6 +698,78 @@ export function AnimationEditor({
     );
   }, [editorState, loadedImage]);
 
+  /**
+   * Re-run the bake pipeline for a saved source without taking the
+   * user through the full editor. For spritesheet sources we have
+   * everything we need in the `spriteSources` row + the source PNG —
+   * decode, composite, persist. For FBX sources we open the importer
+   * (it owns the Three.js bake pipeline; a headless re-bake would
+   * double-up that logic).
+   *
+   * Surfaced as the "🔄 Re-bake" button on each Sources row and as
+   * the same button on the baked preview's source footer.
+   */
+  const handleRebakeSource = useCallback(
+    async (spriteId: string) => {
+      setSaveError(null);
+      const source = await EditorProjectStore.loadSpriteSource(
+        projectId,
+        spriteId,
+      );
+      if (!source) {
+        setSaveError(`No source recorded for "${spriteId}".`);
+        return;
+      }
+      // FBX re-bake — defer to the dedicated importer; modders almost
+      // always want to tweak something between bakes anyway, and the
+      // importer's "Bake" button already does the right thing.
+      if (source.kind === "fbx") {
+        await openSource(spriteId);
+        return;
+      }
+      // Spritesheet — recompose inline.
+      const blob = await EditorProjectStore.loadAsset(
+        projectId,
+        source.sourcePath,
+      );
+      if (!(blob instanceof Blob)) {
+        setSaveError(
+          `Source PNG missing for "${spriteId}" (${source.sourcePath}).`,
+        );
+        return;
+      }
+      try {
+        setSaving(true);
+        const img = await decodeBlobToImage(blob);
+        const state = fromSpriteSourceMeta(source, img.width, img.height);
+        const plan = buildCompositePlan(state);
+        const canvas = document.createElement("canvas");
+        canvas.width = plan.outWidth;
+        canvas.height = plan.outHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("2d context unavailable");
+        ctx.imageSmoothingEnabled = false;
+        composite(ctx, plan, img.bitmap, state);
+        const baked = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), "image/png"),
+        );
+        if (!baked) throw new Error("Failed to encode canonical PNG.");
+        const result = await saveBakedSprite(projectId, state, baked);
+        setManifest(result.manifest);
+        setSavedAt(Date.now());
+        onManifestChanged?.();
+        await refresh();
+        URL.revokeObjectURL(img.objectUrl);
+        img.bitmap.close?.();
+      } catch (err) {
+        setSaveError((err as Error).message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [projectId, openSource, onManifestChanged, refresh],
+  );
+
   const handleSave = useCallback(async () => {
     if (!editorState) return;
     if (hasErrors) {
@@ -689,6 +892,41 @@ export function AnimationEditor({
 
   // ── Render ──
 
+  /**
+   * Derived rail sections — Baked sprites (PNG-backed) vs. Sources
+   * (re-editable inputs). A baked sprite is every entry in
+   * `manifest.sprites`; a source is every `spriteSources` row. A
+   * sprite can appear in both sections — when it does the badge on
+   * the baked row points at its source.
+   */
+  const bakedSprites = useMemo<
+    Array<{
+      id: string;
+      def: SpriteDef;
+      sourceKind?: SpriteSourceMeta["kind"];
+      animCount: number;
+    }>
+  >(() => {
+    if (!manifest?.sprites) return [];
+    const sourceByIdMap = new Map(sources.map((s) => [s.spriteId, s]));
+    return Object.entries(manifest.sprites)
+      .map(([id, def]) => ({
+        id,
+        def,
+        sourceKind: sourceByIdMap.get(id)?.kind,
+        animCount: Object.keys(def.animations ?? {}).length,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }, [manifest, sources]);
+
+  const sourceSprites = useMemo<
+    Array<{ id: string; meta: SpriteSourceMeta }>
+  >(() => {
+    return [...sources]
+      .sort((a, b) => a.spriteId.localeCompare(b.spriteId))
+      .map((meta) => ({ id: meta.spriteId, meta }));
+  }, [sources]);
+
   const grid = editorState
     ? {
         cellW: editorState.frameWidth,
@@ -751,41 +989,152 @@ export function AnimationEditor({
             </div>
           ) : null}
         </div>
-        <ul className="flex-1 overflow-auto divide-y divide-zinc-800">
-          {sheetSpriteIds.length === 0 ? (
-            <li className="px-4 py-3 text-xs text-zinc-500">
-              No animation sprites yet. Click "+ New sprite" to import a
-              spritesheet.
-            </li>
-          ) : null}
-          {sheetSpriteIds.map((id) => {
-            const src = sources.find((s) => s.spriteId === id);
-            return (
-              <li
-                key={id}
-                onClick={() => openSprite(id)}
-                className={cn(
-                  "px-4 py-2 cursor-pointer hover:bg-zinc-800/40",
-                  activeId === id && "bg-zinc-800/60",
-                )}
-              >
-                <div className="text-sm text-zinc-100">{id}</div>
-                <div className="text-xs text-zinc-500">
-                  {src
-                    ? `${src.grid.cols}×${src.grid.rows} · ${
-                        Object.keys(src.cellMappings).length
-                      } anim${
-                        Object.keys(src.cellMappings).length === 1 ? "" : "s"
-                      }`
-                    : "imported externally"}
-                </div>
+        <div className="flex-1 overflow-auto" data-testid="anim-sprite-rail">
+          {/* ── Baked sprites — read-only previews, clicked by default ── */}
+          <div
+            className="px-4 py-2 text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-900/60 bg-zinc-950/40"
+            data-testid="baked-sprites-header"
+          >
+            Baked sprites
+          </div>
+          <ul className="divide-y divide-zinc-800">
+            {bakedSprites.length === 0 ? (
+              <li className="px-4 py-3 text-xs text-zinc-500">
+                No baked sprites yet. Click "+ New sprite" to author one.
               </li>
-            );
-          })}
-        </ul>
+            ) : null}
+            {bakedSprites.map((row) => {
+              const angles = row.def.angles ?? 1;
+              return (
+                <li
+                  key={`baked:${row.id}`}
+                  onClick={() => openBaked(row.id)}
+                  data-testid={`baked-sprite-${row.id}`}
+                  className={cn(
+                    "px-4 py-2 cursor-pointer hover:bg-zinc-800/40",
+                    activeId === row.id &&
+                      centerMode === "preview" &&
+                      "bg-zinc-800/60",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm text-zinc-100 flex-1 truncate">
+                      {row.id}
+                    </div>
+                    {row.sourceKind === "fbx" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openSource(row.id);
+                        }}
+                        className="text-[9px] px-1 py-0.5 rounded bg-amber-900/60 text-amber-200 hover:bg-amber-800"
+                        title="Jump to FBX source"
+                      >
+                        FBX
+                      </button>
+                    ) : row.sourceKind === "spritesheet" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openSource(row.id);
+                        }}
+                        className="text-[9px] px-1 py-0.5 rounded bg-zinc-700/60 text-zinc-200 hover:bg-zinc-600"
+                        title="Jump to spritesheet source"
+                      >
+                        sheet
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {(row.def.frameWidth ?? "?")}×{row.def.frameHeight ?? "?"}{" "}
+                    · {angles} angle{angles === 1 ? "" : "s"}
+                    {row.animCount > 0
+                      ? ` · ${row.animCount} anim${row.animCount === 1 ? "" : "s"}`
+                      : ""}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* ── Sources — re-editable inputs (FBX / spritesheet) ── */}
+          <div
+            className="px-4 py-2 text-[10px] uppercase tracking-wide text-zinc-500 border-y border-zinc-900/60 bg-zinc-950/40 mt-2"
+            data-testid="sources-header"
+          >
+            Sources
+          </div>
+          <ul className="divide-y divide-zinc-800">
+            {sourceSprites.length === 0 ? (
+              <li className="px-4 py-3 text-xs text-zinc-500">
+                No editable sources yet. Imports land here.
+              </li>
+            ) : null}
+            {sourceSprites.map(({ id, meta }) => {
+              const isFbx = meta.kind === "fbx";
+              const sourceFile = meta.sourcePath.split("/").pop() ?? meta.sourcePath;
+              const clipCount = meta.fbx?.enabledClips.length ?? 0;
+              return (
+                <li
+                  key={`source:${id}`}
+                  onClick={() => openSource(id)}
+                  data-testid={`source-${id}`}
+                  className={cn(
+                    "px-4 py-2 cursor-pointer hover:bg-zinc-800/40",
+                    activeId === id &&
+                      centerMode !== "preview" &&
+                      "bg-zinc-800/60",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm text-zinc-100 truncate">
+                      {sourceFile}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRebakeSource(id);
+                      }}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 hover:bg-amber-700 hover:text-zinc-950"
+                      title="Re-bake this source into its linked sprite"
+                    >
+                      🔄 Re-bake
+                    </button>
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {isFbx
+                      ? `${clipCount} clip${clipCount === 1 ? "" : "s"} → "${id}"`
+                      : `${meta.grid.cols}×${meta.grid.rows} → "${id}"`}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </aside>
 
-      {/* Center: preview pane. */}
+      {/* Center: preview / edit pane. Dispatches on `centerMode`. */}
+      {centerMode === "preview" &&
+      activeId &&
+      bakedPngBlob &&
+      manifest?.sprites?.[activeId] ? (
+        <BakedSpritePreview
+          spriteId={activeId}
+          sprite={manifest.sprites[activeId]!}
+          pngBlob={bakedPngBlob}
+          sourceMeta={sources.find((s) => s.spriteId === activeId)}
+          onRebake={
+            sources.find((s) => s.spriteId === activeId)
+              ? () => handleRebakeSource(activeId)
+              : undefined
+          }
+          onOpenSource={
+            sources.find((s) => s.spriteId === activeId)
+              ? () => openSource(activeId)
+              : undefined
+          }
+        />
+      ) : (
       <section className="flex-1 flex flex-col bg-zinc-950/20 overflow-hidden">
         {editorState && loadedImage && grid ? (
           <>
@@ -1010,9 +1359,16 @@ export function AnimationEditor({
           </div>
         )}
       </section>
+      )}
 
-      {/* Right: config panel. */}
-      <aside className="w-96 border-l border-zinc-800 bg-zinc-950/40 overflow-auto">
+      {/* Right: config panel. Hidden in preview mode (the preview pane
+          owns its own animation controls). */}
+      <aside
+        className={cn(
+          "w-96 border-l border-zinc-800 bg-zinc-950/40 overflow-auto",
+          centerMode === "preview" && "hidden",
+        )}
+      >
         {editorState ? (
           <div className="p-4 space-y-4">
             <section>
