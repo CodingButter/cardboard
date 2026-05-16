@@ -25,6 +25,7 @@ import type ItemImages from "ItemImages";
 import type { SceneRenderer } from "Renderers";
 import type { PartialGameConfig } from "Settings";
 import type {
+  AnimAPI,
   BindingsAPI,
   BuiltInComponents,
   FrameFn,
@@ -49,6 +50,7 @@ import { RendererSystemRegistry } from "./RendererSystemRegistry";
 import { UIRegistry } from "./UIRegistry";
 import { SettingsRegistry } from "./SettingsRegistry";
 import { BindingsRegistry } from "./BindingsRegistry";
+import { AnimRegistry } from "./AnimRegistry";
 
 /**
  * Dependencies the engine wires into the ModAPI implementation. Kept
@@ -108,7 +110,14 @@ export class ModAPIImpl implements ModAPI {
   };
 
   readonly world: World;
-  readonly scene: Scene;
+  /**
+   * Live scene reference. Mutable so the engine can swap to a
+   * different scene at runtime via `Game.loadScene` /
+   * `Game.reloadScene` (see EDITOR_IFRAME.md §7) without rebuilding
+   * the entire ModAPI. Pack scripts read `api.scene.*` per frame so
+   * the swap takes effect on the next tick.
+   */
+  scene: Scene;
   readonly pack: AssetPack;
   readonly input: InputAPI;
   readonly modals: ModalsAPI;
@@ -116,6 +125,7 @@ export class ModAPIImpl implements ModAPI {
   readonly ui: UIAPI;
   readonly settings: SettingsAPI;
   readonly bindings: BindingsAPI;
+  readonly anim: AnimAPI;
 
   /**
    * Internal handle to the UI registry. The engine's `Game.update`
@@ -145,6 +155,7 @@ export class ModAPIImpl implements ModAPI {
     this.ui = this.uiRegistry;
     this.settings = new SettingsRegistry(deps.packConfig);
     this.bindings = new BindingsRegistry();
+    this.anim = new AnimRegistry(this.world);
   }
 
   /**

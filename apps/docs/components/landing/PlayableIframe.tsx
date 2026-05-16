@@ -30,8 +30,12 @@ const SCENES: SceneOption[] = [
   { value: 'scenes/scene1.json', label: 'Scene 1 — Open Arena' },
   { value: 'scenes/scene2.json', label: 'Scene 2 — Pillared Hall' },
   {
-    value: 'scenes/scene_heights_demo.json',
-    label: 'Heights Demo — Partial Walls + Dynamic Lights',
+    value: 'scenes/scene3.json',
+    label: 'Scene 3 — Heights Demo (Partial Walls + Dynamic Lights)',
+  },
+  {
+    value: 'scenes/scene4.json',
+    label: 'Scene 4 — Animation Demo (multi-angle anim_marker)',
   },
 ];
 

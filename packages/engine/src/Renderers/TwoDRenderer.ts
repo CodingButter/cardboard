@@ -424,6 +424,12 @@ export class TwoDRenderer implements SceneRenderer {
       lightR: number;
       lightG: number;
       lightB: number;
+      /** A1 of ANIMATIONS.md — atlas-layer source-rect origin (UV space, 0..1). */
+      uvOffsetX: number;
+      uvOffsetY: number;
+      /** A1 of ANIMATIONS.md — atlas-layer source-rect size (UV space, 0..1). */
+      uvScaleX: number;
+      uvScaleY: number;
     };
     const items: Item[] = [];
     // Cached scene from this frame's `drawWorld`. Sprites without a prior
@@ -475,6 +481,10 @@ export class TwoDRenderer implements SceneRenderer {
         lightR,
         lightG,
         lightB,
+        uvOffsetX: req.uvOffset?.x ?? 0,
+        uvOffsetY: req.uvOffset?.y ?? 0,
+        uvScaleX: req.uvScale?.x ?? 1,
+        uvScaleY: req.uvScale?.y ?? 1,
       });
     }
     if (items.length === 0) return;
@@ -530,8 +540,16 @@ export class TwoDRenderer implements SceneRenderer {
       const texW = it.tex.width;
       const texH = it.tex.height;
       const texData = it.tex.data;
-      const stepU = texW / spriteW;
-      const stepV = texH / spriteH;
+      // A1 of ANIMATIONS.md — restrict sampling to the (uvOffset,
+      // uvScale) region within the source texture. For unanimated
+      // sprites this is the whole texture (uvOffset=0,0 / uvScale=1,1)
+      // so the stride math collapses to the pre-A1 path exactly.
+      const srcLeft = it.uvOffsetX * texW;
+      const srcTop = it.uvOffsetY * texH;
+      const srcW = it.uvScaleX * texW;
+      const srcH = it.uvScaleY * texH;
+      const stepU = srcW / spriteW;
+      const stepV = srcH / spriteH;
 
       const spriteLeft = screenCenterX - spriteW / 2;
       const spriteTop = screenCenterY - spriteH / 2;
@@ -542,7 +560,9 @@ export class TwoDRenderer implements SceneRenderer {
         // the whole column is safe to draw.
         const nearest = depth[x]!;
         const skipColumnTest = nearest >= it.camY;
-        const u = ((x - spriteLeft) * stepU) | 0;
+        // Offset by srcLeft so the per-screen-x texel index is anchored
+        // at the active frame's column when this sprite is animated.
+        const u = (srcLeft + (x - spriteLeft) * stepU) | 0;
         if (u < 0 || u >= texW) continue;
 
         // Per-column slab list — used when at least one slab is closer
@@ -553,8 +573,10 @@ export class TwoDRenderer implements SceneRenderer {
         let dstIdx = y0 * dstStride + x * 4;
         // Keep v as a float — `stepV` is < 1 whenever the sprite is
         // larger than its texture, so an integer-only step would freeze
-        // sampling at the first row.
-        let vf = (y0 - spriteTop) * stepV;
+        // sampling at the first row. Offset by srcTop so the per-y
+        // sample index is anchored at the active frame's row when this
+        // sprite is animated (= srcTop=0, srcH=texH for static).
+        let vf = srcTop + (y0 - spriteTop) * stepV;
         for (let y = y0; y < y1; y++) {
           // Per-pixel slab occlusion: if any closer slab covers this y,
           // the sprite is hidden here. For knee walls, pixels above the

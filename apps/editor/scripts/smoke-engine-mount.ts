@@ -1,10 +1,10 @@
 /**
- * Smoke test for E2 — exercises the `EditorAssetPack` contract end to
+ * Smoke test for E2 — exercises the `IdbAssetPack` contract end to
  * end against a freshly-imported default-pack project.
  *
  * The actual engine `Game` constructor needs a DOM canvas, WebGL, and
  * a browser event loop — none of which Bun's runtime provides. So we
- * stop at the layer just below: prove that `EditorAssetPack` satisfies
+ * stop at the layer just below: prove that `IdbAssetPack` satisfies
  * the abstract `AssetPack` surface the engine reads from (manifest,
  * `has`, `textBody`, `textureBlob`, `startScene`). If those round-trip
  * here, the engine has everything it needs once a browser canvas is
@@ -26,7 +26,7 @@ import {
   _resetDBCache,
 } from "../src/lib/EditorProjectStore";
 import { importPackFromBlob } from "../src/lib/importPack";
-import { EditorAssetPack } from "../src/lib/EditorAssetPack";
+import { IdbAssetPack } from "@two_5_d/engine";
 
 const PACK_PATH = resolve(
   import.meta.dir,
@@ -62,8 +62,8 @@ async function main() {
   const result = await importPackFromBlob(blob);
   assert(result.project?.id, "import returns a fresh project");
 
-  console.log("Constructing EditorAssetPack…");
-  const pack = await EditorAssetPack.fromProject(result.project.id);
+  console.log("Constructing IdbAssetPack…");
+  const pack = await IdbAssetPack.fromProject(result.project.id);
   assert(pack.manifest, "pack has a manifest");
   assert(
     typeof pack.manifest.name === "string" && pack.manifest.name.length > 0,

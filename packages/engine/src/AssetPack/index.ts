@@ -7,6 +7,8 @@ export type {
   ItemStack,
   DefaultInventoryEntry,
   SpriteDef,
+  AnimationDef,
+  SpriteAngleCount,
   ItemImageVariant,
   PackManifest,
   PackRequiresEntry,
@@ -19,6 +21,11 @@ export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS, POST_PASS_UNIFORMS } from "./types";
 export { discoverItemVariants } from "./discoverItemVariants";
 export { AssetPack } from "./AssetPack";
 export { ZipAssetPack } from "./ZipAssetPack";
+export {
+  IdbAssetPack,
+  DEFAULT_EDITOR_DB_NAME,
+  DEFAULT_EDITOR_DB_VERSION,
+} from "./IdbAssetPack";
 export { DEFAULT_PACK_URL, loadAssetPack } from "./loadAssetPack";
 export { resolveChain, clearChainCache } from "./ChainResolver";
 export {

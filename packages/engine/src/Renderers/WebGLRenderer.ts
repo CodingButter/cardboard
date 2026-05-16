@@ -102,6 +102,8 @@ in float a_layer;
 in float a_camY;
 in vec2 a_worldPos;
 in float a_variant;
+in vec2 a_uvOffset;
+in vec2 a_uvScale;
 out vec2 v_uv;
 flat out float v_layer;
 flat out float v_camY;
@@ -109,7 +111,12 @@ flat out vec2 v_worldPos;
 flat out int v_variant;
 void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
-  v_uv = a_uv;
+  // A1 of ANIMATIONS.md — map the per-vertex [0,1] quad UV into the
+  // atlas-layer region for the active animation frame + angle. When
+  // the entity has no Animation component the system sends
+  // (uvOffset, uvScale) = ((0,0), (1,1)) so this collapses to the
+  // identity v_uv = a_uv path (byte-identical to pre-A1).
+  v_uv = a_uvOffset + a_uv * a_uvScale;
   v_layer = a_layer;
   v_camY = a_camY;
   v_worldPos = a_worldPos;
@@ -123,28 +130,39 @@ void main() {
 }
 `;
 
+/** Per-vertex stride in floats. See `bindSpriteAttribs` for the layout. */
+const SPRITE_VERTEX_FLOATS = 13;
+
 /**
  * Bind every sprite-VBO attribute against the supplied (presumably
  * just-linked) sprite program. Lives at module scope so the
  * constructor and `rebuildSpriteProgram` both reach it; the VAO is
  * already bound + the VBO is the active ARRAY_BUFFER when this runs.
  *
- * Per-vertex layout: 9 floats × 4 bytes = 36 bytes/vertex.
+ * Per-vertex layout: 13 floats × 4 bytes = 52 bytes/vertex.
  *
- *   [posX, posY, u, v, layer, camY, worldX, worldY, variantId]
+ *   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
+ *    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
  *
- * Variant id is M1 of MATERIALS.md — the per-entity shader-variant
- * the fragment dispatcher switches on. Defaults to 0 when an entity
- * has no `Shader` component.
+ *  - `variantId` is M1 of MATERIALS.md — per-entity shader-variant
+ *    the fragment dispatcher switches on. Defaults to 0 when an
+ *    entity has no `Shader` component.
+ *  - `uvOffset` + `uvScale` are A1 of ANIMATIONS.md — the source-
+ *    region rectangle within the atlas layer. The VS maps the
+ *    per-vertex [0,1] quad UV into the rect. For unanimated sprites
+ *    these stream as `(0,0)` + `(1,1)` so the rect is the whole
+ *    layer (= pre-A1 byte-identical sampling).
  */
 function bindSpriteAttribs(gl: WebGL2RenderingContext, program: WebGLProgram): void {
-  const stride = 9 * 4;
+  const stride = SPRITE_VERTEX_FLOATS * 4;
   const posLoc = gl.getAttribLocation(program, "a_position");
   const uvLoc = gl.getAttribLocation(program, "a_uv");
   const layerLoc = gl.getAttribLocation(program, "a_layer");
   const camYLoc = gl.getAttribLocation(program, "a_camY");
   const worldLoc = gl.getAttribLocation(program, "a_worldPos");
   const variantLoc = gl.getAttribLocation(program, "a_variant");
+  const uvOffsetLoc = gl.getAttribLocation(program, "a_uvOffset");
+  const uvScaleLoc = gl.getAttribLocation(program, "a_uvScale");
   gl.enableVertexAttribArray(posLoc);
   gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
   gl.enableVertexAttribArray(uvLoc);
@@ -161,6 +179,18 @@ function bindSpriteAttribs(gl: WebGL2RenderingContext, program: WebGLProgram): v
   if (variantLoc >= 0) {
     gl.enableVertexAttribArray(variantLoc);
     gl.vertexAttribPointer(variantLoc, 1, gl.FLOAT, false, stride, 8 * 4);
+  }
+  // A1: uvOffset + uvScale are read by the VS for the multiply-add.
+  // They're never optimised out by the engine's VS (always read), but
+  // a pack-supplied VS replacement could theoretically drop them, so
+  // we still guard via -1.
+  if (uvOffsetLoc >= 0) {
+    gl.enableVertexAttribArray(uvOffsetLoc);
+    gl.vertexAttribPointer(uvOffsetLoc, 2, gl.FLOAT, false, stride, 9 * 4);
+  }
+  if (uvScaleLoc >= 0) {
+    gl.enableVertexAttribArray(uvScaleLoc);
+    gl.vertexAttribPointer(uvScaleLoc, 2, gl.FLOAT, false, stride, 11 * 4);
   }
 }
 
@@ -791,7 +821,9 @@ export class WebGLRenderer implements SceneRenderer {
    * Streams 0 when no entity has a `Shader` component (= today's
    * behaviour).
    */
-  private readonly spriteVertexData: Float32Array = new Float32Array(MAX_SPRITES_PER_FRAME * 6 * 9);
+  private readonly spriteVertexData: Float32Array = new Float32Array(
+    MAX_SPRITES_PER_FRAME * 6 * SPRITE_VERTEX_FLOATS,
+  );
   // Mutable — re-resolved against `this.spriteProgram` whenever the
   // sprite program is rebuilt (M1 of MATERIALS.md).
   private spriteUniforms: Record<string, WebGLUniformLocation | null>;
@@ -1089,11 +1121,14 @@ export class WebGLRenderer implements SceneRenderer {
     );
 
     // Sprite VAO — per-vertex layout is
-    //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId]
-    // (9 floats × 4 bytes = 36-byte stride). The trailing variantId
-    // is M1 of MATERIALS.md — per-entity shader-variant attribute.
-    // The VAO layout always carries it; `drawSprites` writes 0 when
-    // no Shader component is present.
+    //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
+    //    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
+    // (13 floats × 4 bytes = 52-byte stride). `variantId` is M1 of
+    // MATERIALS.md — per-entity shader-variant attribute, defaults to
+    // 0 when no Shader component is present. `uvOffset` + `uvScale`
+    // are A1 of ANIMATIONS.md — the source-region rectangle within the
+    // atlas layer. Default `(0,0)` + `(1,1)` for unanimated sprites
+    // keeps the read byte-identical to pre-A1.
     const svao = gl.createVertexArray();
     if (!svao) throw new Error("Failed to create sprite VAO");
     gl.bindVertexArray(svao);
@@ -1526,6 +1561,12 @@ export class WebGLRenderer implements SceneRenderer {
       worldY: number;
       /** Per-entity shader-variant id, M1 of MATERIALS.md. 0 = pack default. */
       variant: number;
+      /** A1 of ANIMATIONS.md — atlas-layer source rect origin (0..1). */
+      uvOffsetX: number;
+      uvOffsetY: number;
+      /** A1 of ANIMATIONS.md — atlas-layer source rect size (0..1). */
+      uvScaleX: number;
+      uvScaleY: number;
     };
     const items: Item[] = [];
     for (const req of requests) {
@@ -1551,6 +1592,10 @@ export class WebGLRenderer implements SceneRenderer {
         worldX: req.x,
         worldY: req.y,
         variant: req.shaderVariant ?? 0,
+        uvOffsetX: req.uvOffset?.x ?? 0,
+        uvOffsetY: req.uvOffset?.y ?? 0,
+        uvScaleX: req.uvScale?.x ?? 1,
+        uvScaleY: req.uvScale?.y ?? 1,
       });
     }
     if (items.length === 0) return;
@@ -1571,8 +1616,12 @@ export class WebGLRenderer implements SceneRenderer {
       }
     }
 
-    // Build vertex data — 6 verts per quad, 9 floats per vert
-    // (trailing float is the variant id, M1 of MATERIALS.md).
+    // Build vertex data — 6 verts per quad, 13 floats per vert.
+    //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
+    //    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
+    // `variantId` is M1 of MATERIALS.md; `uvOffset` + `uvScale` are
+    // A1 of ANIMATIONS.md (atlas region for the current frame +
+    // angle).
     const data = this.spriteVertexData;
     const invW = 1 / width;
     const invH = 1 / height;
@@ -1601,14 +1650,18 @@ export class WebGLRenderer implements SceneRenderer {
       const WX = it.worldX;
       const WY = it.worldY;
       const V = it.variant;
+      const UOX = it.uvOffsetX;
+      const UOY = it.uvOffsetY;
+      const USX = it.uvScaleX;
+      const USY = it.uvScaleY;
       // Tri 1: TL, TR, BL
-      data[off++] = clipL; data[off++] = clipT; data[off++] = 0; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
-      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
-      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipL; data[off++] = clipT; data[off++] = 0; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
+      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
+      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
       // Tri 2: TR, BR, BL
-      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
-      data[off++] = clipR; data[off++] = clipB; data[off++] = 1; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
-      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V;
+      data[off++] = clipR; data[off++] = clipT; data[off++] = 1; data[off++] = 0; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
+      data[off++] = clipR; data[off++] = clipB; data[off++] = 1; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
+      data[off++] = clipL; data[off++] = clipB; data[off++] = 0; data[off++] = 1; data[off++] = L; data[off++] = Y; data[off++] = WX; data[off++] = WY; data[off++] = V; data[off++] = UOX; data[off++] = UOY; data[off++] = USX; data[off++] = USY;
     }
 
     // Upload only the bytes we filled.

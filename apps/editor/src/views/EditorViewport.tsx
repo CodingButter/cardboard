@@ -1,33 +1,31 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Game } from "Game";
-import { applyConfigOverride, CONFIG } from "GameConfig";
-import { WebGLRenderer } from "Renderers";
-import type { PartialGameConfig } from "Settings";
-import { EditorAssetPack } from "../lib/EditorAssetPack";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/cn";
+import { GAME_RUNNER_URL } from "../lib/gameRunnerUrl";
 import { GridEditor, type MutableScene } from "./GridEditor";
 
 /**
  * Live engine pane for the editor's project view.
  *
- * Mounts a `<canvas>`, builds an `EditorAssetPack` on top of the
- * project's IDB rows, then constructs the engine's `Game` against the
- * active scene. In Play mode this is the full engine (pointer lock +
- * WASD + mouse look). In Edit mode the live engine is torn down and
- * the 2D `GridEditor` takes over the same pane.
+ * I1 of `docs/plans/EDITOR_IFRAME.md`: the engine no longer mounts
+ * in the editor's React tree. Instead, this component embeds the
+ * game runner via `<iframe>` and drives it via `postMessage`.
  *
- * E3 lifecycle:
- *   1. Play → Edit. Tear the engine down (`game.destroy()`), let the
- *      `<GridEditor>` mount. Pointer lock is released as a side effect.
- *   2. Edit → Play. If `dirty`, persist the in-memory scene JSON to
- *      IDB via `onPersistScene` first so the re-mounted engine boots
- *      against the edited scene.
+ * That moves four classes of bug out of scope:
+ *  - HUD canvas leaks past the viewport pane (the engine's stacked
+ *    2D HUD canvas appends to `document.body`; inside the iframe
+ *    that body IS the viewport).
+ *  - Modal overlays (`position: fixed`) cover the editor — anchored
+ *    to iframe viewport now.
+ *  - Tailwind classes from `default-pack/scripts/ui/` weren't in
+ *    editor's compiled CSS — the iframe runs game-runner HTML,
+ *    whose Tailwind compile includes pack sources.
+ *  - Engine teardown races on mode toggle — iframe lifecycle is
+ *    decoupled from React's render cycle.
  *
- * The viewport doesn't own the scene state any more — `ProjectView`
- * does. It also doesn't own `mode`; we expose it as a controlled prop
- * so the parent can re-use the same toggle from the header / save
- * indicator. The `Tab` keyboard binding still lives here because the
- * binding is meaningful only when the viewport is mounted.
+ * Lifecycle:
+ *  - Project change → new iframe URL (full iframe rebuild).
+ *  - Scene change within same project → `switch-scene` message.
+ *  - Edit→Play → `scene-changed` message (engine re-reads IDB).
  */
 export type ViewportMode = "play" | "edit";
 
@@ -41,29 +39,20 @@ export interface EditorViewportProps {
   mode: ViewportMode;
   onModeChange: (mode: ViewportMode) => void;
   /** Edit-mode scene state. Owned by the parent so it can persist on
-   *  Save and rebuild EditorAssetPack on Play. */
+   *  Save and signal the iframe on Play. */
   editScene: MutableScene | null;
   editScenePath: string | null;
   onEditSceneChange: (next: MutableScene) => void;
-  /** Persist the edited scene to IDB. Called by the viewport before it
-   *  switches back to Play so the engine boots on the fresh bytes. */
+  /** Persist the edited scene to IDB. Called before signalling the
+   *  iframe so the engine boots on the fresh bytes. */
   onPersistScene: () => Promise<void>;
 }
 
-interface EngineHandle {
-  game: Game;
-  pack: EditorAssetPack;
-}
-
-/** Tear down a `Game`. Defensive against double-dispose. */
-function disposeEngine(handle: EngineHandle | null): void {
-  if (!handle) return;
-  try {
-    handle.game.destroy();
-  } catch (err) {
-    console.warn("EditorViewport: dispose threw —", err);
-  }
-}
+/** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
+type IframeToEditor =
+  | { type: "ready"; projectId: string; scene: string }
+  | { type: "scene-loaded"; path: string }
+  | { type: "error"; message: string };
 
 export function EditorViewport({
   projectId,
@@ -76,123 +65,84 @@ export function EditorViewport({
   onEditSceneChange,
   onPersistScene,
 }: EditorViewportProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [status, setStatus] = useState<string>("Initialising…");
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [status, setStatus] = useState<string>("Booting…");
   const [error, setError] = useState<string | null>(null);
   /**
-   * Engine handle held in a ref (not state) so it survives
-   * re-renders without forcing a remount cycle. The mount effect
-   * writes it; the unmount cleanup reads it.
+   * Active scene the iframe is reportedly on, per its last
+   * `scene-loaded`. Tracked so we know whether a `sceneName` change
+   * has been ACKed and we don't keep re-sending the same path.
    */
-  const engineRef = useRef<EngineHandle | null>(null);
+  const lastSentSceneRef = useRef<string | null>(null);
 
-  // Mount / re-mount the engine on every (projectId, sceneName) change.
-  // Skip the engine entirely in Edit mode — GridEditor renders instead.
-  useEffect(() => {
-    if (mode === "edit") {
-      // Make sure no stale engine is running while we're in edit mode.
-      const handle = engineRef.current;
-      engineRef.current = null;
-      disposeEngine(handle);
-      setStatus("Edit mode");
-      return;
-    }
-
-    let cancelled = false;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    // Re-bind to a local const so the async closure below sees a
-    // non-null `HTMLCanvasElement` even after re-entries.
-    const liveCanvas: HTMLCanvasElement = canvas;
-
-    async function boot() {
-      setStatus("Loading project…");
-      setError(null);
-      try {
-        const pack = await EditorAssetPack.fromProject(projectId);
-        if (cancelled) return;
-        setStatus("Applying config…");
-        const packConfigRaw = ((await pack.config()) ?? {}) as PartialGameConfig;
-        applyConfigOverride(packConfigRaw);
-        if (cancelled) return;
-
-        const resolvedSceneName = sceneName ?? pack.manifest.startScene;
-        if (!resolvedSceneName) {
-          throw new Error("Project manifest is missing `startScene`.");
-        }
-        if (!pack.has(resolvedSceneName)) {
-          throw new Error(
-            `Scene "${resolvedSceneName}" not found in project assets.`,
-          );
-        }
-        setStatus(`Loading scene ${resolvedSceneName}…`);
-        const scene = await pack.scene(resolvedSceneName);
-        if (cancelled) return;
-        onSceneResolved?.(resolvedSceneName);
-
-        setStatus("Compiling shaders…");
-        const shaderSources =
-          CONFIG.rendering.backend === "webgl" && pack.manifest.shaders
-            ? await WebGLRenderer.prefetchShaderSources(pack)
-            : undefined;
-        if (cancelled) return;
-
-        setStatus("Starting engine…");
-        const game = new Game(
-          liveCanvas,
-          pack,
-          scene,
-          undefined,
-          packConfigRaw,
-          shaderSources,
-        );
-        await game.runPackScripts();
-        if (cancelled) {
-          game.destroy();
-          return;
-        }
-        game.spawnInitialEntities();
-        await game.collectShaderVariants();
-        await game.renderer.assetsReady;
-        if (cancelled) {
-          game.destroy();
-          return;
-        }
-        engineRef.current = { game, pack };
-        game.start();
-        setStatus("Running");
-      } catch (err) {
-        if (cancelled) return;
-        const message = (err as Error).message ?? String(err);
-        console.error("EditorViewport: boot failed —", err);
-        setError(message);
-        setStatus("Failed");
-      }
-    }
-
-    boot();
-    return () => {
-      cancelled = true;
-      const handle = engineRef.current;
-      engineRef.current = null;
-      disposeEngine(handle);
-      if (
-        typeof document !== "undefined" &&
-        document.pointerLockElement === canvas
-      ) {
-        document.exitPointerLock();
-      }
-    };
-    // `onSceneResolved` deliberately omitted — we only want to remount
-    // on the bound project/scene/mode change.
+  /**
+   * Iframe src — encodes the project id so a different project
+   * triggers a full iframe reload (the engine inside the iframe
+   * rebuilds from the new IDB rows). `sceneName` is intentionally
+   * NOT in the src — within a project we drive scene changes via
+   * postMessage so the engine state survives.
+   */
+  const src = useMemo(() => {
+    const base = GAME_RUNNER_URL;
+    const u = new URL(base, window.location.href);
+    u.searchParams.set("source", "editor");
+    u.searchParams.set("projectId", projectId);
+    // First-load scene only — subsequent scene changes use
+    // postMessage so engine state doesn't reset.
+    if (sceneName) u.searchParams.set("scene", sceneName);
+    return u.toString();
+    // sceneName intentionally excluded from deps — see comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sceneName, mode]);
+  }, [projectId]);
 
-  // Keyboard: Tab swaps Play ⇄ Edit. Spacebar in edit mode is reserved
-  // for the GridEditor's spawn-recenter (TODO E4).
+  // Reset the lastSent tracker whenever the project changes (new
+  // iframe = no message has been sent yet).
+  useEffect(() => {
+    lastSentSceneRef.current = null;
+    setStatus("Booting…");
+    setError(null);
+  }, [projectId]);
+
+  // Listen for messages from THIS iframe specifically. Same-origin
+  // means we could trust any postMessage, but the source check
+  // future-proofs against other iframes the editor might host.
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      if (ev.source !== iframeRef.current?.contentWindow) return;
+      const m = ev.data as IframeToEditor;
+      if (!m || typeof m !== "object" || typeof m.type !== "string") return;
+      if (m.type === "ready") {
+        setStatus("Running");
+        setError(null);
+      } else if (m.type === "error") {
+        setError(m.message);
+        setStatus("Failed");
+      } else if (m.type === "scene-loaded") {
+        lastSentSceneRef.current = m.path;
+        onSceneResolved?.(m.path);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onSceneResolved]);
+
+  // When the parent flips `sceneName` (user clicks a different
+  // scene), tell the iframe to swap WITHOUT reloading. The engine
+  // keeps its world state.
+  useEffect(() => {
+    if (!sceneName) return;
+    // Skip if we haven't received `ready` yet — the bridge isn't up.
+    if (status !== "Running") return;
+    if (lastSentSceneRef.current === sceneName) return;
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "switch-scene", path: sceneName },
+      "*",
+    );
+  }, [sceneName, status]);
+
+  // Keyboard: Tab swaps Play ⇄ Edit.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Don't intercept keystrokes that belong to a form input.
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -209,32 +159,41 @@ export function EditorViewport({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // `handleModeToggle` captures current props; we want it to be the
-    // latest closure on every render, so we re-bind the listener.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, editScene]);
+  }, [mode, editScene, editScenePath]);
 
-  // Toggle helper — persists pending edits before the play remount.
+  /**
+   * Toggle helper — on Edit→Play, persist pending edits and tell
+   * the iframe to re-read so the engine sees them. On Play→Edit,
+   * pause the engine so it isn't burning frames behind GridEditor.
+   */
   async function handleModeToggle() {
     if (mode === "edit") {
-      // Save first so the engine reboots against the edited scene.
       try {
         await onPersistScene();
       } catch (err) {
         console.warn("EditorViewport: save-on-play-switch failed —", err);
       }
+      // Tell the iframe to re-read the (now-saved) scene from IDB.
+      if (editScenePath) {
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: "scene-changed", path: editScenePath },
+          "*",
+        );
+      }
+      iframeRef.current?.contentWindow?.postMessage({ type: "resume" }, "*");
       onModeChange("play");
     } else {
+      // Pause the engine so it stops capturing input + burning CPU
+      // while the GridEditor is on screen.
+      iframeRef.current?.contentWindow?.postMessage({ type: "pause" }, "*");
       onModeChange("edit");
     }
   }
 
   return (
     <div className="relative h-full w-full bg-zinc-950 overflow-hidden">
-      {/* Mode toggle (top-right segmented control). Floats above the
-          canvas in Play mode; pinned to the toolbar row visually
-          but as an overlay so we don't shift the layout when the
-          GridEditor's own toolbar renders below. */}
+      {/* Mode toggle (top-right segmented control). */}
       <div className="absolute top-2 right-2 z-30 flex rounded-md border border-zinc-700 bg-zinc-900/80 backdrop-blur-sm overflow-hidden text-xs">
         <ViewportModeButton
           active={mode === "play"}
@@ -248,10 +207,7 @@ export function EditorViewport({
         />
       </div>
 
-      {/* Status / error overlay sits above the canvas so the user
-          sees boot progress without a flash of unstyled engine. Only
-          shown when the live engine is mounting — Edit mode renders
-          GridEditor directly. */}
+      {/* Status / error overlay (Play mode only). */}
       {mode === "play" && error ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/90 px-6 text-center">
           <div className="max-w-md text-sm text-red-300">
@@ -269,10 +225,8 @@ export function EditorViewport({
         </div>
       ) : null}
 
-      {/* Edit mode → GridEditor occupies the pane. The engine canvas
-          stays mounted but hidden so we don't tear down the WebGL
-          context unnecessarily (the boot effect already disposed
-          the engine). */}
+      {/* Edit mode → GridEditor occupies the pane. The iframe stays
+          mounted but hidden so the engine doesn't lose its world. */}
       {mode === "edit" && editScene && editScenePath ? (
         <div className="absolute inset-0 z-10">
           <GridEditor
@@ -288,14 +242,16 @@ export function EditorViewport({
         </div>
       ) : null}
 
-      <canvas
-        ref={canvasRef}
-        id="editor-viewport-canvas"
+      <iframe
+        ref={iframeRef}
+        src={src}
+        title="Engine viewport"
+        allow="pointer-lock; fullscreen; gamepad; screen-wake-lock"
         className={cn(
-          "block h-full w-full",
-          mode === "edit" && "invisible",
+          "block w-full h-full",
+          mode === "edit" && "invisible pointer-events-none",
         )}
-        style={{ touchAction: "none" }}
+        style={{ border: 0, background: "#000" }}
       />
     </div>
   );

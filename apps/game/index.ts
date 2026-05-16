@@ -1,4 +1,5 @@
 import { main, type GameState } from "@two_5_d/engine";
+import { bootForEditor } from "./src/boot-editor";
 
 /**
  * HMR-aware bootstrap.
@@ -15,6 +16,12 @@ import { main, type GameState } from "@two_5_d/engine";
  * declaration order — the LAST one is the root passed to `Game`,
  * earlier ones become prepended dependencies once the resolver walks
  * their `requires` graphs. A single `?pack=URL` stays as-before.
+ *
+ * I1 of `docs/plans/EDITOR_IFRAME.md` §4: the URL also accepts
+ * `?source=editor&projectId=<id>`, which branches into an
+ * IDB-backed pack served from the editor's `two_5_d_editor`
+ * database. The branch is detected here so the standard `?pack=`
+ * code path stays untouched.
  */
 let previousState: Partial<GameState> | undefined;
 
@@ -23,9 +30,21 @@ if (import.meta.hot && import.meta.hot.data.state) {
 }
 
 const params = new URLSearchParams(window.location.search);
-const packUrls = params.getAll("pack").filter((u) => u.length > 0);
 
-const game = await main(previousState, packUrls);
+let game;
+if (params.get("source") === "editor") {
+  // Editor-embedded mode (EDITOR_IFRAME.md §4). The project id is
+  // mandatory; without it we'd have nothing to read from IDB.
+  const projectId = params.get("projectId");
+  if (!projectId) {
+    throw new Error("?source=editor requires a ?projectId=<id> parameter");
+  }
+  game = await bootForEditor(projectId, params.get("scene"), previousState);
+} else {
+  // Standard zip-pack flow — `?pack=URL` (or empty → DEFAULT_PACK_URL).
+  const packUrls = params.getAll("pack").filter((u) => u.length > 0);
+  game = await main(previousState, packUrls);
+}
 
 if (import.meta.hot) {
   import.meta.hot.dispose((data) => {

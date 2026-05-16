@@ -12,12 +12,14 @@ import {
   collectSceneShaderLayer,
 } from "Renderers";
 import {
+  AnimationSystem,
   LightCollectionSystem,
   SpriteRenderSystem,
 } from "Systems";
 import ModalRegistry from "ModalRegistry";
 import type { PartialGameConfig } from "Settings";
 import { Aim, Camera, Facing, Position } from "Components";
+import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
 import { ModAPIImpl } from "ModAPI";
@@ -47,7 +49,13 @@ export interface GameState {
  */
 export class Game {
   readonly engine: Engine;
-  readonly scene: Scene;
+  /**
+   * Currently-active scene. Mutable so `loadScene` / `reloadScene`
+   * can swap to a fresh scene without re-constructing `Game`. Every
+   * per-frame consumer reads through `this.scene` so the swap
+   * propagates on the next render tick.
+   */
+  scene: Scene;
   readonly world: World;
   readonly keyboard: KeyboardController;
   readonly mouse: MouseController;
@@ -55,6 +63,15 @@ export class Game {
 
   readonly spriteRender: SpriteRenderSystem;
   readonly lightCollection: LightCollectionSystem;
+  /**
+   * Animation advance system — A1 of `docs/plans/ANIMATIONS.md`. Runs
+   * every update tick (before render) to drain elapsed time on every
+   * `Animation` component and advance the active frame. The render
+   * pass then reads stable frame state to compute the atlas UV region.
+   * Pack-agnostic at construction; wired with `pack` directly below so
+   * the system can look up `manifest.sprites[<id>].animations`.
+   */
+  readonly animationSystem: AnimationSystem;
   readonly modals: ModalRegistry;
   readonly itemImages: ItemImages;
   readonly api: ModAPIImpl;
@@ -111,8 +128,22 @@ export class Game {
     this.pack = pack;
     this.chain = chain && chain.length > 0 ? chain : [pack];
     this.canvas = canvas;
+    // Canvas fills its parent container — game runner's body is sized
+    // to viewport via apps/game CSS, editor viewport pane is bounded.
+    // The buffer matches the host via fitCanvasToWindow on every
+    // resize event + ResizeObserver tick.
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    this.canvas.style.display = "block";
     this.fitCanvasToWindow();
     window.addEventListener("resize", this.fitCanvasToWindow);
+    // ResizeObserver picks up host-pane resizes (editor viewport
+    // changing size, container reflow) that don't fire window resize.
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(this.fitCanvasToWindow);
+      const parent = this.canvas.parentElement;
+      if (parent) this.resizeObserver.observe(parent);
+    }
     // Canvas click → pointer lock. Fullscreen is opt-in via the
     // settings menu — auto-fullscreening on click felt aggressive and
     // didn't reliably suppress Ctrl+W in all browsers anyway.
@@ -153,6 +184,13 @@ export class Game {
     this.itemImages = new ItemImages(pack);
     this.spriteRender = new SpriteRenderSystem();
     this.lightCollection = new LightCollectionSystem();
+    // A1 of ANIMATIONS.md — engine-side AnimationSystem runs
+    // unconditionally. Wired with `pack` so it can look up sprite
+    // animation definitions; the SpriteRenderSystem reuses the same
+    // pack reference for atlas UV-region resolution.
+    this.animationSystem = new AnimationSystem();
+    this.animationSystem.pack = pack;
+    this.spriteRender.pack = pack;
     this.modals = new ModalRegistry();
 
     // Pack-side `.tsx` scripts (e.g. modal screens) import `"preact"`
@@ -262,6 +300,53 @@ export class Game {
   }
 
   /**
+   * Switch to a different scene from the current pack. I1 of
+   * EDITOR_IFRAME.md §7 — handler for the `switch-scene` message.
+   *
+   * The world (ECS entities) is preserved: the player keeps its
+   * Position / Inventory / etc., but `Position` is reset to the
+   * new scene's spawn so the player doesn't start mid-wall in the
+   * destination map.
+   *
+   * Tile / wall geometry comes from `this.scene` per-frame, so
+   * swapping the reference is all the renderer needs to draw the
+   * new map on the next tick.
+   */
+  async loadScene(path: string): Promise<void> {
+    const fresh = await this.pack.scene(path);
+    this.scene = fresh;
+    this.api.scene = fresh;
+    // Reset the player to the new scene's spawn. Keeping the world
+    // intact across scene swaps is a deliberate I1 choice — full
+    // entity teardown on each load is I2 territory.
+    const playerEntity = this.world.first(Camera, Position, Facing);
+    if (playerEntity !== undefined) {
+      // Vec2 is immutable — overwrite the component with a fresh
+      // instance instead of trying to mutate `pos.x` / `pos.y`.
+      this.world.add(playerEntity, Position, new Vec2(fresh.spawn.x, fresh.spawn.y));
+      Facing.set(playerEntity, fresh.spawn.facing);
+    }
+  }
+
+  /**
+   * Re-read the active scene from the pack. I1 of EDITOR_IFRAME.md
+   * §7 — handler for the `scene-changed` message after the editor
+   * persists an edit to IDB.
+   *
+   * Differs from `loadScene` in that it preserves the player's
+   * position (the geometry may have been retiled around the
+   * player, but the player itself shouldn't teleport on a paint).
+   * If the destination cell is unwalkable post-edit, downstream
+   * collision systems will resolve it on the next tick.
+   */
+  async reloadScene(path: string): Promise<void> {
+    const fresh = await this.pack.scene(path);
+    this.scene = fresh;
+    this.api.scene = fresh;
+    // Player position deliberately NOT reset — see method docstring.
+  }
+
+  /**
    * Material-variant collection + program recompiles (M1 + M2 + M3 of
    * MATERIALS.md). Three things happen here:
    *
@@ -357,32 +442,40 @@ export class Game {
     this.keyboard.destroy();
     this.mouse.destroy();
     window.removeEventListener("resize", this.fitCanvasToWindow);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
   }
 
   /**
-   * Re-fit the canvas to the current window:
+   * Re-fit the canvas to its host container:
    *
-   *   - CSS box fills the window edge-to-edge (no letterboxing).
-   *   - Pixel buffer = `window dims × resolutionScale`, clamped to
+   *   - Reads the canvas's parent `clientWidth/clientHeight` so the
+   *     engine adapts to whatever box the host gives it (game runner =
+   *     full window via body CSS; editor viewport = bounded pane).
+   *   - Pixel buffer = `host dims × resolutionScale`, clamped to
    *     `[0.25, 1.0]`. Lower scales upscale via CSS — cheaper at high
    *     resolutions, useful for the canvas2d backend on 4K monitors.
+   *   - Does NOT force inline CSS width/height on the canvas — the
+   *     host controls layout. The buffer matches the host's chosen
+   *     CSS dimensions so the displayed image has 1:1 pixel mapping.
    *
    * Renderer call-sites use `canvas.width / .height` per frame, so the
-   * aspect ratio adapts naturally — wider windows show more world
+   * aspect ratio adapts naturally — wider hosts show more world
    * horizontally without stretching the image. WebGL's HUD canvas is
    * resized alongside the main one.
    */
   private readonly fitCanvasToWindow = (): void => {
-    const winW = window.innerWidth;
-    const winH = window.innerHeight;
-    this.canvas.style.width = `${winW}px`;
-    this.canvas.style.height = `${winH}px`;
+    const parent = this.canvas.parentElement;
+    const hostW = parent?.clientWidth || window.innerWidth;
+    const hostH = parent?.clientHeight || window.innerHeight;
     const scale = Math.max(0.25, Math.min(1, CONFIG.rendering.resolutionScale ?? 1));
-    const bufW = Math.max(1, Math.round(winW * scale));
-    const bufH = Math.max(1, Math.round(winH * scale));
+    const bufW = Math.max(1, Math.round(hostW * scale));
+    const bufH = Math.max(1, Math.round(hostH * scale));
     if (this.renderer) this.renderer.resize(bufW, bufH);
   };
+
+  private resizeObserver: ResizeObserver | null = null;
 
   /** State to preserve across an HMR reload. */
   snapshot(): GameState {
@@ -399,6 +492,13 @@ export class Game {
       // close-side path runs inside the Preact component itself
       // (window keydown listener) and so doesn't need a frame tick.
       this.api.runFrame(deltaTime);
+      // A1 of ANIMATIONS.md — engine-side animation advance runs in
+      // the update phase (gameplay-paused while a modal is open), so
+      // when the inventory / settings UI is up the world freezes
+      // including any animated sprites. Runs AFTER pack systems so a
+      // mod that calls `api.anim.play(...)` reacting to input sees
+      // its `play` reset land BEFORE this tick's frame advance.
+      this.animationSystem.update(this.world, deltaTime);
     }
     // Reconcile pack-registered modal components (Preact) against the
     // engine's open-modal set. Runs every frame so live-prop callbacks

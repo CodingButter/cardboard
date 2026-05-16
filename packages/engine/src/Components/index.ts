@@ -7,6 +7,7 @@ export * from "./Weapon";
 export * from "./Inventory";
 export * from "./Pickup";
 export * from "./Sprite";
+export * from "./Animation";
 export * from "./Camera";
 export * from "./Light";
 export * from "./MinimapMarker";

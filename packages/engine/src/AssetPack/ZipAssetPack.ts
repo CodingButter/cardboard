@@ -22,7 +22,9 @@ export class ZipAssetPack extends AssetPack {
    * malformed zips, or missing/invalid `manifest.json`.
    */
   static async load(url: string): Promise<ZipAssetPack> {
-    const res = await fetch(url);
+    const { rewriteCorsHostileUrl } = await import("./rewriteUrl");
+    const fetchUrl = rewriteCorsHostileUrl(url);
+    const res = await fetch(fetchUrl);
     if (!res.ok) throw new Error(`Failed to fetch pack ${url} (${res.status})`);
     const buffer = await res.arrayBuffer();
     return ZipAssetPack.loadFromBytes(new Uint8Array(buffer), url);

@@ -15,7 +15,7 @@
  *      semantics, JSON.stringify, save via `EditorProjectStore.saveAsset`.
  *   5. Reload the scene from IDB, assert the mutated cell + idMap
  *      entry survived.
- *   6. Re-run the EditorAssetPack → engine `scene()` path to make sure
+ *   6. Re-run the IdbAssetPack → engine `scene()` path to make sure
  *      the modified scene still parses cleanly through the resolver
  *      (i.e. the engine could boot against it after a Play-mode flip).
  *
@@ -32,7 +32,7 @@ import {
   EditorProjectStore,
   _resetDBCache,
 } from "../src/lib/EditorProjectStore";
-import { EditorAssetPack } from "../src/lib/EditorAssetPack";
+import { IdbAssetPack } from "@two_5_d/engine";
 import { importPackFromBlob } from "../src/lib/importPack";
 
 const PACK_PATH = resolve(
@@ -203,13 +203,13 @@ async function main() {
   );
 
   // Verify the engine can still boot against the mutated scene by
-  // running it through EditorAssetPack.scene() — the same path the
+  // running it through IdbAssetPack.scene() — the same path the
   // viewport uses when flipping back to Play mode.
-  const pack = await EditorAssetPack.fromProject(projectId);
+  const pack = await IdbAssetPack.fromProject(projectId);
   let parsedScene;
   try {
     parsedScene = await pack.scene(startScene);
-    assert(true, "edited scene parses through EditorAssetPack.scene()");
+    assert(true, "edited scene parses through IdbAssetPack.scene()");
   } catch (err) {
     assert(false, `edited scene parses (${(err as Error).message})`);
   }

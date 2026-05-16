@@ -70,8 +70,20 @@
     { "itemId": "rifle_ammo", "count": 90 }
   ],
   "sprites": {
-    "ammo_pack": { "image": "images/items/ammo_pack.png" }
+    "ammo_pack": { "image": "images/items/ammo_pack.png" },
+    "anim_marker": {
+      "image": "images/sprites/anim_marker.png",
+      "frameWidth": 32,
+      "frameHeight": 32,
+      "cols": 4,
+      "rows": 4,
+      "angles": 4,
+      "animations": {
+        "idle": { "frames": [0, 1, 2, 3], "frameDuration": 0.18, "loop": true }
+      }
+    }
   },
+  "_animationsSmokeTest_doc": "A1 of ANIMATIONS.md smoke test. Flip `animationsSmokeTest` to `true` and run `bun run build-packs` to enable. With the flag on, `scripts/hello.js` spawns one 'anim_marker' sprite at (4, 4) using the 4-angle × 4-frame `anim_marker` sheet — the hue shifts as the camera walks around it (exercises the angle-selection math) and the centered arrow's brightness pulses through 4 frames (exercises the AnimationSystem). Disabled by default; with the flag off the default pack renders byte-identically to pre-A1.",
   "shaders_example": {
     "_doc": "R4/S3 smoke test (wet floor via Mode 3 hooks — supersedes the S1 wet-world.frag full-shader demo). Rename this key to `shaders` and run `bun run build-packs` to enable. Default ships disabled.",
     "worldHooks": "shaders/wet-world-hooks.glsl"
@@ -82,5 +94,5 @@
       { "name": "crt", "frag": "shaders/crt-pass.frag" }
     ]
   },
-  "_materialsSmokeTest_doc": "M1+M2+M3 of MATERIALS.md smoke test. Flip `materialsSmokeTest` to `true` and run `bun run build-packs` to see ALL THREE tiers light up: (M1) alternate ammo pickups get a per-entity Shader pointing at shaders/ghost-sprite.glsl (translucent green wave); (M2) cells assigned the wet.floor preset in scene_heights_demo render with 85% mirror reflectivity via shaders/wet-cell.glsl; (M3) scene2.json declares shaders.worldHooks=shaders/scene-fog.glsl which adds a hot-orange depth-attenuated tint via hook_modifyFinalColor. Disabled by default — with this flag off the engine compiles its pack-default programs and rendering is byte-identical to pre-MATERIALS today, even though the wet.floor preset and scene2.json shaders block are still in the pack (they're inert until the flag flips)."
+  "_materialsSmokeTest_doc": "M1+M2+M3 of MATERIALS.md smoke test. Flip `materialsSmokeTest` to `true` and run `bun run build-packs` to see ALL THREE tiers light up: (M1) alternate ammo pickups get a per-entity Shader pointing at shaders/ghost-sprite.glsl (translucent green wave); (M2) cells assigned the wet.floor preset in scene3 render with 85% mirror reflectivity via shaders/wet-cell.glsl; (M3) scene2.json declares shaders.worldHooks=shaders/scene-fog.glsl which adds a hot-orange depth-attenuated tint via hook_modifyFinalColor. Disabled by default — with this flag off the engine compiles its pack-default programs and rendering is byte-identical to pre-MATERIALS today, even though the wet.floor preset and scene2.json shaders block are still in the pack (they're inert until the flag flips)."
 }

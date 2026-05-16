@@ -18,6 +18,7 @@ import {
   Weapon,
   Inventory,
   Sprite,
+  Animation,
   Pickup,
   Light,
   Shader,
@@ -206,6 +207,14 @@ export interface BuiltInComponents {
   Weapon: typeof Weapon;
   Inventory: typeof Inventory;
   Sprite: typeof Sprite;
+  /**
+   * Frame-based sprite animation playback state (A1 of
+   * `docs/plans/ANIMATIONS.md`). Attach alongside `Sprite` to drive
+   * named-animation playback through `api.anim`. Entities without an
+   * `Animation` component render frame 0 of angle 0 (= pre-A1
+   * single-image path).
+   */
+  Animation: typeof Animation;
   Pickup: typeof Pickup;
   Light: typeof Light;
   /**
@@ -251,6 +260,37 @@ export interface InventoryAPI {
  */
 export interface RaycastAPI {
   readonly castRayToWall: typeof castRayToWall;
+}
+
+/**
+ * Sprite-animation control surface — A1 of `docs/plans/ANIMATIONS.md`.
+ *
+ * All helpers operate on the entity's `Animation` component (added by
+ * the pack when the entity is spawned, or lazily by `play` itself).
+ * Calls are write-now-read-on-next-tick: the changes land before the
+ * next `AnimationSystem.update` so the next frame renders the right
+ * cell.
+ *
+ * `onComplete` is A2 work — it rides `api.events` (MULTIPLAYER M1)
+ * once that surface lands. Not exposed in A1.
+ */
+export interface AnimAPI {
+  /**
+   * Switch to a named animation. Resets `frame` + `elapsed` to 0,
+   * unpauses, and (for entities without an `Animation` component) adds
+   * one so callers can author `Sprite`-first prefabs and start playback
+   * later. No-op if the entity already plays `animName` and isn't paused.
+   */
+  play(entity: Entity, animName: string): void;
+  /** Pause playback. Frame state preserved. No-op if no Animation. */
+  stop(entity: Entity): void;
+  /** Resume playback. No-op if no Animation. */
+  resume(entity: Entity): void;
+  /**
+   * `true` if the entity has an `Animation` component, isn't paused,
+   * AND (when `animName` is given) `current === animName`.
+   */
+  isPlaying(entity: Entity, animName?: string): boolean;
 }
 
 /**
@@ -311,6 +351,11 @@ export interface ModAPI {
   readonly settings: SettingsAPI;
   /** Bindings label resolver — wraps `Controllers/Bindings#bindingLabel`. */
   readonly bindings: BindingsAPI;
+  /**
+   * Sprite-animation control surface. See `AnimAPI`. A1 of
+   * `docs/plans/ANIMATIONS.md`.
+   */
+  readonly anim: AnimAPI;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */

@@ -6,7 +6,7 @@ import React, {
   useState,
 } from "react";
 import type { PackManifest, PresetResolver, ResolvedPresetData } from "@two_5_d/engine";
-import { EditorAssetPack } from "../lib/EditorAssetPack";
+import { IdbAssetPack } from "@two_5_d/engine";
 import { Button } from "../components/ui";
 import { cn } from "../lib/cn";
 
@@ -476,14 +476,14 @@ interface TexturePreviewBundle {
 function useTexturePack(projectId: string, manifest: PackManifest) {
   const cacheRef = useRef<Map<string, string>>(new Map());
   const inflightRef = useRef<Map<string, Promise<string>>>(new Map());
-  const packRef = useRef<EditorAssetPack | null>(null);
+  const packRef = useRef<IdbAssetPack | null>(null);
   const [, force] = useState(0);
 
   // Build the pack once; the inner manifest reference may change but
   // the project id won't, so the pack object is stable.
   useEffect(() => {
     let alive = true;
-    EditorAssetPack.fromProject(projectId).then((pack) => {
+    IdbAssetPack.fromProject(projectId).then((pack) => {
       if (!alive) return;
       packRef.current = pack;
       force((n) => n + 1);
@@ -535,7 +535,7 @@ function useTexturePack(projectId: string, manifest: PackManifest) {
  *  We rebuild whenever the manifest reference changes (preset edits
  *  during E4 — for E3 it's effectively a one-shot). */
 function useResolver(
-  pack: EditorAssetPack | null,
+  pack: IdbAssetPack | null,
 ): { resolver: PresetResolver | null; error: string | null } {
   const [state, setState] = useState<{
     resolver: PresetResolver | null;
@@ -642,11 +642,12 @@ export function GridEditor({
   const width = wallsGrid[0]?.length ?? 0;
   const cellSize = Math.max(2, Math.floor(20 * zoom));
 
-  // Center the viewport on the scene the first time we mount it. The
-  // user can pan with middle-button drag (or space+drag) thereafter.
-  const centeredRef = useRef(false);
+  // Center the viewport on the scene every time the scene changes
+  // (path, or dimensions if scenes were edited externally). The user
+  // can pan with middle-button drag (or space+drag) thereafter — the
+  // dependency list intentionally excludes cellSize so user zoom is
+  // preserved across re-centers.
   useEffect(() => {
-    if (centeredRef.current) return;
     const el = wrapRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -654,9 +655,8 @@ export function GridEditor({
       x: Math.floor(r.width / 2 - (width * cellSize) / 2),
       y: Math.floor(r.height / 2 - (height * cellSize) / 2),
     });
-    centeredRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, height]);
+  }, [scenePath, width, height]);
 
   // Preset palette — sorted, exposes a swatch + texture-url-or-null.
   const presetList = useMemo<TexturePreviewBundle[]>(() => {
@@ -1423,7 +1423,9 @@ export function GridEditor({
                 };
                 // Stamp a prefab marker via a free-form `prefab` field
                 // so the engine + smoke tests can spot the source.
-                (entity as Record<string, unknown>).prefab = name;
+                // `SceneEntity` doesn't declare a string index signature,
+                // so TS requires the double-cast through `unknown`.
+                (entity as unknown as Record<string, unknown>).prefab = name;
                 const next = addEntityToScene(scene, entity);
                 onSceneChange(next);
                 setSelected(cell);
@@ -1801,11 +1803,12 @@ function EntityInspector({
           className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px] font-mono"
         />
       </div>
-      {typeof (entity as Record<string, unknown>).prefab === "string" ? (
+      {typeof (entity as unknown as Record<string, unknown>).prefab ===
+      "string" ? (
         <div>
           <div className="text-zinc-500">Prefab</div>
           <div className="font-mono">
-            {(entity as Record<string, unknown>).prefab as string}
+            {(entity as unknown as Record<string, unknown>).prefab as string}
           </div>
         </div>
       ) : null}

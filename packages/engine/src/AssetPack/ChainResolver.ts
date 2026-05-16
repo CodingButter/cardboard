@@ -109,7 +109,9 @@ async function fetchPack(url: string, integrity?: string): Promise<AssetPack> {
   if (cached) return cached;
 
   const promise = (async () => {
-    const res = await fetch(url);
+    const { rewriteCorsHostileUrl } = await import("./rewriteUrl");
+    const fetchUrl = rewriteCorsHostileUrl(url);
+    const res = await fetch(fetchUrl);
     if (!res.ok) {
       throw new Error(`Failed to fetch pack ${url} (${res.status})`);
     }

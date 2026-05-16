@@ -11,8 +11,12 @@
  * line below when a new boundary crossing is needed.
  */
 
-// Bootstrap entry — `apps/game/index.ts` calls `main()`.
-export { main } from "./main";
+// Bootstrap entry — `apps/game/index.ts` calls `main()`. The
+// editor iframe boot path uses `bootFromChain` directly so it can
+// supply an `IdbAssetPack` instead of going through URL-based pack
+// resolution (see EDITOR_IFRAME.md §4).
+export { main, bootFromChain } from "./main";
+export { Game } from "./Game";
 export type { GameState } from "./Game";
 
 // Scene module — the bake script (`apps/pack-builder`) parses, mutates,
@@ -45,6 +49,9 @@ export {
   PresetResolver,
   stripJsonComments,
   ZipAssetPack,
+  IdbAssetPack,
+  DEFAULT_EDITOR_DB_NAME,
+  DEFAULT_EDITOR_DB_VERSION,
   resolveChain,
   clearChainCache,
   AssetPack,

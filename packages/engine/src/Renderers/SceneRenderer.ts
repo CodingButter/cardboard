@@ -31,6 +31,22 @@ export interface SpriteDrawRequest {
    * to the right override. The canvas2d backend ignores it.
    */
   shaderVariant?: number;
+  /**
+   * Source-region origin in [0, 1] layer coords — A1 of
+   * `docs/plans/ANIMATIONS.md`. Default `{x:0,y:0}` (full layer).
+   * Computed by `SpriteRenderSystem` from the entity's `Animation`
+   * component + sprite manifest grid + camera-angle bucket. The WebGL
+   * backend writes this to per-vertex `a_uvOffset`; the canvas2d
+   * backend translates to a `drawImage` source rect.
+   */
+  uvOffset?: { x: number; y: number };
+  /**
+   * Source-region size in [0, 1] layer coords — A1 of
+   * `docs/plans/ANIMATIONS.md`. Default `{x:1,y:1}` (full layer).
+   * Negative x is reserved for the A2 mirror optimisation (not used
+   * in A1).
+   */
+  uvScale?: { x: number; y: number };
 }
 
 /**

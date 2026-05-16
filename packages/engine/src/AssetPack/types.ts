@@ -150,14 +150,79 @@ export interface DefaultInventoryEntry {
 }
 
 /**
- * A pack-defined sprite. Right now this is just the image path; instance
- * properties (where to spawn, how tall, vertical offset) live on the
- * `Sprite` component of each entity. This keeps the manifest small while
- * still letting the renderer preload every sprite atlas at boot.
+ * Allowed view-angle counts for animated sprites. Other values (3, 6,
+ * 7, 9, …) are rejected by the pack-builder. See
+ * `docs/plans/ANIMATIONS.md` §3.1.
+ */
+export type SpriteAngleCount = 1 | 2 | 4 | 5 | 8 | 16;
+
+/**
+ * One named animation on a sprite. The `frames` array holds animation-
+ * local frame indices (columns within the angle's row in the sheet —
+ * see `docs/plans/ANIMATIONS.md` §5.2). `frameDuration` is per-frame
+ * playback time in seconds.
+ *
+ * A1 scope (per ANIMATIONS.md §14): no `onComplete` callback, no
+ * crossfade. `loop`, `next`, and per-clip `angles` override are honoured.
+ */
+export interface AnimationDef {
+  /**
+   * Animation-local frame indices. For multi-angle sprites these are
+   * column indices within the active row of the sheet (the row is
+   * picked by sprite-level `rowBase + angleIndex`).
+   */
+  frames: number[];
+  /** Per-frame duration in seconds. Must be > 0. */
+  frameDuration: number;
+  /** Default true. When false the animation pauses on its last frame (unless `next` is set). */
+  loop?: boolean;
+  /**
+   * Name of another animation on the same sprite to play once this one
+   * finishes (only meaningful with `loop: false`). Resets frame +
+   * elapsed to 0 at the transition.
+   */
+  next?: string;
+  /**
+   * Override the sprite-level `angles` for this clip. e.g. a death
+   * animation typically collapses to a single angle even when the rest
+   * of the sprite uses 8. See ANIMATIONS.md §10.1.
+   */
+  angles?: SpriteAngleCount;
+}
+
+/**
+ * A pack-defined sprite. The minimal form is `{ image }` (single PNG,
+ * single frame, single angle — backwards-compatible with the pre-A1
+ * sprite path). The optional fields describe a grid sprite sheet and
+ * any named animations / view-angle variants. See
+ * `docs/plans/ANIMATIONS.md` §4 for the full schema.
  */
 export interface SpriteDef {
   /** Path inside the pack to the sprite PNG. Alpha channel respected. */
   image: string;
+  /**
+   * Grid frame width in source-image pixels. Omit → single-image
+   * sheet (the renderer reads the whole image as one frame).
+   */
+  frameWidth?: number;
+  /** Grid frame height in source-image pixels. */
+  frameHeight?: number;
+  /** Columns in the source sheet (max frames per animation row). */
+  cols?: number;
+  /** Rows in the source sheet (sum of per-animation angle strips). */
+  rows?: number;
+  /**
+   * Default view-angle count for animations that don't override.
+   * Defaults to 1 (view-independent). See ANIMATIONS.md §3.1.
+   */
+  angles?: SpriteAngleCount;
+  /**
+   * Named animations. Keys are the identifiers passed to
+   * `api.anim.play(entity, name)`. Iteration order matters — the
+   * renderer computes per-animation `rowBase` by walking entries in
+   * insertion order. See ANIMATIONS.md §5.1.
+   */
+  animations?: Record<string, AnimationDef>;
 }
 
 /**

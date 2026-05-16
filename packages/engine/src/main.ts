@@ -1,6 +1,7 @@
 import { DEFAULT_PACK_URL, resolveChain, type AssetPack } from "AssetPack";
 import { applyConfigOverride } from "GameConfig";
 import type { Game as GameClass, GameState } from "Game";
+import { Scene } from "Scene";
 import { loadLocalSettings, loadUrlSettings, type PartialGameConfig } from "Settings";
 import { deepMerge } from "Libs/DeepMerge";
 
@@ -101,6 +102,34 @@ export async function main(
     console.log(`Loaded asset pack: ${pack.manifest.name} v${pack.manifest.version}`);
   }
 
+  return bootFromChain(chain, previous, sceneOverride);
+}
+
+/**
+ * The post-pack-resolution half of `main`. Takes a fully-formed
+ * pack chain (single-pack callers wrap their pack in `[pack]`) and
+ * drives the rest of boot — config merge, scene load, renderer
+ * pick, pack scripts, initial spawn, shader variants, assets ready.
+ *
+ * Reusable for callers that built the pack themselves (the editor
+ * iframe constructs an `IdbAssetPack` from URL params and hands it
+ * here). Kept exported so the engine's bootstrap is a public
+ * surface, not a private implementation detail.
+ */
+export async function bootFromChain(
+  chain: ReadonlyArray<AssetPack>,
+  previous?: Partial<GameState>,
+  sceneOverride?: string | null,
+): Promise<GameClass> {
+  const canvas = document.getElementById("main-canvas") as HTMLCanvasElement;
+  canvas.width = 600;
+  canvas.height = 600;
+
+  if (chain.length === 0) {
+    throw new Error("bootFromChain: empty chain");
+  }
+  const pack: AssetPack = chain[chain.length - 1]!;
+
   // 2. Config overrides — pack config + user settings (localStorage),
   //    plus an optional hosted profile from ?settings=<url>. Combined
   //    BEFORE Game is dynamically imported so renderer module-load
@@ -118,25 +147,15 @@ export async function main(
   // 3. Scene
   bootStatus("Loading scene…");
   const scenePath = sceneOverride ?? pack.manifest.startScene;
-  const scene = await pack.scene(scenePath);
+  const scene: Scene = await pack.scene(scenePath);
   console.log(`Loaded scene: ${scenePath} (${scene.size.x}×${scene.size.y})`);
 
   // 4. Game (dynamic import — defers renderer module-load until after
   //    applyConfigOverride has run, so renderer captures see merged config)
   bootStatus("Initialising renderer…");
   const { Game } = await import("Game");
-  // Resolve any `manifest.shaders` overrides BEFORE constructing the
-  // renderer. WebGL-only; canvas2d gets `undefined` and silently
-  // ignores the override (ENGINE_PACK_SHADERS.md § 2). The prefetch is
-  // a small handful of `pack.textBody` reads — pack files are already
-  // in memory after step 1, so this is microseconds.
   const { CONFIG } = await import("GameConfig");
   const { WebGLRenderer } = await import("Renderers");
-  // M4 of MATERIALS.md §10 — when more than one pack is loaded, the
-  // engine resolves each role's shader source from the cascaded
-  // chain (hooks merged per-pack, Mode 1 last-wins, post-passes
-  // appended in load order). Single-pack callers still take the
-  // single-pack fast path.
   const anyPackShipsShaders = chain.some((p) => p.manifest.shaders !== undefined);
   const shaderSources =
     CONFIG.rendering.backend === "webgl" && anyPackShipsShaders
@@ -146,30 +165,19 @@ export async function main(
       : undefined;
   const game = new Game(canvas, pack, scene, previous, packConfig, shaderSources, chain);
 
-  // 5. Mod scripts — must run BEFORE we spawn the player, because the
-  //    "player" prefab is pack-side content. The default pack's
-  //    `scripts/prefabs/player.js` registers it during this step.
+  // 5. Mod scripts
   bootStatus("Running pack scripts…");
   await game.runPackScripts();
 
-  // 5b. Spawn the initial world entities (player today) via prefabs
-  //     the pack just registered. No-op when an HMR snapshot already
-  //     carries a populated world.
+  // 5b. Spawn the initial world entities (player today).
   game.spawnInitialEntities();
 
-  // 5c. Collect per-entity shader variants (M1 of MATERIALS.md). Walks
-  //     the world for `Shader` components and asks the renderer to
-  //     recompile the sprite program with a per-variant dispatcher.
-  //     No-op when no entity carries a `Shader` (byte-identical to
-  //     pre-M1) or when the renderer doesn't implement variants
-  //     (canvas2d backend).
+  // 5c. Collect per-entity shader variants (M1 of MATERIALS.md).
   bootStatus("Compiling shader variants…");
   await game.collectShaderVariants();
 
   // 6. Wait for tile/sprite/item assets to finish decoding so the
-  //    first visible frame doesn't flash the pink fallback. Same await
-  //    serves canvas2d + WebGL because `assetsReady` is on the
-  //    SceneRenderer interface.
+  //    first visible frame doesn't flash the pink fallback.
   bootStatus("Decoding textures…");
   await game.renderer.assetsReady;
 

@@ -1,4 +1,5 @@
 export type {
+  AnimAPI,
   FrameFn,
   PrefabFn,
   BuiltInComponents,

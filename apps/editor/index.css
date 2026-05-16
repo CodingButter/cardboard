@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/*
+ * The engine's modal screens (InventoryScreen, SettingsScreen) live
+ * in `packages/default-pack/scripts/ui/` and mount inside the engine
+ * viewport when the user opens them in play mode. Without these
+ * @source directives Tailwind tree-shakes their utility classes out
+ * of the editor's compiled CSS and the modals render unstyled.
+ */
+@source "../../packages/engine/src/**/*.{ts,tsx}";
+@source "../../packages/default-pack/scripts/**/*.{js,ts,tsx}";
+
 html,
 body {
   margin: 0;
