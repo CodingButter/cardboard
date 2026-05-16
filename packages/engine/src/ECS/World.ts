@@ -33,6 +33,16 @@ export class World {
    */
   private readonly knownComponents: Set<Component<unknown>> = new Set();
 
+  /**
+   * Optional teardown hook — `ModAPIImpl` wires this to fire the
+   * canonical `entity:despawned` event (Ev1 of EVENTS.md §4.2). Called
+   * SYNCHRONOUSLY before component removal so handlers can read the
+   * dying entity's components one last time. Engine internals (`new
+   * World()` callers without ModAPI) leave it unset; the despawn path
+   * stays byte-identical to pre-Ev1.
+   */
+  onDespawn: ((entity: Entity) => void) | null = null;
+
   /** Allocate a new entity id. Reuses ids freed by `despawn` when possible. */
   spawn(): Entity {
     const id = this.freeIds.pop() ?? this.nextId++;
@@ -46,6 +56,10 @@ export class World {
    */
   despawn(entity: Entity): void {
     if (!this.alive.has(entity)) return;
+    // Pre-removal hook (Ev1 entity:despawned). Throws here would
+    // prevent the entity tear-down; the hook implementation wraps
+    // emit in try/catch so handler throws never reach this far.
+    if (this.onDespawn !== null) this.onDespawn(entity);
     for (const component of this.knownComponents) component.remove(entity);
     this.alive.delete(entity);
     this.freeIds.push(entity);

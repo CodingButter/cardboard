@@ -98,5 +98,12 @@
     "lineHeight":  16,
     "padding":     8,
     "width":       200
+  },
+  "audio": {
+    "masterVolume":  0.8,
+    "sfxVolume":     1.0,
+    "musicVolume":   0.7,
+    "ambientVolume": 0.8,
+    "voiceVolume":   1.0
   }
 }

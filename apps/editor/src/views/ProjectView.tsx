@@ -19,6 +19,7 @@ import {
 import { cn } from "../lib/cn";
 import { EditorViewport, type ViewportMode } from "./EditorViewport";
 import type { MutableScene } from "./GridEditor";
+import { AnimationEditor } from "./AnimationEditor";
 
 /**
  * Read-only-ish project view for E1.
@@ -36,6 +37,50 @@ interface ProjectViewProps {
   projectId: string;
   onBackHome: () => void;
 }
+
+/**
+ * Workflow modes per EDITOR.md §5.1 — Map / Entities / Scripts /
+ * Assets / Animation. AE1 lights up the Animation mode; the other
+ * four still share today's single combined viewport+manifest+scenes
+ * surface (they'll split out as separate components in later phases,
+ * see EDITOR.md §10 E5+).
+ *
+ * Picking "Animation" replaces the central viewport+scenes+manifest
+ * panel with the `<AnimationEditor>` component. The iframe is kept
+ * mounted on the project shell so swapping back to Map/Entities/etc.
+ * doesn't lose engine state.
+ */
+type WorkflowMode = "map" | "entities" | "scripts" | "assets" | "animation";
+
+const WORKFLOW_MODES: ReadonlyArray<{
+  id: WorkflowMode;
+  label: string;
+  /** Short hint shown in a tooltip — Map/Entities/Scripts/Assets still
+   *  share today's combined surface, the label clarifies. */
+  hint: string;
+}> = [
+  { id: "map", label: "Map", hint: "Top-down scene editor (today's surface)" },
+  {
+    id: "entities",
+    label: "Entities",
+    hint: "Entity inspector (uses today's surface)",
+  },
+  {
+    id: "scripts",
+    label: "Scripts",
+    hint: "Pack scripts (uses today's surface)",
+  },
+  {
+    id: "assets",
+    label: "Assets",
+    hint: "Asset browser (uses today's surface)",
+  },
+  {
+    id: "animation",
+    label: "Animation",
+    hint: "Sprite-sheet animation editor (AE1)",
+  },
+];
 
 /** Top-level scalar fields surfaced by the simple form. */
 interface ManifestFormFields {
@@ -135,6 +180,9 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   const [sceneDirty, setSceneDirty] = useState(false);
   const [sceneSaving, setSceneSaving] = useState(false);
   const [sceneSavedAt, setSceneSavedAt] = useState<number | null>(null);
+  /** Workflow mode tab. AE1 adds Animation; the other four currently
+   *  share the existing combined surface. */
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("map");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -449,6 +497,30 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
         </div>
       </header>
 
+      {/* Workflow-mode tab strip — EDITOR.md §5.1 + ANIMATION_EDITOR.md §5.1.
+          AE1 ships the Animation mode; the other four reuse today's
+          combined viewport+manifest+scenes surface. */}
+      <nav className="border-b border-zinc-800 px-8 flex items-center gap-1 bg-zinc-950/60">
+        {WORKFLOW_MODES.map((m) => {
+          const isActive = workflowMode === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => setWorkflowMode(m.id)}
+              title={m.hint}
+              className={cn(
+                "px-4 py-2 text-sm border-b-2 -mb-px transition-colors",
+                isActive
+                  ? "border-amber-400 text-amber-300"
+                  : "border-transparent text-zinc-400 hover:text-zinc-100",
+              )}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+      </nav>
+
       {error ? (
         <div className="mx-8 mt-4 rounded-md border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
           <div className="font-medium">Something went wrong</div>
@@ -462,6 +534,22 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
         </div>
       ) : null}
 
+      {workflowMode === "animation" ? (
+        <main className="px-0 py-0">
+          {/* Animation mode — replaces the combined surface with a
+              dedicated three-column shell per ANIMATION_EDITOR.md §5.2. */}
+          <div className="h-[calc(100vh-128px)] border-t border-zinc-800">
+            <AnimationEditor
+              projectId={projectId}
+              onManifestChanged={() => {
+                // Refresh manifest + asset list so the other modes
+                // pick up the new sprite without a remount.
+                refresh();
+              }}
+            />
+          </div>
+        </main>
+      ) : (
       <main className="px-8 py-6 max-w-7xl mx-auto space-y-6">
         {/* Viewport pane — live engine bound to the selected scene
             (or manifest.startScene). Tab swaps Play / Edit. E3 will
@@ -735,6 +823,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
         </Card>
         </div>
       </main>
+      )}
     </div>
   );
 }

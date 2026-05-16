@@ -60,6 +60,34 @@ export type KeyCode =
   | "Mouse4";
 
 /**
+ * Native-event modifier set, normalised so `EventsAPI` payloads
+ * (`input:keyDown` / `input:keyUp` / mouse) all carry the same shape.
+ * Pulled to a helper so KeyboardController + MouseController stay in
+ * sync without duplicating the per-event extraction.
+ */
+export interface InputModifiers {
+  shift: boolean;
+  ctrl: boolean;
+  alt: boolean;
+  meta: boolean;
+}
+
+/**
+ * Hook the engine wires onto the controller to surface DOM events on
+ * `api.events` (Ev1 of EVENTS.md §4.5). Native `keydown` reaches the
+ * controller first, the controller updates `pressedKeys`, THEN this
+ * fires — so a pack handler querying `isKeyPressed` inside the hook
+ * sees the new state (the spec calls this out under §4.5).
+ *
+ * Engine internals that build a controller without a ModAPI leave the
+ * field unset; the controller stays byte-identical to pre-Ev1.
+ */
+export type InputEventEmit = (
+  topic: "input:keyDown" | "input:keyUp",
+  payload: { key: KeyCode; modifiers: InputModifiers },
+) => void;
+
+/**
  * Tracks the set of physical keys currently held down.
  *
  * Listens at `document` so the canvas doesn't need focus for input to work.
@@ -67,11 +95,41 @@ export type KeyCode =
  */
 export default class KeyboardController {
   private readonly pressedKeys: Set<string> = new Set();
+
+  /**
+   * Optional event-bus bridge — `ModAPIImpl` sets this so DOM key
+   * events fan out on `api.events` after pressedKeys is updated. Left
+   * null in tests / non-ModAPI callers.
+   */
+  emitEvent: InputEventEmit | null = null;
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     this.pressedKeys.add(event.code);
+    if (this.emitEvent !== null) {
+      this.emitEvent("input:keyDown", {
+        key: event.code as KeyCode,
+        modifiers: {
+          shift: event.shiftKey,
+          ctrl: event.ctrlKey,
+          alt: event.altKey,
+          meta: event.metaKey,
+        },
+      });
+    }
   };
   private readonly handleKeyUp = (event: KeyboardEvent): void => {
     this.pressedKeys.delete(event.code);
+    if (this.emitEvent !== null) {
+      this.emitEvent("input:keyUp", {
+        key: event.code as KeyCode,
+        modifiers: {
+          shift: event.shiftKey,
+          ctrl: event.ctrlKey,
+          alt: event.altKey,
+          meta: event.metaKey,
+        },
+      });
+    }
   };
 
   constructor() {

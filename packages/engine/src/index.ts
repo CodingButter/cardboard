@@ -72,6 +72,8 @@ export type {
   ItemStack,
   WeaponItemStats,
   ArmorItemStats,
+  SoundDef,
+  SoundGroup,
 } from "./AssetPack";
 
 // Inventory types — pack-side modal UIs (InventoryScreen) need
@@ -93,6 +95,9 @@ export type {
   InputAPI,
   KeyboardInputAPI,
   MouseInputAPI,
+  AudioAPI,
+  AudioHandle,
+  PlayOpts,
 } from "./ModAPI";
 
 // Settings overlay type — needed by SettingsScreen (pack-side after R4)

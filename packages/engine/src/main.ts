@@ -164,10 +164,24 @@ export async function bootFromChain(
         : await WebGLRenderer.prefetchShaderSources(pack)
       : undefined;
   const game = new Game(canvas, pack, scene, previous, packConfig, shaderSources, chain);
+  // Ev1 of EVENTS.md — record the resolved scene path on Game so the
+  // `scene:loaded` event payload reflects the actual loaded scene
+  // (`?scene=` override or manifest default), not whatever the engine
+  // would derive at emit time.
+  game.setInitialScenePath(scenePath);
 
   // 5. Mod scripts
   bootStatus("Running pack scripts…");
   await game.runPackScripts();
+
+  // 5a. Au1 of AUDIO.md — kick off eager audio decode now that pack
+  // scripts have run (so the manifest is final). Decode work happens
+  // off the main thread; the bootstrap doesn't await it — sounds
+  // become playable as their buffers complete and the first
+  // `api.audio.play("...")` call resolves once the buffer lands. A
+  // pack without `manifest.sounds` no-ops here without creating an
+  // AudioContext.
+  void game.api.audio.preloadAll();
 
   // 5b. Spawn the initial world entities (player today).
   game.spawnInitialEntities();

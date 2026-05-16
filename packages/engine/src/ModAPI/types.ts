@@ -35,7 +35,7 @@ import {
   removeItem,
   seedInventory,
 } from "Libs/Inventory";
-import { EQUIP_SLOTS } from "AssetPack";
+import { EQUIP_SLOTS, type SoundGroup } from "AssetPack";
 import type ItemImages from "ItemImages";
 import { castRayToWall } from "Libs/Raycast";
 
@@ -302,6 +302,173 @@ export interface AnimAPI {
  */
 export type ItemImagesAPI = ItemImages;
 
+// ─── Events (Ev1 of docs/plans/EVENTS.md) ────────────────────────────
+
+/**
+ * Handle returned by `EventsAPI.on` / `once`. Idempotent `.off()` —
+ * calling twice is a no-op. Most pack scripts won't stash the handle;
+ * auto-cleanup on pack-script HMR (§6 of EVENTS.md) covers the common
+ * case where a script subscribes once at load-time.
+ */
+export interface EventSubscription {
+  readonly name: string;
+  /** Remove this subscription. Idempotent — safe to call multiple times. */
+  off(): void;
+}
+
+/**
+ * Pub/sub event bus — Ev1 of `docs/plans/EVENTS.md`. Synchronous
+ * dispatch: `emit` runs every subscribed handler in registration order
+ * before returning. Handlers that throw are logged + skipped; later
+ * handlers still run. `emit` returns `void` — request/response patterns
+ * use a correlation-id on top of two events (see §1 non-goals).
+ *
+ * Topics use `:` as a namespace separator (`scene:loaded`,
+ * `inventory:added`). Canonical engine events ship in
+ * `canonical-events.ts`; pack scripts emit their own free-form topics,
+ * conventionally prefixed with the pack id (`acme_rpg:level_up`).
+ *
+ * Subscriptions registered inside a pack script auto-cleanup when that
+ * pack script reloads via HMR. The pack-script context is tracked by
+ * `ModAPIImpl.setActiveScript`, called around each script's run.
+ * Subscriptions registered outside any pack script (engine internals)
+ * are not auto-cleaned and live until `Game.destroy()`.
+ *
+ * Wildcards (`name:*`, `*`) are Ev2 — not exposed in this surface yet.
+ */
+export interface EventsAPI {
+  /** Subscribe to `name`. Returns a handle whose `.off()` removes the subscription. */
+  on<T = unknown>(
+    name: string,
+    handler: (payload: T) => void,
+  ): EventSubscription;
+  /**
+   * Subscribe for a single fire. Auto-removes BEFORE invoking the
+   * handler — so a `once` handler that re-emits the same topic doesn't
+   * re-trigger itself.
+   */
+  once<T = unknown>(
+    name: string,
+    handler: (payload: T) => void,
+  ): EventSubscription;
+  /**
+   * Remove a subscription. Two forms — pass the subscription handle
+   * (canonical, `O(1)` path) OR the original `(name, handler)` pair
+   * (DOM-ish parity; `O(handlers on topic)`, exact-ref match).
+   */
+  off(name: string, handler: (payload: unknown) => void): void;
+  off(subscription: EventSubscription): void;
+  /**
+   * Fire `name` with `payload`. Every subscribed handler runs
+   * synchronously in registration order before `emit` returns. Handler
+   * throws are logged + skipped. Returns `void` — emit is fire-and-
+   * forget.
+   *
+   * Cost when nothing's subscribed: a single `Map.get` returning
+   * `undefined` plus a size check, ~5 ns. Hot-path call sites
+   * (`frame:before`, `frame:after`) lean on this fast path.
+   */
+  emit<T = unknown>(name: string, payload?: T): void;
+}
+
+/**
+ * Per-play tuning passed to `api.audio.play` / `playLoop` /
+ * `playReplace`. Each field stacks on top of the SoundDef's defaults
+ * (volume × `SoundDef.volume`, etc.). See `docs/plans/AUDIO.md` §4.1.
+ */
+export interface PlayOpts {
+  /** Multiplied onto `SoundDef.volume × groupGain`. Default 1.0. */
+  volume?: number;
+  /** Playback rate. 1.0 = normal, 0.5 = octave down, 2.0 = octave up. */
+  pitch?: number;
+  /** Override the SoundDef's group for this single playback. */
+  group?: SoundGroup;
+  /**
+   * Detune in cents (±100 = ±1 semitone). Stacks with `pitch`. Useful
+   * for "play the same footstep N× without sounding mechanical" —
+   * randomize ±50 cents.
+   */
+  detune?: number;
+}
+
+/**
+ * Live handle returned by every `play*` call. Cheap proxy (~80 bytes);
+ * once the underlying source ends (or `.stop()` is called) the handle
+ * becomes inert — `.setVolume` / `.setPitch` / etc. silently no-op
+ * and `.isPlaying()` returns `false`. See AUDIO.md §4.3.
+ */
+export interface AudioHandle {
+  /** The sound id this handle was created for. */
+  readonly id: string;
+  /** Which group's gain node this handle routes through. */
+  readonly group: SoundGroup;
+  /** `true` until the BufferSource has finished or been stopped. */
+  isPlaying(): boolean;
+  /** Re-set the per-handle gain (0..1). Live, no fade. */
+  setVolume(v: number): void;
+  /** Re-set playback rate. */
+  setPitch(p: number): void;
+  /** Fade out over `seconds`, then stop. Default 0 = hard stop. */
+  stop(seconds?: number): void;
+}
+
+/**
+ * Audio playback surface — Au1 of `docs/plans/AUDIO.md`. Pack scripts
+ * call `api.audio.play("gunshot")` and get back a handle they can stop
+ * or retune. The engine owns the `AudioContext`, the per-group gain
+ * graph, and the live-volume settings binding so pack scripts don't
+ * reach for raw Web Audio primitives. See AUDIO.md §4.1 + §5.
+ *
+ * The context is lazily bootstrapped on the first `play*` call — a
+ * pack that never plays a sound never touches Web Audio at all, and
+ * an `AudioContext` is never instantiated. Au2+ adds spatial audio
+ * (`playPositional`) and music crossfade (`crossfadeMusic`); those
+ * methods are intentionally NOT part of the Au1 surface.
+ */
+export interface AudioAPI {
+  /**
+   * Fire-and-forget. Plays the sound once (or loops, if the SoundDef
+   * has `loop: true`). Returns a handle the caller can use to stop it
+   * mid-play.
+   */
+  play(id: string, opts?: PlayOpts): AudioHandle;
+
+  /**
+   * Force-loop the sound regardless of its SoundDef. Returns a handle
+   * whose `.stop()` is the only way to end it.
+   */
+  playLoop(id: string, opts?: PlayOpts): AudioHandle;
+
+  /**
+   * Cancel-and-replay variant of `play`. If the same id is already
+   * playing, stop it first, then start fresh. Useful for UI
+   * confirmations where overlapping playback sounds bad.
+   */
+  playReplace(id: string, opts?: PlayOpts): AudioHandle;
+
+  /** Stop a single handle. No-op if already stopped. */
+  stop(handle: AudioHandle): void;
+
+  /**
+   * Stop every active handle, optionally restricted to one group.
+   * `stopAll()` with no arg stops everything.
+   */
+  stopAll(group?: SoundGroup): void;
+
+  /** Returns `true` if the AudioContext is running. Diagnostic. */
+  isReady(): boolean;
+
+  /**
+   * Live per-group volume read/write. `set(group, v)` is what the
+   * Settings slider calls; equivalent to writing to the corresponding
+   * `GameConfig.audio.<group>Volume` and saving.
+   */
+  readonly groupVolume: {
+    get(group: SoundGroup): number;
+    set(group: SoundGroup, v: number): void;
+  };
+}
+
 /** The api passed to every pack script. */
 export interface ModAPI {
   /** The active ECS world. Stable across the session. */
@@ -356,6 +523,22 @@ export interface ModAPI {
    * `docs/plans/ANIMATIONS.md`.
    */
   readonly anim: AnimAPI;
+  /**
+   * Audio playback surface — sfx, music, ambient, voice. See
+   * `AudioAPI`. Pack scripts should NOT instantiate their own
+   * `AudioContext`; use these calls so the engine owns mixing,
+   * grouping, and (post-Au1) modal ducking. Au1 of
+   * `docs/plans/AUDIO.md`.
+   */
+  readonly audio: AudioAPI;
+  /**
+   * Pub/sub event bus — see `EventsAPI`. Engine fires canonical
+   * lifecycle events (`scene:loaded`, `entity:spawned`,
+   * `modal:opened`, `frame:before`, …); pack scripts subscribe by
+   * name and emit their own custom topics. Ev1 of
+   * `docs/plans/EVENTS.md`.
+   */
+  readonly events: EventsAPI;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */

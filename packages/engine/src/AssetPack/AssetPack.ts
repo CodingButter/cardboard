@@ -15,6 +15,21 @@ export abstract class AssetPack {
   abstract has(path: string): boolean;
 
   /**
+   * Read a binary asset (sound, font, arbitrary bytes) as a raw
+   * `ArrayBuffer` — the form `AudioContext.decodeAudioData` consumes
+   * directly. Au1 of `docs/plans/AUDIO.md` §5.4.
+   *
+   * Default implementation delegates to `textureBlob` and unwraps to
+   * an `ArrayBuffer`; subclasses that have a cheaper byte-level
+   * accessor (e.g. `ZipAssetPack`'s in-memory `Uint8Array`) override
+   * this to skip the Blob round-trip.
+   */
+  async binaryBlob(path: string): Promise<ArrayBuffer> {
+    const blob = await this.textureBlob(path);
+    return await blob.arrayBuffer();
+  }
+
+  /**
    * Lazily-built tile-preset resolver. Loads every file listed in
    * `manifest.tilePresets[]`, synthesises legacy presets for any
    * `manifest.tileTextures` entries, and exposes a flat lookup the

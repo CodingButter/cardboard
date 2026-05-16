@@ -18,11 +18,11 @@ import {
 } from "Systems";
 import ModalRegistry from "ModalRegistry";
 import type { PartialGameConfig } from "Settings";
-import { Aim, Camera, Facing, Position } from "Components";
+import { Aim, Camera, Facing, Movement, PlayerInput, Position } from "Components";
 import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
-import { ModAPIImpl } from "ModAPI";
+import { ModAPIImpl, PLAYER_MOVED_FRAME_THROTTLE } from "ModAPI";
 import ItemImages from "ItemImages";
 import { installPreactRuntime } from "PreactRuntime";
 
@@ -100,6 +100,35 @@ export class Game {
    * duplicate it.
    */
   private readonly freshWorld: boolean;
+
+  /**
+   * Monotonic frame counter — incremented at the top of `update`.
+   * Threaded into `frame:before` / `frame:after` payloads (EVENTS.md
+   * §4.7) so subscribers can detect frame deltas / build their own
+   * throttles. Also gates `player:moved` (every Nth frame, §4.3).
+   */
+  private frameIndex = 0;
+
+  /**
+   * Path of the currently-loaded scene — threaded into the
+   * `scene:loaded` / `scene:beforeLoad` / `scene:beforeUnload` event
+   * payloads (EVENTS.md §4.1). Initialised on first spawn (boot scene
+   * is `pack.manifest.startScene` or the `?scene=` override); updated
+   * by `loadScene` + `reloadScene`.
+   */
+  private currentScenePath: string = "";
+
+  /**
+   * Per-player tracking for the throttled `player:moved` event.
+   * Stores last-emitted cell + frame index per entity so we can emit
+   * on cell-boundary cross OR every Nth frame, whichever first
+   * (EVENTS.md §4.3). Entity-keyed so multi-player setups (future)
+   * track each independently.
+   */
+  private readonly playerMoveTrack: Map<
+    number,
+    { cellX: number; cellY: number; lastFrame: number }
+  > = new Map();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -257,6 +286,14 @@ export class Game {
       try {
         const blob = new Blob([source], { type: "application/javascript" });
         const url = URL.createObjectURL(blob);
+        // Ev1 of EVENTS.md §6.1 — tag every subscription registered
+        // during this script's setup() so HMR reloads of the single
+        // script can drop only its subscriptions. setActiveScript
+        // returns to null in the `finally`, so subscriptions made
+        // OUTSIDE the wrapper (engine internals, late
+        // onWorldReady callbacks) stay un-tagged and live for the
+        // session.
+        this.api.events.setActiveScript(path);
         try {
           const mod = (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
           const setup = (mod.default ?? mod.setup) as ((api: ModAPIImpl) => void) | undefined;
@@ -268,6 +305,7 @@ export class Game {
           }
         } finally {
           URL.revokeObjectURL(url);
+          this.api.events.setActiveScript(null);
         }
       } catch (err) {
         console.error(`Script ${path}: failed to load —`, err);
@@ -291,12 +329,39 @@ export class Game {
   spawnInitialEntities(): void {
     if (!this.freshWorld) return;
     const { x, y, facing } = this.scene.spawn;
+    // Boot scene's name comes from the manifest's startScene; main.ts
+    // can override it, but in either case the path is the canonical
+    // identifier for `scene:loaded` event listeners.
+    if (this.currentScenePath === "") {
+      this.currentScenePath = this.pack.manifest.startScene;
+    }
     this.api.spawnPrefab("player", { x, y, facing });
     // Fire any pack-registered `onWorldReady` callbacks now that the
     // player + scene entities exist. Scripts use this to locate named
     // entities and attach extra components without "if entity exists
     // yet" guards.
     this.api.runWorldReadyCallbacks();
+    // Ev1 of EVENTS.md §4.1 / §4.6 — scene:loaded fires AFTER
+    // `spawnInitialEntities()` + every `onWorldReady` callback, so
+    // subscribers can safely query the freshly-built world. pack:loaded
+    // fires once at boot for the same reason. Both ride the post-
+    // worldReady moment to give pack scripts a chance to register
+    // their handlers BEFORE these events fire.
+    this.api.events.emit("scene:loaded", {
+      name: this.currentScenePath,
+      size: { x: this.scene.size.x, y: this.scene.size.y },
+    });
+    this.api.events.emit("pack:loaded", { manifest: this.pack.manifest });
+  }
+
+  /**
+   * Allow the bootstrap (`main.ts`) to seed the initial scene path
+   * before `spawnInitialEntities` runs. Without this the canonical
+   * scene-name in event payloads would fall back to the manifest's
+   * startScene even when `?scene=` overrode it.
+   */
+  setInitialScenePath(path: string): void {
+    this.currentScenePath = path;
   }
 
   /**
@@ -313,9 +378,18 @@ export class Game {
    * new map on the next tick.
    */
   async loadScene(path: string): Promise<void> {
+    // Ev1 of EVENTS.md §4.1 — emit `scene:beforeLoad` BEFORE the swap
+    // begins so subscribers can capture the outgoing scene's id, and
+    // `scene:beforeUnload` so they can read entity state one last
+    // time before the player's Position resets to the new spawn.
+    const from = this.currentScenePath || undefined;
+    this.api.events.emit("scene:beforeLoad", { from, to: path });
+    if (from) this.api.events.emit("scene:beforeUnload", { name: from });
+
     const fresh = await this.pack.scene(path);
     this.scene = fresh;
     this.api.scene = fresh;
+    this.currentScenePath = path;
     // Reset the player to the new scene's spawn. Keeping the world
     // intact across scene swaps is a deliberate I1 choice — full
     // entity teardown on each load is I2 territory.
@@ -326,6 +400,13 @@ export class Game {
       this.world.add(playerEntity, Position, new Vec2(fresh.spawn.x, fresh.spawn.y));
       Facing.set(playerEntity, fresh.spawn.facing);
     }
+    // `scene:loaded` mirrors the boot-time emit in
+    // `spawnInitialEntities`. Subscribers can re-run their per-scene
+    // setup logic each time the player switches.
+    this.api.events.emit("scene:loaded", {
+      name: path,
+      size: { x: fresh.size.x, y: fresh.size.y },
+    });
   }
 
   /**
@@ -445,6 +526,11 @@ export class Game {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
+    // Ev1 of EVENTS.md §6 — drop every subscription so a fresh Game
+    // doesn't inherit handlers via lingering closures. The registry
+    // itself will be GC'd along with `this.api`, but disposeAll makes
+    // the teardown explicit + cheap.
+    this.api.events.disposeAll();
   }
 
   /**
@@ -483,6 +569,15 @@ export class Game {
   }
 
   private readonly update = (deltaTime: number): void => {
+    this.frameIndex += 1;
+    // `frame:before` — Ev1 §4.7. Fires at the top of update before any
+    // system runs. EventsRegistry's no-subscriber fast path keeps idle
+    // cost ~5 ns (Map.get + size check, no work).
+    this.api.events.emit("frame:before", {
+      deltaTime,
+      frameIndex: this.frameIndex,
+    });
+
     if (!this.modals.any()) {
       // World-affecting systems (mod-registered after R3 — see
       // `packages/default-pack/scripts/systems/*`) pause while any
@@ -499,12 +594,81 @@ export class Game {
       // mod that calls `api.anim.play(...)` reacting to input sees
       // its `play` reset land BEFORE this tick's frame advance.
       this.animationSystem.update(this.world, deltaTime);
+      // Throttled `player:moved` (EVENTS.md §4.3) — emit when the
+      // player crosses a cell boundary OR every Nth frame, whichever
+      // first. Skipped while paused so handlers don't fire during
+      // modal screens.
+      this.emitPlayerMoved();
     }
     // Reconcile pack-registered modal components (Preact) against the
     // engine's open-modal set. Runs every frame so live-prop callbacks
     // see fresh state (CONFIG, inventory, etc).
     this.api.flushUI();
+    // Au1 of AUDIO.md — push CONFIG.audio.* into the live gain nodes
+    // every frame. The pack-side settings system already mutates
+    // CONFIG via `applyConfigOverride` when the user drags a slider;
+    // this loop reflects writes that didn't come through
+    // `api.audio.groupVolume.set(...)` (e.g. JSON import). Cheap —
+    // five float comparisons — and a no-op while audio is dormant.
+    this.api.audio.syncFromConfig();
+
+    // `frame:after` — Ev1 §4.7. Fires at the bottom of update after
+    // every system + UI flush. Symmetric with `frame:before`.
+    this.api.events.emit("frame:after", {
+      deltaTime,
+      frameIndex: this.frameIndex,
+    });
   };
+
+  /**
+   * Throttled `player:moved` emit (EVENTS.md §4.3). Walks the player
+   * entity (`PlayerInput + Position`) and fires when the player
+   * crosses a cell boundary OR every Nth frame, whichever first.
+   * Velocity is reconstructed from the `Movement` component when
+   * present; future versions can feed the input system's per-frame
+   * intent vector directly.
+   */
+  private emitPlayerMoved(): void {
+    const e = this.world.first(PlayerInput, Position);
+    if (e === undefined) return;
+    const pos = Position.getOrThrow(e);
+    const cellX = Math.floor(pos.x);
+    const cellY = Math.floor(pos.y);
+    let track = this.playerMoveTrack.get(e);
+    if (track === undefined) {
+      track = { cellX, cellY, lastFrame: this.frameIndex };
+      this.playerMoveTrack.set(e, track);
+      this.fireMoved(e, pos, cellX, cellY, track);
+      return;
+    }
+    const crossed = cellX !== track.cellX || cellY !== track.cellY;
+    const elapsed =
+      this.frameIndex - track.lastFrame >= PLAYER_MOVED_FRAME_THROTTLE;
+    if (!crossed && !elapsed) return;
+    this.fireMoved(e, pos, cellX, cellY, track);
+  }
+
+  private fireMoved(
+    entity: number,
+    pos: Vec2,
+    cellX: number,
+    cellY: number,
+    track: { cellX: number; cellY: number; lastFrame: number },
+  ): void {
+    track.cellX = cellX;
+    track.cellY = cellY;
+    track.lastFrame = this.frameIndex;
+    const mv = Movement.get(entity);
+    const vmag = mv
+      ? mv.speed * (mv.isRunning ? mv.runMultiplier : 1)
+      : 0;
+    this.api.events.emit("player:moved", {
+      position: pos,
+      velocity: new Vec2(vmag, 0),
+      cellX,
+      cellY,
+    });
+  }
 
   private readonly render = (deltaTime: number): void => {
     // 0. `before-world` phase — pack-registered renderer systems that

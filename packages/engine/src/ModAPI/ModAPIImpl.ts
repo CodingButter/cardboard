@@ -26,8 +26,10 @@ import type { SceneRenderer } from "Renderers";
 import type { PartialGameConfig } from "Settings";
 import type {
   AnimAPI,
+  AudioAPI,
   BindingsAPI,
   BuiltInComponents,
+  EventsAPI,
   FrameFn,
   InputAPI,
   InventoryAPI,
@@ -51,6 +53,8 @@ import { UIRegistry } from "./UIRegistry";
 import { SettingsRegistry } from "./SettingsRegistry";
 import { BindingsRegistry } from "./BindingsRegistry";
 import { AnimRegistry } from "./AnimRegistry";
+import { AudioRegistry } from "./AudioRegistry";
+import { EventsRegistry } from "./EventsRegistry";
 
 /**
  * Dependencies the engine wires into the ModAPI implementation. Kept
@@ -126,6 +130,28 @@ export class ModAPIImpl implements ModAPI {
   readonly settings: SettingsAPI;
   readonly bindings: BindingsAPI;
   readonly anim: AnimAPI;
+  /**
+   * Audio surface — Au1 of `docs/plans/AUDIO.md`. Exposed as the
+   * concrete `AudioRegistry` so the engine can reach `preloadAll()` /
+   * `syncFromConfig()` without casting; pack scripts see only the
+   * `AudioAPI` slice via the public `ModAPI` interface.
+   */
+  readonly audio: AudioAPI & {
+    preloadAll(): Promise<void>;
+    syncFromConfig(): void;
+  };
+  /**
+   * Event bus — Ev1 of `docs/plans/EVENTS.md`. Exposed as the concrete
+   * `EventsRegistry` so the engine can reach `setActiveScript()` /
+   * `disposeScript()` / `disposeAll()` for auto-cleanup; pack scripts
+   * see only the `EventsAPI` slice via the public `ModAPI` interface.
+   * Same pattern as `audio` above.
+   */
+  readonly events: EventsAPI & {
+    setActiveScript(path: string | null): void;
+    disposeScript(path: string): void;
+    disposeAll(): void;
+  };
 
   /**
    * Internal handle to the UI registry. The engine's `Game.update`
@@ -148,14 +174,35 @@ export class ModAPIImpl implements ModAPI {
     this.world = deps.world;
     this.scene = deps.scene;
     this.pack = deps.pack;
+    // Events must be constructed BEFORE any registry that emits — the
+    // ModalsRegistry wrapper fires `modal:opened` / `modal:closed`
+    // through the bus on every `setOpen` edge.
+    this.events = new EventsRegistry();
+    // Wire DOM-event surfacing on the controllers (EVENTS.md §4.5).
+    // Native keydown/up → bus AFTER the controller updates its
+    // pressedKeys; pack handlers querying `isKeyPressed` inside an
+    // `input:keyDown` handler see the new state.
+    deps.keyboard.emitEvent = (topic, payload) => {
+      this.events.emit(topic, payload);
+    };
+    deps.mouse.emitEvent = (topic, payload) => {
+      this.events.emit(topic, payload);
+    };
     this.input = new InputRegistry(deps.keyboard, deps.mouse);
-    this.modals = new ModalsRegistry(deps.modals);
+    this.modals = new ModalsRegistry(deps.modals, this.events);
     this.itemImages = deps.itemImages;
     this.uiRegistry = new UIRegistry(deps.modals);
     this.ui = this.uiRegistry;
     this.settings = new SettingsRegistry(deps.packConfig);
     this.bindings = new BindingsRegistry();
     this.anim = new AnimRegistry(this.world);
+    this.audio = new AudioRegistry(deps.pack);
+    // Wire World's despawn hook to the bus. Fires SYNCHRONOUSLY
+    // before component removal so handlers can read the dying
+    // entity's components one last time (EVENTS.md §4.2).
+    this.world.onDespawn = (entity) => {
+      this.events.emit("entity:despawned", { entity });
+    };
   }
 
   /**
@@ -180,7 +227,24 @@ export class ModAPIImpl implements ModAPI {
           `Did boot scripts run before scene load?`,
       );
     }
-    return this.prefabRegistry.spawn(name, ...args);
+    return this.runPrefabAndEmit(name, args);
+  }
+
+  /**
+   * Shared prefab-invocation path for `spawnPrefab` (engine internals)
+   * and `spawn` (pack-facing). Centralises the canonical
+   * `entity:spawned` emit (Ev1 §4.2) so both entry points produce
+   * exactly one event per spawn. Raw `world.spawn()` from inside a
+   * prefab factory does NOT emit a second time — only the outermost
+   * prefab call generates the event, per EVENTS.md §12 open Q8.
+   *
+   * The fast-path `Map.get + size === 0` check in
+   * `EventsRegistry.emit` keeps this ~free when nothing's subscribed.
+   */
+  private runPrefabAndEmit(name: string, args: unknown[]): Entity {
+    const entity = this.prefabRegistry.spawn(name, ...args);
+    this.events.emit("entity:spawned", { entity, prefabName: name });
+    return entity;
   }
 
   /** Live binding — reads see whatever's in `CONFIG` right now. */
@@ -205,7 +269,7 @@ export class ModAPIImpl implements ModAPI {
   }
 
   spawn(name: string, ...args: unknown[]): Entity {
-    return this.prefabRegistry.spawn(name, ...args);
+    return this.runPrefabAndEmit(name, args);
   }
 
   onWorldReady(fn: (api: ModAPI) => void): void {

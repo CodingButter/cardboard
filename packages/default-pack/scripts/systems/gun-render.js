@@ -78,6 +78,19 @@ export default (api) => {
           if (shouldFire) {
             weapon.lastFireTime = now;
             if (magSize > 0) active.mag = (active.mag ?? 1) - 1;
+            // Au1 of AUDIO.md — placeholder gunshot. The default pack
+            // ships a synthesized stub; modders replace with real OGG.
+            api.audio.play("gunshot");
+            // Ev1 of EVENTS.md §4.8 — fire-edge moment. Chain packs
+            // (camera-shake mods, recoil overlays, screen-flash
+            // effects) subscribe to react without monkey-patching the
+            // viewmodel pipeline. ammoLeft reflects the post-decrement
+            // value so subscribers see "how many remain" semantics.
+            api.events.emit("weapon:fired", {
+              player: entity,
+              weaponId: active.itemId,
+              ammoLeft: magSize > 0 ? (active.mag ?? 0) : -1,
+            });
           }
         }
         weapon.wasFiring = firingNow;

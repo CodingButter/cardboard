@@ -24,6 +24,25 @@ import type { PackManifest } from "@two_5_d/engine";
 const DB_NAME = "two_5_d_editor";
 const DB_VERSION = 1;
 
+/**
+ * Sidecar DB for AE1's sprite-source authoring metadata.
+ *
+ * Per `docs/plans/ANIMATION_EDITOR.md` §7.1 the metadata is editor-
+ * only (never exported), so its lifecycle is decoupled from the
+ * project DB. Why a sidecar instead of bumping the main DB to v2?
+ *
+ *   The engine reads the same `two_5_d_editor` DB via
+ *   `IdbAssetPack.fromProject` (in `packages/engine`) at a constant
+ *   `DEFAULT_EDITOR_DB_VERSION = 1`. Bumping our open to v2 would
+ *   force the engine's v1 open to fail with a downgrade error.
+ *   Splitting authoring metadata into its own DB keeps the wire
+ *   contract with the engine untouched.
+ *
+ * Single-store schema; no migrations expected until AE2.
+ */
+const ANIM_DB_NAME = "two_5_d_editor_animation";
+const ANIM_DB_VERSION = 1;
+
 export interface ProjectMeta {
   id: string;
   name: string;
@@ -69,6 +88,61 @@ export interface AssetMeta {
   updatedAt: number;
 }
 
+/**
+ * Authoring metadata for an editor-baked sprite — per
+ * `docs/plans/ANIMATION_EDITOR.md` §7.1. Stored alongside the project
+ * in IDB but explicitly NOT shipped in the `.apg`: the manifest entry
+ * + the canonical sheet PNG are the engine-visible artefacts; this
+ * row exists so re-opening the sprite reproduces the editor state
+ * (grid dims, per-animation cell mappings, source pointer).
+ *
+ * AE1 only emits `kind: "spritesheet"`. Path B (`"fbx"`) and the
+ * loose-frames Path A.2 stitching (`"loose-frames"`) shape the same
+ * row with extra fields when those phases land.
+ */
+export type SpriteSourceKind = "spritesheet" | "fbx" | "loose-frames";
+
+export interface SpriteSourceMeta {
+  projectId: string;
+  spriteId: string;
+  kind: SpriteSourceKind;
+  /** IDB asset path where the raw source PNG / FBX lives (e.g. `_source/zombie-source.png`). */
+  sourcePath: string;
+  /** Cell-grid dims authored in the editor — input shape, not output. */
+  grid: {
+    frameWidth: number;
+    frameHeight: number;
+    cols: number;
+    rows: number;
+    padding: number;
+    offsetX: number;
+    offsetY: number;
+  };
+  /** Default per-sprite angles count (manifest mirrors it). */
+  angles: 1 | 2 | 4 | 5 | 8 | 16;
+  /**
+   * Per-animation cell-index lists. The author clicks cells in the
+   * preview pane and the indices land here. Output layout is then
+   * derived by `canonicalizeSpritesheet` — this map is the source of
+   * truth for re-edits.
+   */
+  cellMappings: Record<string, number[]>;
+  /** Per-animation runtime fields (frameDuration / loop / next / angles override). */
+  animationsMeta: Record<
+    string,
+    {
+      frameDuration: number;
+      loop: boolean;
+      next?: string;
+      anglesOverride?: 1 | 2 | 4 | 5 | 8 | 16;
+    }
+  >;
+  /** Optional ordered list of animation keys — preserves insertion order. */
+  animationOrder?: string[];
+  /** Last bake epoch ms. */
+  bakedAt: number;
+}
+
 interface EditorDB extends DBSchema {
   projects: {
     key: string;
@@ -83,6 +157,19 @@ interface EditorDB extends DBSchema {
   assets: {
     key: [string, string]; // [projectId, path]
     value: AssetRow;
+    indexes: { byProjectId: string };
+  };
+}
+
+/**
+ * Sidecar DB schema — see the `ANIM_DB_NAME` comment for the rationale
+ * behind the split. One store keyed by `[projectId, spriteId]` so a
+ * `byProjectId` range scan can list every sprite owned by a project.
+ */
+interface AnimDB extends DBSchema {
+  spriteSources: {
+    key: [string, string]; // [projectId, spriteId]
+    value: SpriteSourceMeta;
     indexes: { byProjectId: string };
   };
 }
@@ -143,6 +230,23 @@ function newManifest(name: string): PackManifest {
 }
 
 let cachedDB: Promise<IDBPDatabase<EditorDB>> | null = null;
+let cachedAnimDB: Promise<IDBPDatabase<AnimDB>> | null = null;
+
+function getAnimDB(): Promise<IDBPDatabase<AnimDB>> {
+  if (!cachedAnimDB) {
+    cachedAnimDB = openDB<AnimDB>(ANIM_DB_NAME, ANIM_DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains("spriteSources")) {
+          const spriteSources = db.createObjectStore("spriteSources", {
+            keyPath: ["projectId", "spriteId"],
+          });
+          spriteSources.createIndex("byProjectId", "projectId");
+        }
+      },
+    });
+  }
+  return cachedAnimDB;
+}
 
 function getDB(): Promise<IDBPDatabase<EditorDB>> {
   if (!cachedDB) {
@@ -174,6 +278,7 @@ function getDB(): Promise<IDBPDatabase<EditorDB>> {
  */
 export function _resetDBCache(): void {
   cachedDB = null;
+  cachedAnimDB = null;
 }
 
 function sizeOf(body: string | Blob): number {
@@ -272,6 +377,17 @@ export const EditorProjectStore = {
     }
     await tx.objectStore("projects").delete(id);
     await tx.done;
+    // Also cascade into the animation sidecar DB. Separate
+    // transaction because the two DBs are unrelated — and the
+    // sidecar may not exist yet on a fresh install (the upgrade
+    // callback creates it on demand).
+    const animDb = await getAnimDB();
+    const animTx = animDb.transaction("spriteSources", "readwrite");
+    const ssIdx = animTx.objectStore("spriteSources").index("byProjectId");
+    for await (const cursor of ssIdx.iterate(IDBKeyRange.only(id))) {
+      await cursor.delete();
+    }
+    await animTx.done;
   },
 
   async loadManifest(id: string): Promise<PackManifest | null> {
@@ -407,6 +523,55 @@ export const EditorProjectStore = {
     }
     await tx.done;
     return out.sort((a, b) => a.path.localeCompare(b.path));
+  },
+
+  // ---- AE1: spriteSources -------------------------------------------------
+  //
+  // Authoring-only metadata. Stored alongside the project but never
+  // shipped — `Export/exportApg` filters this store entirely. Used by
+  // the Animation editor mode to round-trip an in-progress sprite
+  // (grid dims, per-animation cell-index lists, source PNG path).
+
+  async loadSpriteSource(
+    projectId: string,
+    spriteId: string,
+  ): Promise<SpriteSourceMeta | null> {
+    const db = await getAnimDB();
+    return (
+      (await db.get("spriteSources", [projectId, spriteId])) ?? null
+    );
+  },
+
+  async saveSpriteSource(
+    projectId: string,
+    spriteId: string,
+    meta: SpriteSourceMeta,
+  ): Promise<void> {
+    const db = await getAnimDB();
+    // Defensive: stamp the key fields so callers can pass partial
+    // updates without re-specifying the composite key.
+    const row: SpriteSourceMeta = { ...meta, projectId, spriteId };
+    await db.put("spriteSources", row);
+  },
+
+  async deleteSpriteSource(
+    projectId: string,
+    spriteId: string,
+  ): Promise<void> {
+    const db = await getAnimDB();
+    await db.delete("spriteSources", [projectId, spriteId]);
+  },
+
+  async listSpriteSources(projectId: string): Promise<SpriteSourceMeta[]> {
+    const db = await getAnimDB();
+    const tx = db.transaction("spriteSources", "readonly");
+    const idx = tx.objectStore("spriteSources").index("byProjectId");
+    const out: SpriteSourceMeta[] = [];
+    for await (const cursor of idx.iterate(IDBKeyRange.only(projectId))) {
+      out.push(cursor.value);
+    }
+    await tx.done;
+    return out.sort((a, b) => a.spriteId.localeCompare(b.spriteId));
   },
 };
 

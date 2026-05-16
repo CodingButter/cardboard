@@ -259,6 +259,49 @@ export type ShaderHookRole = "skyHooks" | "worldHooks" | "spriteHooks";
 export type ShaderEntry = ShaderRole | ShaderHookRole;
 
 /**
+ * Sound-group routing. Each group has its own gain node and Settings
+ * slider — `master` is the global multiplier feeding the destination,
+ * the other four feed into `master`. See `docs/plans/AUDIO.md` §5.1.
+ */
+export type SoundGroup = "master" | "sfx" | "music" | "ambient" | "voice";
+
+/**
+ * One playable sound declared in `manifest.sounds`. Pack scripts
+ * reference sounds by their manifest id via `api.audio.play(id)`. See
+ * `docs/plans/AUDIO.md` §3.2.
+ */
+export interface SoundDef {
+  /**
+   * Path inside the pack. Browser-decodable: `.ogg`, `.mp3`, `.wav`,
+   * `.opus`, `.m4a`. Recommend `.ogg` for cross-browser + license
+   * friendliness. See AUDIO.md §7.
+   */
+  file: string;
+  /**
+   * Per-sound base volume (0..1). Applied as a static gain on top of
+   * the group's live volume. Defaults to 1.0.
+   */
+  volume?: number;
+  /**
+   * Group the sound routes to. Drives which Settings slider mixes it.
+   * Defaults to `"sfx"`. `"master"` bypasses the per-group sliders.
+   */
+  group?: SoundGroup;
+  /**
+   * Default looping behaviour. `playLoop(id)` ignores this; `play(id)`
+   * respects it. Defaults to `false`.
+   */
+  loop?: boolean;
+  /**
+   * Eager-preload hint. `true` (default for `sfx` / `voice`) loads +
+   * decodes the buffer at pack-load time. `false` (default for `music`
+   * / `ambient`) defers the fetch to the first play call. See
+   * AUDIO.md §5.5.
+   */
+  preload?: boolean;
+}
+
+/**
  * One Mode-2 (post-process) fragment pass declared by a pack. The pack
  * ships just the body of a fragment shader (helpers + `void main()`);
  * the engine prepends an auto-injected post-pass header declaring the
@@ -434,4 +477,13 @@ export interface PackManifest {
   shaders?: Partial<Record<ShaderEntry, string>> & {
     postPasses?: PostPassDef[];
   };
+  /**
+   * Sound registry — Au1 of `docs/plans/AUDIO.md`. Keys are the ids
+   * referenced by `api.audio.play(id)` et al. Files live anywhere in
+   * the pack; convention is `audio/sfx/`, `audio/music/`,
+   * `audio/ambient/`. A pack with no `sounds` field skips the audio
+   * subsystem entirely (no `AudioContext` instantiation, byte-
+   * identical to pre-Au1).
+   */
+  sounds?: Record<string, SoundDef>;
 }

@@ -36,7 +36,23 @@ export default (api) => {
           if (taken === 0) return; // full inventory — leave the pile
 
           pickup.count = leftover;
-          if (pickup.count === 0) world.despawn(entity);
+          // Au1 of AUDIO.md — chime on successful pickup. Plays for
+          // every partial-stack grab too; mass-collect of a pile fires
+          // once per frame the inventory accepts items.
+          api.audio.play("pickup");
+          // Ev1 of EVENTS.md §4.8 — fire `pickup:collected` only when
+          // the pile fully drains, matching the spec's "partial
+          // pickups don't fire" rule. Other packs subscribe by the
+          // canonical name to react (e.g. notification overlay, score
+          // tracker).
+          if (pickup.count === 0) {
+            api.events.emit("pickup:collected", {
+              player: _player,
+              itemId: pickup.itemId,
+              count: taken,
+            });
+            world.despawn(entity);
+          }
         });
       },
     );

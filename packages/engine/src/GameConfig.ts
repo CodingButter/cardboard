@@ -250,6 +250,23 @@ export interface GameConfig {
     padding: number;
     width: number;
   };
+
+  /**
+   * Audio mixer volumes — Au1 of `docs/plans/AUDIO.md` §6.1. Each
+   * group has its own gain node feeding `master`; this block drives
+   * the live `GainNode.gain.value` updates from the Settings UI. All
+   * values are 0..1. A pack that ships no `manifest.sounds` never
+   * touches the audio subsystem, so these knobs are inert by default.
+   */
+  audio: {
+    /** Global volume multiplier (0..1). Slider in Settings → Audio. */
+    masterVolume: number;
+    /** Per-group volumes (0..1). */
+    sfxVolume: number;
+    musicVolume: number;
+    ambientVolume: number;
+    voiceVolume: number;
+  };
 }
 
 /**

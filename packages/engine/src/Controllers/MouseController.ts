@@ -1,4 +1,19 @@
 import { Vec2 } from "Libs/Vector";
+import type { InputModifiers } from "./KeyboardController";
+
+/**
+ * Event-bus bridge for mouse DOM events (Ev1 of EVENTS.md §4.5).
+ * `ModAPIImpl` sets this so `mousedown` / `mouseup` / `wheel` fan out
+ * on `api.events` after the controller updates its internal state.
+ * Engine internals that build a MouseController without a ModAPI
+ * leave it unset; the controller stays byte-identical to pre-Ev1.
+ */
+export type MouseEventEmit = (
+  topic: "input:mouseDown" | "input:mouseUp" | "input:wheel",
+  payload:
+    | { button: number; position: Vec2; modifiers: InputModifiers }
+    | { deltaY: number; modifiers: InputModifiers },
+) => void;
 
 /**
  * Tracks mouse position, button state, and per-frame motion delta.
@@ -15,6 +30,9 @@ export default class MouseController {
   /** Buttons currently held. `0` = left, `1` = middle, `2` = right. */
   readonly buttons: Set<number> = new Set();
 
+  /** Event-bus bridge — set by `ModAPIImpl`. See `MouseEventEmit`. */
+  emitEvent: MouseEventEmit | null = null;
+
   private movement: Vec2 = Vec2.zero();
   /** Signed notch count since last `consumeWheel`. +1 per scroll-down notch. */
   private wheelNotches: number = 0;
@@ -28,9 +46,23 @@ export default class MouseController {
   };
   private readonly handleMouseDown = (event: MouseEvent): void => {
     this.buttons.add(event.button);
+    if (this.emitEvent !== null) {
+      this.emitEvent("input:mouseDown", {
+        button: event.button,
+        position: new Vec2(event.offsetX, event.offsetY),
+        modifiers: this.modifiers(event),
+      });
+    }
   };
   private readonly handleMouseUp = (event: MouseEvent): void => {
     this.buttons.delete(event.button);
+    if (this.emitEvent !== null) {
+      this.emitEvent("input:mouseUp", {
+        button: event.button,
+        position: new Vec2(event.offsetX, event.offsetY),
+        modifiers: this.modifiers(event),
+      });
+    }
   };
   private readonly handleWheel = (event: WheelEvent): void => {
     // One notch per wheel event — most OSes fire one per click of the
@@ -38,7 +70,23 @@ export default class MouseController {
     // vs line vs page modes to a uniform "one switch per notch".
     if (event.deltaY === 0) return;
     this.wheelNotches += Math.sign(event.deltaY);
+    if (this.emitEvent !== null) {
+      this.emitEvent("input:wheel", {
+        deltaY: event.deltaY,
+        modifiers: this.modifiers(event),
+      });
+    }
   };
+
+  /** Build a normalised modifier struct from a mouse/wheel event. */
+  private modifiers(event: MouseEvent | WheelEvent): InputModifiers {
+    return {
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey,
+      alt: event.altKey,
+      meta: event.metaKey,
+    };
+  }
 
   constructor(target: HTMLElement) {
     this.target = target;

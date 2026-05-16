@@ -87,6 +87,18 @@ export class ZipAssetPack extends AssetPack {
     return new Blob([bytes as BlobPart]);
   }
 
+  override async binaryBlob(path: string): Promise<ArrayBuffer> {
+    const bytes = this.files.get(path);
+    if (!bytes) throw new Error(`Pack missing ${path}`);
+    // Copy into a freshly-allocated ArrayBuffer — `decodeAudioData`
+    // takes ownership of the buffer (detaches it), and we want every
+    // call to `binaryBlob` for the same path to succeed (the pack's
+    // own `Uint8Array` must NOT be detached).
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    return copy;
+  }
+
   async textBody(path: string): Promise<string> {
     const bytes = this.files.get(path);
     if (!bytes) throw new Error(`Pack missing ${path}`);

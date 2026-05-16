@@ -16,6 +16,8 @@ export type {
   ShaderHookRole,
   ShaderEntry,
   PostPassDef,
+  SoundGroup,
+  SoundDef,
 } from "./types";
 export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS, POST_PASS_UNIFORMS } from "./types";
 export { discoverItemVariants } from "./discoverItemVariants";

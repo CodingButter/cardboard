@@ -15,6 +15,7 @@
     "scripts/systems/inventory-bar-render.js",
     "scripts/systems/inventory-screen.tsx",
     "scripts/systems/settings-screen.tsx",
+    "scripts/systems/events-demo.js",
     "scripts/hello.js"
   ],
   "tileTextures": {
@@ -83,7 +84,13 @@
       }
     }
   },
+  "sounds": {
+    "gunshot": { "file": "audio/sfx/gunshot.wav", "group": "sfx", "volume": 0.6 },
+    "pickup":  { "file": "audio/sfx/pickup.wav",  "group": "sfx", "volume": 0.8 }
+  },
   "_animationsSmokeTest_doc": "A1 of ANIMATIONS.md smoke test. Flip `animationsSmokeTest` to `true` and run `bun run build-packs` to enable. With the flag on, `scripts/hello.js` spawns one 'anim_marker' sprite at (4, 4) using the 4-angle × 4-frame `anim_marker` sheet — the hue shifts as the camera walks around it (exercises the angle-selection math) and the centered arrow's brightness pulses through 4 frames (exercises the AnimationSystem). Disabled by default; with the flag off the default pack renders byte-identically to pre-A1.",
+  "_eventsDemo_doc": "Ev1 of EVENTS.md smoke test. When true, scripts/systems/events-demo.js subscribes to a handful of canonical engine events (scene:loaded, pack:loaded, modal:opened/closed, player:moved (once), weapon:fired) plus the default-pack's pickup:collected and console.logs each fire. Flip `eventsDemo=true` and run `bun run build-packs` to enable. Disabled by default — the events-demo script bundles either way but no-ops when the flag is off.",
+  "eventsDemo": false,
   "shaders_example": {
     "_doc": "R4/S3 smoke test (wet floor via Mode 3 hooks — supersedes the S1 wet-world.frag full-shader demo). Rename this key to `shaders` and run `bun run build-packs` to enable. Default ships disabled.",
     "worldHooks": "shaders/wet-world-hooks.glsl"
