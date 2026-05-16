@@ -118,6 +118,9 @@ function rowBaseFor(sprite: SpriteDef, animName: string): number {
   return acc;
 }
 
+/** Max displayed edge of the atlas (debug) thumbnail in CSS pixels. */
+const ATLAS_MAX_DISPLAY = 240;
+
 export function BakedSpritePreview({
   spriteId,
   sprite,
@@ -127,15 +130,66 @@ export function BakedSpritePreview({
   onOpenSource,
 }: BakedSpritePreviewProps) {
   // Hold the blob as an object URL so the `<img>` can render. Revoke
-  // on unmount / blob swap to avoid leaking GPU resources.
+  // on unmount / blob swap to avoid leaking GPU resources. Cleanup
+  // must run AFTER React swaps the URL into the DOM, otherwise we get
+  // a flash of revoked-URL where the live preview goes blank — we use
+  // a microtask deferral via `queueMicrotask` to be safe.
   const [objectUrl, setObjectUrl] = useState<string>("");
   useEffect(() => {
     const url = URL.createObjectURL(pngBlob);
     setObjectUrl(url);
     return () => {
-      URL.revokeObjectURL(url);
+      // Defer the revoke — by the time this runs, React has already
+      // committed the new URL into any background-image / <img> via
+      // the next effect, so the old one is safe to release without
+      // racing the still-mounted DOM nodes.
+      const toRevoke = url;
+      queueMicrotask(() => URL.revokeObjectURL(toRevoke));
     };
   }, [pngBlob]);
+
+  // Decoded <img> for canvas-based live preview. Loading the image
+  // ourselves (instead of relying on CSS background-image) gives us an
+  // explicit `load` event so the canvas never paints an empty frame
+  // after a re-bake. The browser's image decoder is async — without
+  // this we'd see a flash of blank pixels because the div was sized
+  // and positioned before the new PNG had been decoded.
+  //
+  // BUG 1 (re-bake blanks the live preview) — root cause: the
+  // previous implementation drove the cell with CSS
+  // `backgroundImage: url(objectUrl)`. When pngBlob changes, the
+  // previous effect's cleanup revokes the old URL on a microtask,
+  // racing the browser's async fetch+decode of the new URL. The
+  // background-image div doesn't expose a `load` event, so React's
+  // render commits the new URL before the bytes are actually
+  // available, and the div paints empty. The atlas SVG/img view
+  // worked because `<img>` has its own loading lifecycle.
+  //
+  // Fix: drive the live preview from this decoded `<img>` via a
+  // `<canvas>` + `drawImage` (see live-preview canvas effect below).
+  // The canvas only paints once `decodedImage` is non-null, so we
+  // can never display a torn/blank frame post-bake.
+  const [decodedImage, setDecodedImage] = useState<HTMLImageElement | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!objectUrl) {
+      setDecodedImage(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setDecodedImage(img);
+    };
+    img.onerror = () => {
+      if (!cancelled) setDecodedImage(null);
+    };
+    img.src = objectUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [objectUrl]);
 
   const animationNames = useMemo(
     () => Object.keys(sprite.animations ?? {}),
@@ -175,9 +229,12 @@ export function BakedSpritePreview({
   const totalFrames = animDef?.frames.length ?? 0;
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  // Reset frame when switching animations.
+  // Reset frame + auto-play when switching animations — the modder
+  // almost always wants to see the animation playing immediately on
+  // click, not to have to manually press ▶ every time.
   useEffect(() => {
     setFrameIdx(0);
+    if (activeAnim) setPlaying(true);
   }, [activeAnim]);
 
   // Playback timer — drives `frameIdx` forward at `frameDuration`.
@@ -239,6 +296,60 @@ export function BakedSpritePreview({
     };
   }, [animDef, activeAnim, frameIdx, angleIndex, frameWidth, frameHeight, sprite]);
 
+  // Live-preview canvas — paints the active cell from the *decoded*
+  // image. We don't paint until `decodedImage` is non-null, which
+  // means we never show a torn/blank frame after a re-bake (the
+  // canvas keeps its prior pixels until the new image is ready).
+  // 4× scale + `imageSmoothingEnabled = false` matches the engine's
+  // nearest-neighbor sampling, so the modder sees crisp pixels.
+  const LIVE_SCALE = 4;
+  const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = liveCanvasRef.current;
+    if (!canvas) return;
+    if (!decodedImage || !activeCell || frameWidth === 0 || frameHeight === 0) {
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // Reset transforms + disable smoothing every paint — the canvas
+    // may have been resized between renders if frameWidth changed.
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      decodedImage,
+      activeCell.x,
+      activeCell.y,
+      activeCell.w,
+      activeCell.h,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+  }, [decodedImage, activeCell, frameWidth, frameHeight]);
+
+  // Displayed (CSS-pixel) size of the atlas thumbnail on the right.
+  // We scale the natural sheet dimensions down to fit a square of
+  // ATLAS_MAX_DISPLAY while preserving aspect ratio. The SVG grid +
+  // amber highlight read these values so they line up with what the
+  // user actually sees, not the source PNG's native size.
+  const atlasDisplay = useMemo(() => {
+    if (sheetWidth === 0 || sheetHeight === 0) {
+      return { w: 0, h: 0, scale: 1 };
+    }
+    const scale = Math.min(
+      ATLAS_MAX_DISPLAY / sheetWidth,
+      ATLAS_MAX_DISPLAY / sheetHeight,
+      1,
+    );
+    return {
+      w: Math.round(sheetWidth * scale),
+      h: Math.round(sheetHeight * scale),
+      scale,
+    };
+  }, [sheetWidth, sheetHeight]);
+
   const sourceFooter = sourceMeta
     ? sourceMeta.kind === "fbx"
       ? `FBX (${sourceMeta.sourcePath.split("/").pop()})`
@@ -280,76 +391,157 @@ export function BakedSpritePreview({
       </div>
 
       <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
-        {/* PNG + grid overlay */}
-        <div
-          className="relative inline-block self-start border border-zinc-800 rounded bg-zinc-950/40"
-          style={{ minWidth: sheetWidth, minHeight: sheetHeight }}
-        >
-          {objectUrl ? (
-            <img
-              src={objectUrl}
-              alt={spriteId}
-              draggable={false}
-              style={{
-                width: sheetWidth || undefined,
-                height: sheetHeight || undefined,
-                imageRendering: "pixelated",
-                display: "block",
-              }}
-            />
+        {/* TWO-COLUMN: live preview (primary) on the left, atlas
+            thumbnail (debug) on the right. The atlas auto-scales to
+            ATLAS_MAX_DISPLAY so a 1024×1024 FBX bake doesn't blow the
+            layout. The animation list lives below in a full-width row
+            so the scrubber gets real estate. */}
+        <div className="flex flex-row flex-wrap gap-6 items-start">
+          {/* LEFT — live preview (canvas) + angle buttons. The canvas
+              repaints from the decoded image via the effect above; it
+              never shows a torn frame after a re-bake. */}
+          {activeCell && frameWidth > 0 && frameHeight > 0 ? (
+            <section className="flex-shrink-0">
+              <h3 className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
+                Live preview
+                {activeAnim ? (
+                  <span className="text-zinc-500 normal-case ml-2 lowercase">
+                    · {activeAnim} · angle {angleIndex} ({labelForAngle(effectiveAngles, angleIndex)}) · frame {frameIdx + 1}/{totalFrames}
+                  </span>
+                ) : null}
+              </h3>
+              <canvas
+                ref={liveCanvasRef}
+                width={frameWidth * LIVE_SCALE}
+                height={frameHeight * LIVE_SCALE}
+                className="border border-zinc-700 rounded bg-zinc-950 block"
+                style={{
+                  width: frameWidth * LIVE_SCALE,
+                  height: frameHeight * LIVE_SCALE,
+                  imageRendering: "pixelated",
+                }}
+                data-testid="baked-preview-live-cell"
+              />
+              {/* Angle buttons — quick visual swap, more direct than a dropdown. */}
+              {effectiveAngles > 1 ? (
+                <div
+                  className="mt-2 flex flex-wrap gap-1"
+                  style={{ maxWidth: frameWidth * LIVE_SCALE }}
+                  data-testid="baked-preview-angle-buttons"
+                >
+                  {Array.from({ length: effectiveAngles }, (_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setAngleIndex(i)}
+                      className={cn(
+                        "px-2 py-1 text-[11px] rounded border transition-colors",
+                        i === angleIndex
+                          ? "border-amber-500 bg-amber-700/30 text-amber-100"
+                          : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200",
+                      )}
+                    >
+                      {labelForAngle(effectiveAngles, i)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </section>
           ) : null}
-          {/* Grid lines */}
-          {sheetWidth > 0 && sheetHeight > 0 ? (
-            <svg
-              className="absolute top-0 left-0 pointer-events-none"
-              width={sheetWidth}
-              height={sheetHeight}
-            >
-              {Array.from({ length: cols + 1 }, (_, c) => {
-                const x = c * frameWidth;
-                return (
-                  <line
-                    key={`v${c}`}
-                    x1={x}
-                    x2={x}
-                    y1={0}
-                    y2={sheetHeight}
-                    stroke="rgba(74, 222, 128, 0.4)"
-                    strokeWidth={1}
-                  />
-                );
-              })}
-              {Array.from({ length: rows + 1 }, (_, r) => {
-                const y = r * frameHeight;
-                return (
-                  <line
-                    key={`h${r}`}
-                    x1={0}
-                    x2={sheetWidth}
-                    y1={y}
-                    y2={y}
-                    stroke="rgba(74, 222, 128, 0.4)"
-                    strokeWidth={1}
-                  />
-                );
-              })}
-            </svg>
-          ) : null}
-          {/* Active cell highlight */}
-          {activeCell ? (
+
+          {/* RIGHT — atlas thumbnail (debug). PNG + grid overlay,
+              scaled down to fit ATLAS_MAX_DISPLAY. The SVG and
+              highlight read the displayed dimensions, not the source
+              PNG's, so they always line up. */}
+          <section className="flex-shrink-0">
+            <h3 className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
+              Atlas
+              {sheetWidth > 0 ? (
+                <span className="text-zinc-500 normal-case ml-2 lowercase">
+                  · {sheetWidth}×{sheetHeight} px
+                  {atlasDisplay.scale < 1
+                    ? ` · ${Math.round(atlasDisplay.scale * 100)}%`
+                    : ""}
+                </span>
+              ) : null}
+            </h3>
             <div
-              className="absolute pointer-events-none"
+              className="relative inline-block border border-zinc-800 rounded bg-zinc-950/40"
               style={{
-                left: activeCell.x,
-                top: activeCell.y,
-                width: activeCell.w,
-                height: activeCell.h,
-                outline: "2px solid #f59e0b",
-                outlineOffset: -1,
-                background: "rgba(245, 158, 11, 0.18)",
+                width: atlasDisplay.w || sheetWidth || undefined,
+                height: atlasDisplay.h || sheetHeight || undefined,
+                minWidth: 1,
+                minHeight: 1,
               }}
-            />
-          ) : null}
+            >
+              {objectUrl && atlasDisplay.w > 0 ? (
+                <img
+                  src={objectUrl}
+                  alt={spriteId}
+                  draggable={false}
+                  style={{
+                    width: atlasDisplay.w,
+                    height: atlasDisplay.h,
+                    imageRendering: "pixelated",
+                    display: "block",
+                  }}
+                />
+              ) : null}
+              {/* Grid lines — drawn against the DISPLAYED size, so they
+                  remain pixel-aligned with the visible thumbnail. */}
+              {atlasDisplay.w > 0 && atlasDisplay.h > 0 ? (
+                <svg
+                  className="absolute top-0 left-0 pointer-events-none"
+                  width={atlasDisplay.w}
+                  height={atlasDisplay.h}
+                >
+                  {Array.from({ length: cols + 1 }, (_, c) => {
+                    const x = c * frameWidth * atlasDisplay.scale;
+                    return (
+                      <line
+                        key={`v${c}`}
+                        x1={x}
+                        x2={x}
+                        y1={0}
+                        y2={atlasDisplay.h}
+                        stroke="rgba(74, 222, 128, 0.4)"
+                        strokeWidth={1}
+                      />
+                    );
+                  })}
+                  {Array.from({ length: rows + 1 }, (_, r) => {
+                    const y = r * frameHeight * atlasDisplay.scale;
+                    return (
+                      <line
+                        key={`h${r}`}
+                        x1={0}
+                        x2={atlasDisplay.w}
+                        y1={y}
+                        y2={y}
+                        stroke="rgba(74, 222, 128, 0.4)"
+                        strokeWidth={1}
+                      />
+                    );
+                  })}
+                </svg>
+              ) : null}
+              {/* Active cell highlight — same scale as the thumbnail. */}
+              {activeCell && atlasDisplay.scale > 0 ? (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: activeCell.x * atlasDisplay.scale,
+                    top: activeCell.y * atlasDisplay.scale,
+                    width: activeCell.w * atlasDisplay.scale,
+                    height: activeCell.h * atlasDisplay.scale,
+                    outline: "2px solid #f59e0b",
+                    outlineOffset: -1,
+                    background: "rgba(245, 158, 11, 0.18)",
+                  }}
+                />
+              ) : null}
+            </div>
+          </section>
         </div>
 
         {/* Animation list */}
