@@ -45,6 +45,9 @@ export {
   PresetResolver,
   stripJsonComments,
   ZipAssetPack,
+  resolveChain,
+  clearChainCache,
+  AssetPack,
   type Preset,
   type PresetSource,
   type PresetError,
@@ -55,6 +58,7 @@ export {
 } from "./AssetPack";
 export type {
   PackManifest,
+  PackRequiresEntry,
   SheetEntry,
   EquipSlot,
   ItemDef,

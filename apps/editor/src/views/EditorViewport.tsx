@@ -5,23 +5,29 @@ import { WebGLRenderer } from "Renderers";
 import type { PartialGameConfig } from "Settings";
 import { EditorAssetPack } from "../lib/EditorAssetPack";
 import { cn } from "../lib/cn";
+import { GridEditor, type MutableScene } from "./GridEditor";
 
 /**
  * Live engine pane for the editor's project view.
  *
  * Mounts a `<canvas>`, builds an `EditorAssetPack` on top of the
  * project's IDB rows, then constructs the engine's `Game` against the
- * active scene. This is the bare-bones E2 surface — Play mode runs the
- * full engine (pointer lock + WASD + mouse look) and Edit mode keeps
- * the engine drawing but releases pointer lock so the user can
- * interact with the rest of the editor UI. Edit overlays (grid
- * editor, entity glyphs, etc.) land in E3.
+ * active scene. In Play mode this is the full engine (pointer lock +
+ * WASD + mouse look). In Edit mode the live engine is torn down and
+ * the 2D `GridEditor` takes over the same pane.
  *
- * Lifecycle is the standard `useEffect` cleanup pattern — every change
- * to `projectId` or `sceneName` tears down the previous `Game`
- * (cancels the loop, detaches input listeners) and starts a fresh one.
- * Pointer-lock release on unmount is best-effort; the browser
- * eventually releases it on its own if the canvas leaves the DOM.
+ * E3 lifecycle:
+ *   1. Play → Edit. Tear the engine down (`game.destroy()`), let the
+ *      `<GridEditor>` mount. Pointer lock is released as a side effect.
+ *   2. Edit → Play. If `dirty`, persist the in-memory scene JSON to
+ *      IDB via `onPersistScene` first so the re-mounted engine boots
+ *      against the edited scene.
+ *
+ * The viewport doesn't own the scene state any more — `ProjectView`
+ * does. It also doesn't own `mode`; we expose it as a controlled prop
+ * so the parent can re-use the same toggle from the header / save
+ * indicator. The `Tab` keyboard binding still lives here because the
+ * binding is meaningful only when the viewport is mounted.
  */
 export type ViewportMode = "play" | "edit";
 
@@ -31,6 +37,17 @@ export interface EditorViewportProps {
   sceneName?: string;
   /** Notify parent of the resolved scene so it can highlight the row. */
   onSceneResolved?: (path: string) => void;
+  /** Controlled mode. */
+  mode: ViewportMode;
+  onModeChange: (mode: ViewportMode) => void;
+  /** Edit-mode scene state. Owned by the parent so it can persist on
+   *  Save and rebuild EditorAssetPack on Play. */
+  editScene: MutableScene | null;
+  editScenePath: string | null;
+  onEditSceneChange: (next: MutableScene) => void;
+  /** Persist the edited scene to IDB. Called by the viewport before it
+   *  switches back to Play so the engine boots on the fresh bytes. */
+  onPersistScene: () => Promise<void>;
 }
 
 interface EngineHandle {
@@ -52,9 +69,14 @@ export function EditorViewport({
   projectId,
   sceneName,
   onSceneResolved,
+  mode,
+  onModeChange,
+  editScene,
+  editScenePath,
+  onEditSceneChange,
+  onPersistScene,
 }: EditorViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [mode, setMode] = useState<ViewportMode>("play");
   const [status, setStatus] = useState<string>("Initialising…");
   const [error, setError] = useState<string | null>(null);
   /**
@@ -65,14 +87,22 @@ export function EditorViewport({
   const engineRef = useRef<EngineHandle | null>(null);
 
   // Mount / re-mount the engine on every (projectId, sceneName) change.
+  // Skip the engine entirely in Edit mode — GridEditor renders instead.
   useEffect(() => {
+    if (mode === "edit") {
+      // Make sure no stale engine is running while we're in edit mode.
+      const handle = engineRef.current;
+      engineRef.current = null;
+      disposeEngine(handle);
+      setStatus("Edit mode");
+      return;
+    }
+
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
     // Re-bind to a local const so the async closure below sees a
-    // non-null `HTMLCanvasElement` even after re-entries. TS narrows
-    // through the `!canvas` guard at this scope but not into the
-    // nested function.
+    // non-null `HTMLCanvasElement` even after re-entries.
     const liveCanvas: HTMLCanvasElement = canvas;
 
     async function boot() {
@@ -82,11 +112,6 @@ export function EditorViewport({
         const pack = await EditorAssetPack.fromProject(projectId);
         if (cancelled) return;
         setStatus("Applying config…");
-        // Pack `config.json` (if present) layers over the engine
-        // baseline. We DON'T merge in localStorage here — the editor
-        // is its own runtime, and per-user settings from the game
-        // shouldn't bleed into authoring (e.g. a low FOV the user
-        // saved for playing shouldn't crop their level preview).
         const packConfigRaw = ((await pack.config()) ?? {}) as PartialGameConfig;
         applyConfigOverride(packConfigRaw);
         if (cancelled) return;
@@ -106,8 +131,6 @@ export function EditorViewport({
         onSceneResolved?.(resolvedSceneName);
 
         setStatus("Compiling shaders…");
-        // WebGL-only — mirrors `apps/game/index.ts` step 4. canvas2d
-        // backend ignores the shaderSources argument entirely.
         const shaderSources =
           CONFIG.rendering.backend === "webgl" && pack.manifest.shaders
             ? await WebGLRenderer.prefetchShaderSources(pack)
@@ -153,9 +176,6 @@ export function EditorViewport({
       const handle = engineRef.current;
       engineRef.current = null;
       disposeEngine(handle);
-      // Release pointer lock if our canvas owned it; otherwise this
-      // is a no-op. Done outside the try/catch in `disposeEngine`
-      // because the request can throw if no element holds the lock.
       if (
         typeof document !== "undefined" &&
         document.pointerLockElement === canvas
@@ -164,29 +184,15 @@ export function EditorViewport({
       }
     };
     // `onSceneResolved` deliberately omitted — we only want to remount
-    // on the bound project/scene change, not on callback identity.
+    // on the bound project/scene/mode change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sceneName]);
+  }, [projectId, sceneName, mode]);
 
-  // Mode toggle side effects. Play mode lets the user click the canvas
-  // to grab pointer lock (the engine wires that on the canvas itself);
-  // Edit mode releases an active lock so the user can interact with
-  // the surrounding UI without fighting the engine's input bindings.
-  useEffect(() => {
-    if (mode === "edit" && typeof document !== "undefined") {
-      if (document.pointerLockElement === canvasRef.current) {
-        document.exitPointerLock();
-      }
-    }
-  }, [mode]);
-
-  // Keyboard: Tab swaps Play ⇄ Edit. Spacebar in edit mode is a no-op
-  // for E2 (E3 will recenter the grid on the player's last position;
-  // we swallow it here so it doesn't scroll the page).
+  // Keyboard: Tab swaps Play ⇄ Edit. Spacebar in edit mode is reserved
+  // for the GridEditor's spawn-recenter (TODO E4).
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Don't intercept keystrokes that belong to a form input — the
-      // manifest editor + scene-list filters share this window.
+      // Don't intercept keystrokes that belong to a form input.
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -198,37 +204,55 @@ export function EditorViewport({
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        setMode((m) => (m === "play" ? "edit" : "play"));
-        return;
-      }
-      if (e.key === " " && mode === "edit") {
-        // Reserved for E3 grid-recenter. Eat it so we don't scroll.
-        e.preventDefault();
+        handleModeToggle();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode]);
+    // `handleModeToggle` captures current props; we want it to be the
+    // latest closure on every render, so we re-bind the listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, editScene]);
+
+  // Toggle helper — persists pending edits before the play remount.
+  async function handleModeToggle() {
+    if (mode === "edit") {
+      // Save first so the engine reboots against the edited scene.
+      try {
+        await onPersistScene();
+      } catch (err) {
+        console.warn("EditorViewport: save-on-play-switch failed —", err);
+      }
+      onModeChange("play");
+    } else {
+      onModeChange("edit");
+    }
+  }
 
   return (
     <div className="relative h-full w-full bg-zinc-950 overflow-hidden">
-      {/* Mode toggle (top-right segmented control). */}
-      <div className="absolute top-2 right-2 z-10 flex rounded-md border border-zinc-700 bg-zinc-900/80 backdrop-blur-sm overflow-hidden text-xs">
+      {/* Mode toggle (top-right segmented control). Floats above the
+          canvas in Play mode; pinned to the toolbar row visually
+          but as an overlay so we don't shift the layout when the
+          GridEditor's own toolbar renders below. */}
+      <div className="absolute top-2 right-2 z-30 flex rounded-md border border-zinc-700 bg-zinc-900/80 backdrop-blur-sm overflow-hidden text-xs">
         <ViewportModeButton
           active={mode === "play"}
-          onClick={() => setMode("play")}
+          onClick={() => handleModeToggle()}
           label="▶ Play"
         />
         <ViewportModeButton
           active={mode === "edit"}
-          onClick={() => setMode("edit")}
+          onClick={() => handleModeToggle()}
           label="✎ Edit"
         />
       </div>
 
       {/* Status / error overlay sits above the canvas so the user
-          sees boot progress without a flash of unstyled engine. */}
-      {error ? (
+          sees boot progress without a flash of unstyled engine. Only
+          shown when the live engine is mounting — Edit mode renders
+          GridEditor directly. */}
+      {mode === "play" && error ? (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/90 px-6 text-center">
           <div className="max-w-md text-sm text-red-300">
             <div className="font-semibold text-red-200 mb-1">
@@ -239,9 +263,28 @@ export function EditorViewport({
             </pre>
           </div>
         </div>
-      ) : status !== "Running" ? (
+      ) : mode === "play" && status !== "Running" ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/60 text-xs text-zinc-400 pointer-events-none">
           {status}
+        </div>
+      ) : null}
+
+      {/* Edit mode → GridEditor occupies the pane. The engine canvas
+          stays mounted but hidden so we don't tear down the WebGL
+          context unnecessarily (the boot effect already disposed
+          the engine). */}
+      {mode === "edit" && editScene && editScenePath ? (
+        <div className="absolute inset-0 z-10">
+          <GridEditor
+            projectId={projectId}
+            scenePath={editScenePath}
+            scene={editScene}
+            onSceneChange={onEditSceneChange}
+          />
+        </div>
+      ) : mode === "edit" ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center text-xs text-zinc-400 bg-zinc-950">
+          Loading scene…
         </div>
       ) : null}
 
@@ -250,14 +293,8 @@ export function EditorViewport({
         id="editor-viewport-canvas"
         className={cn(
           "block h-full w-full",
-          mode === "edit" && "opacity-90",
+          mode === "edit" && "invisible",
         )}
-        // Engine sizes the pixel buffer in `Game.fitCanvasToWindow`,
-        // but for the editor's bounded pane we want it to fit the
-        // pane, not `window.innerWidth`. Until E3 adds a viewport-
-        // sized resize hook, the engine's window-resize fitter is the
-        // best we have and the canvas's CSS keeps the visual box
-        // inside the pane.
         style={{ touchAction: "none" }}
       />
     </div>

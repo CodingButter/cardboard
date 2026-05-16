@@ -25,11 +25,21 @@ export class ZipAssetPack extends AssetPack {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch pack ${url} (${res.status})`);
     const buffer = await res.arrayBuffer();
+    return ZipAssetPack.loadFromBytes(new Uint8Array(buffer), url);
+  }
 
+  /**
+   * Decode a `.apg` from raw bytes already in memory. Lets the chain
+   * resolver fetch + hash + verify SRI integrity before paying the
+   * unzip cost, and lets tests / smoke scripts construct a pack from
+   * an inline buffer. `source` is purely for error messages; it's the
+   * URL or filename the bytes came from.
+   */
+  static async loadFromBytes(bytes: Uint8Array, source = "<bytes>"): Promise<ZipAssetPack> {
     // Dynamic import keeps jszip out of the main bundle until a real
     // pack URL is supplied.
     const { default: JSZip } = await import("jszip");
-    const zip = await JSZip.loadAsync(buffer);
+    const zip = await JSZip.loadAsync(bytes);
 
     const files = new Map<string, Uint8Array>();
     for (const [name, entry] of Object.entries(zip.files)) {
@@ -38,12 +48,12 @@ export class ZipAssetPack extends AssetPack {
     }
 
     const manifestBytes = files.get("manifest.json");
-    if (!manifestBytes) throw new Error(`Pack ${url} is missing manifest.json`);
+    if (!manifestBytes) throw new Error(`Pack ${source} is missing manifest.json`);
     let manifest: PackManifest;
     try {
       manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as PackManifest;
     } catch (err) {
-      throw new Error(`Pack ${url} has invalid manifest.json: ${err}`);
+      throw new Error(`Pack ${source} has invalid manifest.json: ${err}`);
     }
 
     // Auto-register sprite atlas entries for any item that ships a

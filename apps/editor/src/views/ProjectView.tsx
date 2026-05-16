@@ -17,7 +17,8 @@ import {
   Textarea,
 } from "../components/ui";
 import { cn } from "../lib/cn";
-import { EditorViewport } from "./EditorViewport";
+import { EditorViewport, type ViewportMode } from "./EditorViewport";
+import type { MutableScene } from "./GridEditor";
 
 /**
  * Read-only-ish project view for E1.
@@ -123,6 +124,17 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   // back to the manifest's `startScene` when nothing is explicitly
   // selected. Click a scene in the list → viewport remounts on it.
   const [viewportScene, setViewportScene] = useState<string | null>(null);
+  /** Play vs Edit mode for the viewport pane. Lifted from
+   *  EditorViewport in E3 so the project header can read the dirty
+   *  flag + Save button stays valid across mode switches. */
+  const [mode, setMode] = useState<ViewportMode>("play");
+  /** In-memory editable copy of the scene currently loaded in the
+   *  GridEditor. Set when we enter edit mode; cleared on scene change. */
+  const [editScene, setEditScene] = useState<MutableScene | null>(null);
+  const [editScenePath, setEditScenePath] = useState<string | null>(null);
+  const [sceneDirty, setSceneDirty] = useState(false);
+  const [sceneSaving, setSceneSaving] = useState(false);
+  const [sceneSavedAt, setSceneSavedAt] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -169,6 +181,78 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Resolve which scene the editor should load — same fallback chain
+  // as the viewport's `sceneName` prop.
+  const activeScenePath =
+    viewportScene ?? form?.startScene ?? manifest?.startScene ?? null;
+
+  // Load (or reload) the editable scene whenever the user enters edit
+  // mode or switches scenes while in edit mode. We keep the in-memory
+  // copy detached from the viewport's read-only scene so the
+  // GridEditor can mutate freely without competing with the engine.
+  useEffect(() => {
+    if (mode !== "edit") return;
+    if (!activeScenePath) return;
+    // Don't clobber unsaved edits — if we're already on this scene
+    // and have pending mutations, keep them.
+    if (editScenePath === activeScenePath && editScene) return;
+    let cancelled = false;
+    (async () => {
+      const body = await EditorProjectStore.loadAsset(
+        projectId,
+        activeScenePath,
+      );
+      if (cancelled || typeof body !== "string") return;
+      try {
+        const parsed = JSON.parse(body) as MutableScene;
+        setEditScene(parsed);
+        setEditScenePath(activeScenePath);
+        setSceneDirty(false);
+      } catch (err) {
+        setError(`Failed to parse ${activeScenePath}: ${(err as Error).message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // We deliberately don't include editScene/editScenePath in deps —
+    // they're guards inside the body, and we want this to fire only on
+    // mode/scene/project change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, activeScenePath, projectId]);
+
+  /** Persist the current editable scene to IDB. Idempotent — skip
+   *  when there are no pending edits or no loaded scene. */
+  const persistScene = useCallback(async (): Promise<void> => {
+    if (!editScene || !editScenePath) return;
+    if (!sceneDirty && sceneSavedAt !== null) return;
+    setSceneSaving(true);
+    try {
+      const json = JSON.stringify(editScene, null, 2);
+      await EditorProjectStore.saveAsset(projectId, editScenePath, json);
+      setSceneDirty(false);
+      setSceneSavedAt(Date.now());
+      // Pull a fresh `assets` listing so the size badge stays accurate.
+      const fresh = await EditorProjectStore.listAssets(projectId);
+      setAssets(fresh);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSceneSaving(false);
+    }
+  }, [editScene, editScenePath, projectId, sceneDirty, sceneSavedAt]);
+
+  // Debounced auto-save — write to IDB 750ms after the last paint
+  // mutation. Explicit Save button bypasses the timer for immediate
+  // persistence (and for the Edit→Play handoff in EditorViewport).
+  useEffect(() => {
+    if (!sceneDirty) return;
+    const handle = setTimeout(() => {
+      persistScene();
+    }, 750);
+    return () => clearTimeout(handle);
+  }, [sceneDirty, persistScene]);
 
   const sceneAssets = useMemo(
     () => assets.filter((a) => a.path.startsWith("scenes/")),
@@ -332,9 +416,26 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {sceneDirty ? (
+            <span className="text-xs text-amber-300">● Scene unsaved</span>
+          ) : sceneSavedAt ? (
+            <span className="text-xs text-emerald-400">
+              Scene saved {new Date(sceneSavedAt).toLocaleTimeString()}
+            </span>
+          ) : null}
+          {editScene && editScenePath ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={persistScene}
+              disabled={sceneSaving || !sceneDirty}
+            >
+              {sceneSaving ? "Saving…" : "Save scene"}
+            </Button>
+          ) : null}
           {savedAt ? (
             <span className="text-xs text-emerald-400">
-              Saved {new Date(savedAt).toLocaleTimeString()}
+              Manifest saved {new Date(savedAt).toLocaleTimeString()}
             </span>
           ) : null}
           <Button
@@ -374,7 +475,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
               Play / Edit.
             </CardDescription>
           </CardHeader>
-          <div className="h-[480px] border-t border-zinc-800">
+          <div className="h-[560px] border-t border-zinc-800">
             <EditorViewport
               projectId={projectId}
               sceneName={
@@ -387,6 +488,15 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
                 if (!viewportScene) setViewportScene(path);
                 if (!selectedScene) setSelectedScene(path);
               }}
+              mode={mode}
+              onModeChange={setMode}
+              editScene={editScene}
+              editScenePath={editScenePath}
+              onEditSceneChange={(next) => {
+                setEditScene(next);
+                setSceneDirty(true);
+              }}
+              onPersistScene={persistScene}
             />
           </div>
         </Card>

@@ -9,6 +9,12 @@ import { main, type GameState } from "@two_5_d/engine";
  *
  * `main()` is async now (it awaits the asset pack download); the
  * top-level `await` is supported in ES modules and Bun's bundler.
+ *
+ * P1 of `docs/plans/PACK_CHAIN.md` §3: the URL accepts multiple
+ * `?pack=` params (`?pack=A&pack=B`) treated as an explicit chain in
+ * declaration order — the LAST one is the root passed to `Game`,
+ * earlier ones become prepended dependencies once the resolver walks
+ * their `requires` graphs. A single `?pack=URL` stays as-before.
  */
 let previousState: Partial<GameState> | undefined;
 
@@ -16,7 +22,10 @@ if (import.meta.hot && import.meta.hot.data.state) {
   previousState = import.meta.hot.data.state as Partial<GameState>;
 }
 
-const game = await main(previousState);
+const params = new URLSearchParams(window.location.search);
+const packUrls = params.getAll("pack").filter((u) => u.length > 0);
+
+const game = await main(previousState, packUrls);
 
 if (import.meta.hot) {
   import.meta.hot.dispose((data) => {

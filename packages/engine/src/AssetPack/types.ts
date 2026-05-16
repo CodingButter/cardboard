@@ -218,12 +218,58 @@ export interface PostPassDef {
  */
 export const POST_PASS_UNIFORMS = ["u_color", "u_resolution", "u_time", "u_frame"] as const;
 
+/**
+ * One declared dependency of a pack. Two resolution paths exist; for
+ * Phase P1 of `docs/plans/PACK_CHAIN.md` only the URL-pinned form is
+ * implemented:
+ *
+ *  - `{ id, url, integrity? }` — fetch the URL directly. `integrity`
+ *    is an SRI hash (`sha256-…` / `sha384-…`) of the `.apg` bytes;
+ *    strongly recommended for URL deps so a host swapping contents
+ *    after the dependent pack was authored is a hard abort. P1 warns
+ *    when `url` is given without `integrity`.
+ *  - `{ id, version? }` (no url) — store-resolved lookup against a
+ *    future community store (P3). Until then the resolver hard-errors
+ *    with "store-backed resolution not yet implemented".
+ *
+ * `id` is the human-readable dependency id and lets the resolver
+ * dedupe across two packs that pull in the same dep by url. `version`
+ * is a semver range (P1 reserves the field but only validates exact
+ * equality when both sides set it).
+ *
+ * See `docs/plans/PACK_CHAIN.md` § 2 + § 6.
+ */
+export interface PackRequiresEntry {
+  /** Human id of the dependency. Optional if `url` is given. */
+  id?: string;
+  /** Direct URL to the `.apg` (per § 3 URL-substrate principle). */
+  url?: string;
+  /** Semver range or pin. Reserved — P1 only does exact-equality checks. */
+  version?: string;
+  /** SRI hash (`sha256-…` / `sha384-…`) of the fetched `.apg` bytes. */
+  integrity?: string;
+}
+
 /** Authoritative index of a pack's contents. */
 export interface PackManifest {
+  /**
+   * Globally unique pack id. Optional in P1 for backwards-compat with
+   * the existing default-pack which only ships `name`. Once
+   * pack-chain `requires` becomes load-bearing every pack will have
+   * to set this (P2+); the resolver dedupes by url today.
+   */
+  id?: string;
   name: string;
   version: string;
   /** Engine version the pack targets (semver string). */
   engine?: string;
+  /**
+   * Declared dependencies. The chain resolver walks every entry,
+   * fetches the referenced pack, verifies integrity, and inserts
+   * dependencies before the dependent in the resulting chain. P1 of
+   * `docs/plans/PACK_CHAIN.md` § 11.
+   */
+  requires?: PackRequiresEntry[];
   /**
    * Tile id → image path. Path is resolved against the pack root.
    *

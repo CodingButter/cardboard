@@ -76,5 +76,11 @@
     "_doc": "R4/S3 smoke test (wet floor via Mode 3 hooks — supersedes the S1 wet-world.frag full-shader demo). Rename this key to `shaders` and run `bun run build-packs` to enable. Default ships disabled.",
     "worldHooks": "shaders/wet-world-hooks.glsl"
   },
+  "shaders_postpass_example": {
+    "_doc": "R4/S4 smoke test (CRT scanlines + barrel distortion + vignette via Mode 2 post-process pass). Rename this key to `shaders` and run `bun run build-packs` to enable. Default ships disabled.",
+    "postPasses": [
+      { "name": "crt", "frag": "shaders/crt-pass.frag" }
+    ]
+  },
   "_materialsSmokeTest_doc": "M1+M2+M3 of MATERIALS.md smoke test. Flip `materialsSmokeTest` to `true` and run `bun run build-packs` to see ALL THREE tiers light up: (M1) alternate ammo pickups get a per-entity Shader pointing at shaders/ghost-sprite.glsl (translucent green wave); (M2) cells assigned the wet.floor preset in scene_heights_demo render with 85% mirror reflectivity via shaders/wet-cell.glsl; (M3) scene2.json declares shaders.worldHooks=shaders/scene-fog.glsl which adds a hot-orange depth-attenuated tint via hook_modifyFinalColor. Disabled by default — with this flag off the engine compiles its pack-default programs and rendering is byte-identical to pre-MATERIALS today, even though the wet.floor preset and scene2.json shaders block are still in the pack (they're inert until the flag flips)."
 }

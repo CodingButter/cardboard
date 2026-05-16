@@ -9,6 +9,7 @@ export type {
   SpriteDef,
   ItemImageVariant,
   PackManifest,
+  PackRequiresEntry,
   ShaderRole,
   ShaderHookRole,
   ShaderEntry,
@@ -19,6 +20,7 @@ export { discoverItemVariants } from "./discoverItemVariants";
 export { AssetPack } from "./AssetPack";
 export { ZipAssetPack } from "./ZipAssetPack";
 export { DEFAULT_PACK_URL, loadAssetPack } from "./loadAssetPack";
+export { resolveChain, clearChainCache } from "./ChainResolver";
 export {
   PresetResolver,
   stripJsonComments,
