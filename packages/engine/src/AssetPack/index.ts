@@ -32,6 +32,7 @@ export {
 } from "./IdbAssetPack";
 export { DEFAULT_PACK_URL, loadAssetPack } from "./loadAssetPack";
 export { resolveChain, clearChainCache } from "./ChainResolver";
+export { rewriteCorsHostileUrl } from "./rewriteUrl";
 export {
   PresetResolver,
   stripJsonComments,

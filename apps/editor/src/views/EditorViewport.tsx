@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { GAME_RUNNER_URL } from "../lib/gameRunnerUrl";
 import { GridEditor, type MutableScene } from "./GridEditor";
@@ -46,6 +46,15 @@ export interface EditorViewportProps {
   /** Persist the edited scene to IDB. Called before signalling the
    *  iframe so the engine boots on the fresh bytes. */
   onPersistScene: () => Promise<void>;
+  /**
+   * Optional ref the parent uses to reach the iframe element from
+   * outside the viewport — currently only the Project Settings modal,
+   * which needs to broadcast `{type:"reset"}` from its "Reload
+   * running game" button. The viewport keeps its own internal ref
+   * for all the message wiring; this one is purely an outbound
+   * accessor.
+   */
+  iframeRef?: React.MutableRefObject<HTMLIFrameElement | null>;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
@@ -64,8 +73,19 @@ export function EditorViewport({
   editScenePath,
   onEditSceneChange,
   onPersistScene,
+  iframeRef: externalIframeRef,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Mirror the iframe element through the parent-supplied ref so the
+  // Settings modal can postMessage directly when the user clicks
+  // "Reload running game". The internal ref stays the source of truth.
+  const setIframeNode = useCallback(
+    (node: HTMLIFrameElement | null) => {
+      iframeRef.current = node;
+      if (externalIframeRef) externalIframeRef.current = node;
+    },
+    [externalIframeRef],
+  );
   const [status, setStatus] = useState<string>("Booting…");
   const [error, setError] = useState<string | null>(null);
   /**
@@ -243,7 +263,7 @@ export function EditorViewport({
       ) : null}
 
       <iframe
-        ref={iframeRef}
+        ref={setIframeNode}
         src={src}
         title="Engine viewport"
         allow="fullscreen; gamepad; screen-wake-lock"

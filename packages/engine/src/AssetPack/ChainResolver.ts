@@ -172,7 +172,13 @@ interface QueueEntry {
  *
  * Algorithm (§ 4 of PACK_CHAIN.md):
  *   1. Fetch root → verify integrity → parse manifest.
- *   2. Push every `manifest.requires[]` entry onto a queue.
+ *   2. Push every ENABLED `manifest.requires[]` entry onto a queue.
+ *      Entries with `enabled === false` are skipped at the top of the
+ *      discover loop — they are NOT fetched, NOT added to the visited
+ *      set, and NOT pushed onto the queue. Disabled deps behave as if
+ *      they were missing from `requires[]`. The editor's Project
+ *      Settings → Dependencies tab toggles this flag so an author can
+ *      pin a dep but switch it off without removing the row.
  *   3. For each queue entry: fetch + verify + parse; dedupe by URL;
  *      recurse into its `requires`.
  *   4. Topological sort with a DFS cycle check. Hard error on cycle.
@@ -208,6 +214,11 @@ export async function resolveChain(
     const requires = pack.manifest.requires ?? [];
     const depUrls: string[] = [];
     for (const entry of requires) {
+      // Editor-side disable: skip the entry entirely. The disabled
+      // dep is NOT fetched, NOT pushed into the queue, and NOT
+      // recorded as a dep edge for topo sort — runtime behaviour is
+      // identical to the entry not being declared at all.
+      if (entry.enabled === false) continue;
       const depUrl = urlForRequires(entry, url);
       depUrls.push(depUrl);
       if (!packs.has(depUrl)) {

@@ -54,6 +54,7 @@ export {
   DEFAULT_EDITOR_DB_VERSION,
   resolveChain,
   clearChainCache,
+  rewriteCorsHostileUrl,
   AssetPack,
   type Preset,
   type PresetSource,

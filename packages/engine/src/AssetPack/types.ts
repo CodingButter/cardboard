@@ -386,6 +386,20 @@ export interface PackRequiresEntry {
   version?: string;
   /** SRI hash (`sha256-…` / `sha384-…`) of the fetched `.apg` bytes. */
   integrity?: string;
+  /**
+   * Editor-side enable flag. Default `true`. When set to `false` the
+   * chain resolver treats the entry as if it were absent from
+   * `requires[]` — the referenced pack is NOT fetched, NOT added to
+   * the visited set, and NOT pushed into the discover queue. Used by
+   * the editor's Project Settings → Dependencies tab so the author
+   * can pin a dep but switch it off without removing the row from
+   * the manifest (handy for A/B testing override packs).
+   *
+   * Round-trips as a manifest field so the flag persists across
+   * editor sessions. Runtime resolver semantics are the same as if
+   * the entry were never declared.
+   */
+  enabled?: boolean;
 }
 
 /** Authoritative index of a pack's contents. */

@@ -495,6 +495,115 @@ console.log("\n[6] M4 — post-pass cross-pack name collision");
   );
 }
 
+/* ────────────────────────────────────────────────────────────────────
+ * 7. PackRequiresEntry.enabled = false — disabled deps are skipped.
+ *    Build a child that requires TWO parents (parentA, parentB) where
+ *    parentB is disabled. Resolver must return [parentA, child] and
+ *    skip parentB entirely — no fetch attempt for it.
+ * ────────────────────────────────────────────────────────────────── */
+console.log("\n[7] requires entries with enabled=false are skipped");
+{
+  clearChainCache();
+
+  const parentAManifest: PackManifest = {
+    id: "parent-a",
+    name: "parent-a",
+    version: "1.0.0",
+    tileTextures: {},
+    tileSheets: [],
+    startScene: "scenes/none.json",
+  };
+  const parentABytes = await buildFakePack(parentAManifest);
+  const parentAPath = join(tmp, "parent-a.apg");
+  await writeFile(parentAPath, parentABytes);
+  const parentAUrl = pathToFileURL(parentAPath).toString();
+  const parentAIntegrity = await sriOf(parentABytes);
+
+  // parentB exists on disk but should NEVER be fetched because the
+  // child's requires[] entry for it is disabled.
+  const parentBManifest: PackManifest = {
+    id: "parent-b",
+    name: "parent-b",
+    version: "1.0.0",
+    tileTextures: {},
+    tileSheets: [],
+    startScene: "scenes/none.json",
+  };
+  const parentBBytes = await buildFakePack(parentBManifest);
+  const parentBPath = join(tmp, "parent-b.apg");
+  await writeFile(parentBPath, parentBBytes);
+  const parentBUrl = pathToFileURL(parentBPath).toString();
+  const parentBIntegrity = await sriOf(parentBBytes);
+
+  const childManifest: PackManifest = {
+    id: "child-toggle",
+    name: "child-toggle",
+    version: "0.1.0",
+    tileTextures: {},
+    tileSheets: [],
+    startScene: "scenes/none.json",
+    requires: [
+      { id: "parent-a", url: parentAUrl, integrity: parentAIntegrity },
+      {
+        id: "parent-b",
+        url: parentBUrl,
+        integrity: parentBIntegrity,
+        enabled: false, // ← disabled, must be skipped
+      },
+    ],
+  };
+  const childBytes = await buildFakePack(childManifest);
+  const childPath = join(tmp, "child-toggle.apg");
+  await writeFile(childPath, childBytes);
+  const childUrl = pathToFileURL(childPath).toString();
+
+  const chain = await resolveChain(childUrl);
+  assert(chain.length === 2, `chain length is 2 (got ${chain.length})`);
+  const ids = chain.map((p) => p.manifest.id ?? p.manifest.name);
+  assert(
+    ids.includes("parent-a"),
+    `chain includes enabled parent-a (got: ${ids.join(", ")})`,
+  );
+  assert(
+    !ids.includes("parent-b"),
+    `chain does NOT include disabled parent-b (got: ${ids.join(", ")})`,
+  );
+  assert(
+    ids[ids.length - 1] === "child-toggle",
+    `chain ends with the root child (got: "${ids[ids.length - 1]}")`,
+  );
+
+  // Flipping enabled back to true on the second pass should pull
+  // parent-b in too. Mutating manifests in flight isn't a public API
+  // (the resolver re-reads from the cached `AssetPack.manifest`); we
+  // construct a new child fixture and re-resolve to confirm behaviour.
+  clearChainCache();
+  const childEnabledManifest: PackManifest = {
+    ...childManifest,
+    id: "child-toggle-on",
+    name: "child-toggle-on",
+    requires: [
+      { id: "parent-a", url: parentAUrl, integrity: parentAIntegrity },
+      {
+        id: "parent-b",
+        url: parentBUrl,
+        integrity: parentBIntegrity,
+        enabled: true,
+      },
+    ],
+  };
+  const childOnBytes = await buildFakePack(childEnabledManifest);
+  const childOnPath = join(tmp, "child-toggle-on.apg");
+  await writeFile(childOnPath, childOnBytes);
+  const childOnUrl = pathToFileURL(childOnPath).toString();
+  const chainOn = await resolveChain(childOnUrl);
+  const idsOn = chainOn.map((p) => p.manifest.id ?? p.manifest.name);
+  assert(
+    idsOn.includes("parent-b"),
+    `enabled=true round-trips: chain includes parent-b (got: ${idsOn.join(", ")})`,
+  );
+}
+
 console.log("");
 if (failed > 0) {
   console.log(`✘ ${failed} assertion(s) failed`);

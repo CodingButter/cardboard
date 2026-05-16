@@ -17,3 +17,36 @@ body {
   width: 100%;
   min-height: 100%;
 }
+
+/*
+ * Editor-wide scrollbar consistency. Applies to ALL scrollable
+ * surfaces (sidebars, lists, inspectors, textareas, JSON previews)
+ * so the editor looks cohesive instead of inheriting whatever the
+ * OS / browser ships by default. The iframe's modals use the
+ * separate `cardboard-scroll` class defined in apps/game/index.css
+ * — same visual treatment, different stylesheet because the iframe
+ * is its own document.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(180, 83, 9, 0.7) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(180, 83, 9, 0.7);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(217, 119, 6, 0.9);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
