@@ -18,6 +18,7 @@ import {
 } from "../lib/componentSchemas";
 import { Button, Input, Label, Textarea } from "../components/ui";
 import { cn } from "../lib/cn";
+import type { PrefabConversionResult } from "../lib/prefabConverter";
 
 /**
  * E-ENT — Entities workflow tab. EDITOR.md §6.3.
@@ -76,6 +77,21 @@ export function EntitiesEditor({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  /**
+   * Phase #196 — converter modal open state. When non-null, the modal
+   * is open against the named JS prefab + script path. Set via the
+   * "Convert to declarative" button on a JS-prefab row.
+   */
+  const [converterTarget, setConverterTarget] = useState<
+    { name: string; scriptPath: string } | null
+  >(null);
+  /**
+   * Per-project "keep as JS" set — the converter writes a hidden asset
+   * row at `__editor__/prefab-keep-as-js.json` recording every prefab
+   * the user chose to leave alone. Drives the "JS" badge suppression
+   * after a cancel.
+   */
+  const [keepAsJs, setKeepAsJs] = useState<ReadonlySet<string>>(new Set());
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -86,6 +102,9 @@ export function EntitiesEditor({
     // Detect JS-based prefabs by scanning script bodies.
     const detected = await detectJsPrefabs(projectId, mf);
     setJsPrefabs(detected);
+    // Pull the "keep as JS" suppression list.
+    const keep = await loadKeepAsJs(projectId);
+    setKeepAsJs(keep);
   }, [projectId]);
 
   useEffect(() => {
@@ -329,9 +348,15 @@ export function EntitiesEditor({
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm text-zinc-100 truncate">{row.name}</div>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
-                  JS
-                </span>
+                {keepAsJs.has(row.name) ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                    JS·kept
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200">
+                    JS
+                  </span>
+                )}
               </div>
               <div className="text-[10px] text-zinc-500 truncate font-mono">
                 {row.scriptPath}
@@ -358,7 +383,17 @@ export function EntitiesEditor({
               onPatchComponent={patchComponentData}
             />
           ) : (
-            <JsPrefabView name={activeRow.name} path={activeRow.scriptPath!} />
+            <JsPrefabView
+              name={activeRow.name}
+              path={activeRow.scriptPath!}
+              keptAsJs={keepAsJs.has(activeRow.name)}
+              onConvert={() =>
+                setConverterTarget({
+                  name: activeRow.name,
+                  scriptPath: activeRow.scriptPath!,
+                })
+              }
+            />
           )
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-zinc-500">
@@ -424,6 +459,31 @@ export function EntitiesEditor({
           </p>
         </div>
       </aside>
+      {converterTarget ? (
+        <PrefabConverterModal
+          projectId={projectId}
+          name={converterTarget.name}
+          scriptPath={converterTarget.scriptPath}
+          manifest={manifest}
+          onCancel={async () => {
+            // Per Phase #196 B4 — record the cancel so the JS badge
+            // stops nagging on subsequent loads. The user opted out
+            // deliberately; we respect that until they manually
+            // re-open the converter from the JS prefab view.
+            const next = new Set(keepAsJs);
+            next.add(converterTarget.name);
+            setKeepAsJs(next);
+            await saveKeepAsJs(projectId, next);
+            setConverterTarget(null);
+          }}
+          onApplied={async () => {
+            setConverterTarget(null);
+            // Refresh so the new declarative prefab appears in the
+            // left rail and the JS row vanishes.
+            await refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -569,7 +629,17 @@ function DeclarativeForm({
 }
 
 /** Read-only stub shown for JS-detected prefabs. */
-function JsPrefabView({ name, path }: { name: string; path: string }) {
+function JsPrefabView({
+  name,
+  path,
+  keptAsJs,
+  onConvert,
+}: {
+  name: string;
+  path: string;
+  keptAsJs: boolean;
+  onConvert: () => void;
+}) {
   return (
     <div className="p-4 max-w-2xl mx-auto text-sm space-y-3">
       <h2 className="text-base font-semibold text-zinc-100">{name}</h2>
@@ -580,11 +650,25 @@ function JsPrefabView({ name, path }: { name: string; path: string }) {
       <div className="text-xs text-zinc-300 rounded border border-zinc-800 bg-zinc-950/50 p-3 leading-relaxed">
         This prefab is authored in JavaScript and edits live in the
         Scripts mode. The Entities tab only round-trips declarative
-        prefabs (those stored in <code>manifest.prefabs</code>). To
-        rewrite a JS prefab as declarative: copy the relevant
-        component data into a new declarative prefab here, then
-        delete the script registration. Both kinds coexist at
-        runtime — the later registration wins on name collision.
+        prefabs (those stored in <code>manifest.prefabs</code>). The
+        converter below can extract statically-resolvable
+        <code> world.add</code> calls into the declarative form and
+        route the residual logic into an <code>initScript</code>.
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={onConvert}
+          title="Run the JS→declarative converter against this prefab"
+        >
+          Convert to declarative
+        </Button>
+        {keptAsJs ? (
+          <span className="text-[11px] text-zinc-500">
+            You previously chose to keep this prefab as JS.
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -622,4 +706,365 @@ async function detectJsPrefabs(
 
 function cloneJson<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Phase #196 — JS→declarative converter UI
+ * ──────────────────────────────────────────────────────────────────── */
+
+/**
+ * Hidden asset slot that stores the "keep as JS" suppression list. Not
+ * part of the runtime manifest; lives under `__editor__/` so the pack-
+ * builder strips it out of the .apg.
+ */
+const KEEP_AS_JS_PATH = "__editor__/prefab-keep-as-js.json";
+
+async function loadKeepAsJs(projectId: string): Promise<Set<string>> {
+  const body = await EditorProjectStore.loadAsset(projectId, KEEP_AS_JS_PATH);
+  if (typeof body !== "string") return new Set();
+  try {
+    const arr = JSON.parse(body) as ReadonlyArray<string>;
+    return new Set(arr);
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveKeepAsJs(
+  projectId: string,
+  set: ReadonlySet<string>,
+): Promise<void> {
+  const arr = [...set].sort();
+  await EditorProjectStore.saveAsset(
+    projectId,
+    KEEP_AS_JS_PATH,
+    JSON.stringify(arr, null, 2),
+  );
+}
+
+/**
+ * Modal UI driving the converter. Side-by-side diff:
+ *
+ *   ┌───────────────────────────┬───────────────────────────┐
+ *   │ Original JS source        │ Declarative + init script │
+ *   │ scripts/prefabs/zombie.js │ manifest.prefabs.zombie:  │
+ *   │ <verbatim>                │ { components: { ... },    │
+ *   │                           │   initScript: "..." }     │
+ *   │                           │ scripts/prefabs/...-init  │
+ *   │                           │ <generated body>          │
+ *   └───────────────────────────┴───────────────────────────┘
+ *
+ * Checkboxes let the user un-extract a component (forcing it back into
+ * the residual). Apply writes the new manifest + new asset and removes
+ * the original script from `manifest.scripts[]`.
+ */
+function PrefabConverterModal({
+  projectId,
+  name,
+  scriptPath,
+  manifest,
+  onCancel,
+  onApplied,
+}: {
+  projectId: string;
+  name: string;
+  scriptPath: string;
+  manifest: PackManifest | null;
+  onCancel: () => void;
+  onApplied: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState<string>("");
+  const [result, setResult] = useState<PrefabConversionResult | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const body = await EditorProjectStore.loadAsset(projectId, scriptPath);
+        if (typeof body !== "string") {
+          setParseError(`Could not load ${scriptPath}.`);
+          return;
+        }
+        // Lazy-load the converter — keeps Babel out of the editor's
+        // main bundle. Same dynamic import the smoke test uses.
+        const mod = await import("../lib/prefabConverter");
+        if (cancelled) return;
+        setSource(body);
+        const file = await mod.parsePrefabFile(scriptPath, body);
+        if (file.parseError) {
+          setParseError(file.parseError);
+          return;
+        }
+        const match = file.prefabs.find((p) => p.name === name);
+        if (!match) {
+          setParseError(
+            `No registerPrefab("${name}", ...) call found in ${scriptPath}.`,
+          );
+          return;
+        }
+        setResult(match);
+        // Default to extracting every component the converter flagged
+        // as extractable.
+        const o: Record<string, boolean> = {};
+        for (const c of match.calls) {
+          if (c.extractable) o[c.componentName] = true;
+        }
+        setOverrides(o);
+      } catch (err) {
+        setParseError((err as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, name, scriptPath]);
+
+  // Derive the final declarative `components` map + the residual init
+  // script source from the live overrides. Re-run on toggle so the
+  // preview updates in real time.
+  const preview = useMemo(() => {
+    if (!result) return null;
+    const staticComponents: Record<string, unknown> = {};
+    const residualLines: string[] = [];
+    for (const c of result.calls) {
+      const extract = c.extractable && (overrides[c.componentName] ?? true);
+      if (extract && c.staticValue !== undefined) {
+        staticComponents[c.componentName] = c.staticValue;
+      } else if (c.extractable && c.staticValue !== undefined) {
+        // User explicitly opted out — emit an explicit world.add line
+        // into the residual so the runtime behaviour is preserved.
+        residualLines.push(
+          `  world.add(entity, C.${c.componentName}, ${JSON.stringify(c.staticValue)});`,
+        );
+      } else {
+        residualLines.push(c.residualSource);
+      }
+    }
+    const extracted = Object.keys(staticComponents).length;
+    const total = result.totalCalls;
+    return {
+      staticComponents,
+      residualLines: residualLines.join("\n"),
+      extracted,
+      total,
+    };
+  }, [result, overrides]);
+
+  const handleApply = async () => {
+    if (!result || !preview || !manifest) return;
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const mod = await import("../lib/prefabConverter");
+      const initBody = mod.serializeInitScript({
+        ...result,
+        staticComponents: preview.staticComponents,
+        residualBody: preview.residualLines,
+      });
+      const initPath = mod.prefabInitScriptPath(name);
+      const newPrefab: DeclarativePrefab = {
+        name,
+        components: preview.staticComponents,
+      };
+      if (preview.residualLines.trim().length > 0) {
+        newPrefab.initScript = initPath;
+        await EditorProjectStore.saveAsset(projectId, initPath, initBody);
+      }
+      const nextScripts = (manifest.scripts ?? []).filter(
+        (p) => p !== scriptPath,
+      );
+      const nextManifest: PackManifest = {
+        ...manifest,
+        prefabs: {
+          ...(manifest.prefabs ?? {}),
+          [name]: newPrefab,
+        },
+        ...(nextScripts.length > 0
+          ? { scripts: nextScripts }
+          : { scripts: undefined }),
+      };
+      await EditorProjectStore.saveManifest(projectId, nextManifest);
+      const keep = await loadKeepAsJs(projectId);
+      keep.delete(name);
+      await saveKeepAsJs(projectId, keep);
+      onApplied();
+    } catch (err) {
+      setApplyError((err as Error).message);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="bg-zinc-950 border border-zinc-800 rounded-lg w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+        <header className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">
+              Convert JS prefab → declarative
+            </h2>
+            <p className="text-[11px] text-zinc-500 font-mono">
+              {name} · {scriptPath}
+            </p>
+          </div>
+          <button
+            className="text-zinc-400 hover:text-zinc-100 text-lg leading-none px-2"
+            onClick={onCancel}
+            title="Cancel"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="flex-1 overflow-auto p-4 grid grid-cols-2 gap-4 min-h-0">
+          <section className="border border-zinc-800 rounded bg-zinc-950/40 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-400">
+              Original — {scriptPath}
+            </div>
+            <pre className="flex-1 overflow-auto p-3 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed">
+              {loading ? "Loading…" : source}
+            </pre>
+          </section>
+          <section className="border border-zinc-800 rounded bg-zinc-950/40 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-zinc-800 text-[11px] uppercase tracking-wide text-zinc-400 flex items-center justify-between">
+              <span>Converted</span>
+              {preview ? (
+                <span className="text-zinc-500">
+                  {preview.extracted} / {preview.total} extracted
+                </span>
+              ) : null}
+            </div>
+            <div className="flex-1 overflow-auto p-3 text-[11px] font-mono text-zinc-300 space-y-3">
+              {parseError ? (
+                <div className="text-red-300 bg-red-900/30 border border-red-700 rounded p-2 font-sans text-xs">
+                  Parse error: {parseError}
+                </div>
+              ) : null}
+              {result?.tooDynamic && preview?.extracted === 0 ? (
+                <div className="text-amber-200 bg-amber-900/30 border border-amber-700 rounded p-2 font-sans text-xs">
+                  0 of {result.totalCalls} components extractable — this
+                  prefab is too dynamic. Keep as JS, or rewrite some
+                  values as literals.
+                </div>
+              ) : null}
+              {result ? (
+                <>
+                  <div className="font-sans text-zinc-400 text-[11px]">
+                    Component overrides
+                  </div>
+                  <ul className="space-y-1 font-sans text-xs">
+                    {result.calls.map((c, i) => (
+                      <li
+                        key={`${c.componentName}-${i}`}
+                        className="flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={!c.extractable}
+                          checked={
+                            c.extractable
+                              ? (overrides[c.componentName] ?? true)
+                              : false
+                          }
+                          onChange={(e) =>
+                            setOverrides((prev) => ({
+                              ...prev,
+                              [c.componentName]: e.target.checked,
+                            }))
+                          }
+                          title={
+                            c.extractable
+                              ? "Toggle off to keep this in the init script"
+                              : (c.reason ?? "Not statically extractable")
+                          }
+                        />
+                        <code>{c.componentName}</code>
+                        {c.extractable ? (
+                          <span className="text-zinc-500 text-[10px]">
+                            extractable
+                          </span>
+                        ) : (
+                          <span className="text-amber-400 text-[10px]">
+                            dynamic — {c.reason}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="font-sans text-zinc-400 text-[11px] pt-2">
+                    manifest.prefabs.{name}
+                  </div>
+                  <pre className="bg-zinc-900/60 border border-zinc-800 rounded p-2 overflow-auto">
+                    {JSON.stringify(
+                      {
+                        name,
+                        components: preview?.staticComponents ?? {},
+                        ...(preview && preview.residualLines.trim().length > 0
+                          ? { initScript: `scripts/prefabs/${name}-init.js` }
+                          : {}),
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                  {preview && preview.residualLines.trim().length > 0 ? (
+                    <>
+                      <div className="font-sans text-zinc-400 text-[11px] pt-2">
+                        scripts/prefabs/{name}-init.js (NEW)
+                      </div>
+                      <pre className="bg-zinc-900/60 border border-zinc-800 rounded p-2 overflow-auto">
+                        {preview.residualLines}
+                      </pre>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          </section>
+        </div>
+        <footer className="px-4 py-3 border-t border-zinc-800 flex items-center justify-between gap-2">
+          {applyError ? (
+            <div className="text-xs text-red-300">{applyError}</div>
+          ) : (
+            <p className="text-[11px] text-zinc-500">
+              Apply rewrites the manifest, writes the init script asset
+              (if any residual), and removes the original JS from
+              <code> manifest.scripts</code>.
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={
+                applying ||
+                !result ||
+                !preview ||
+                preview.extracted === 0 ||
+                !!parseError
+              }
+              onClick={handleApply}
+            >
+              {applying ? "Applying…" : "Apply"}
+            </Button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
 }

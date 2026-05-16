@@ -27,6 +27,12 @@ in `docs/plans/*` per topic. Latest session-state snapshot lives at
 | `docs/plans/TILE_PRESETS.md` | Preset-driven tile authoring + tiny scene files. JSONC format with extends + defaults, per-scene idMap + compact grid, build-merge dedupe via content hashes, `PresetResolver`, default-pack migration. | T1 + T2 shipped (resolver + migration + build-merge); T3–T5 pending. |
 | `docs/plans/ENGINE_PACK_SHADERS.md` | R4: optional pack-shipped shaders with auto-injected uniforms. Three modes — role replacement, shader hooks (38), post-process passes — build-time validation + pack-chain conflict resolution. | S1–S3 shipped (role replacement + helper promotion + 38-hook system); S4 (post-passes), S5 (validation), S6 (chain) pending. |
 | `docs/plans/STORE.md` | Hosted store website + iframe game runner + per-pack PWA + embed-anywhere widget. Save data namespaced by pack-id. | Designed; phases ST1–ST5. Game-embed iframe live on docs landing as a proof-of-concept (https://codingbutter.github.io/cardboard/). |
+| `docs/plans/MATERIALS.md` | Per-entity shader attachment (three-tier cascade: pack → scene → material). `Shader` ECS component holding sprite/world/sky hook paths; engine assembles one program with per-pixel branching by variant id. | M1+M2+M3+M5 shipped (commit `bdab12a`), M4 pack-chain cascade shipped (commit `be31fea`). All five phases done. |
+| `docs/plans/ANIMATIONS.md` | Frame-based sprite animation + Doom-style multi-angle (1/2/4/5/8/16) view-dependent sprites. `Animation` component + `AnimationSystem` + `api.anim`. | A1 shipped (commit `ab9dbee`). A2 (mirror + crossfade + events), A3 (editor authoring), A4 (hierarchical) pending. |
+| `docs/plans/ANIMATION_EDITOR.md` | In-editor animation authoring. Path A (bring-your-own spritesheet / loose frames) + Path B (FBX auto-render via Three.js + FBXLoader) → canonical multi-angle sheet. | AE1 shipped (commit `52d8e27`). AE2 (FBX importer) in progress (agent #200). AE3 polish pending. |
+| `docs/plans/AUDIO.md` | Web Audio gain graph + `api.audio.{play,playLoop,playReplace,stop,stopAll}` + 5-group mixer + spatial audio. Sounds declared in `manifest.sounds`. | Au1 shipped (commit `52d8e27`); Au2 (spatial + music + ducking), Au3 (editor authoring), Au4 (reverb) pending. |
+| `docs/plans/EVENTS.md` | Synchronous pub/sub pack interop bus. `api.events.{on,once,off,emit}` + 25 canonical engine topics + auto-cleanup on pack reload. | Ev1 shipped (commit `52d8e27`). Ev2 (wildcards + manifest declarations), Ev3 (editor event log) pending. |
+| `docs/plans/EDITOR_IFRAME.md` | Editor runs the engine via iframe (`?source=editor`) instead of in-process. Same-origin IDB sharing + postMessage protocol for live invalidation. | I1 shipped (commit `ab9dbee`). I2 (player-state telemetry + edit-camera), I3 (script + manifest hot-reload) pending. |
 
 When the user names a phase ("R3", "Phase 4 lighting", "M1") look up
 the corresponding doc before acting. When they reference "the plan"
@@ -42,7 +48,7 @@ packages/default-pack   @two_5_d/default-pack — standard library content
 packages/shared         @two_5_d/shared — protocol/math types client+server agree on
 apps/game               the playable build — bootstraps engine + default-pack
 apps/pack-builder       build-time scripts (bake-lights, build-packs, .tsx pack-script bundling)
-apps/editor             in-browser level editor (React + Tailwind + shadcn — scaffold)
+apps/editor             in-browser level editor (React + Tailwind + shadcn — functional; iframe engine runner, Map/Entities/Animation modes, Project Settings modal)
 apps/docs               documentation site (Fumadocs + Next + MDX → GitHub Pages)
 apps/multiplayer-server (future) — WebSocket/WebRTC game server
 docs/                   all plans + session state
@@ -135,6 +141,32 @@ api.modals.anyOther(name): boolean
 api.ui.registerModal(name, Component, propsFn?): void
 api.ui.unregisterModal(name): void
 
+// Audio (Au1)
+api.audio.play(soundId, opts?): AudioHandle
+api.audio.playLoop(soundId, opts?): AudioHandle
+api.audio.playReplace(soundId, opts?): AudioHandle
+api.audio.stop(handle): void
+api.audio.stopAll(group?): void
+
+// Animation (A1)
+api.anim.play(entity, animName, opts?): void
+api.anim.pause(entity): void
+api.anim.resume(entity): void
+api.anim.stop(entity): void
+api.anim.onComplete(entity, fn): void
+
+// Events (Ev1) — 25 canonical engine topics + pack-defined
+api.events.on(name, fn): EventSubscription
+api.events.once(name, fn): EventSubscription
+api.events.off(name, fn): void
+api.events.emit(name, payload?): void
+
+// Entity lookup (R2)
+api.world.findByName(name): Entity | undefined
+
+// Declarative prefabs (commit d8fcbe7)
+api.registerDeclarativePrefab(name, decl): void   // static component list + optional initScript
+
 // Inventory + items
 api.inventory.{ BAG_SIZE, HOTBAR_SIZE, EQUIP_SLOTS, defaultStackMax,
                 emptyEquipment, seedInventory, addItem, removeItem,
@@ -152,8 +184,9 @@ api.raycast.castRayToWall(origin, dir): WallHit | null
 ```
 
 Pending (not yet implemented): `api.network` (multiplayer M1),
-`api.registerShader` (S4 post-passes — shader hooks already ship
-via manifest, not ModAPI).
+`api.console` (CONSOLE plan — not yet written; agent #199).
+`api.registerShader` lives in manifest (not ModAPI) — Mode 1 + Mode
+3 ship via `manifest.shaders.{role}Frag` and `.{role}Hooks`.
 
 ---
 
@@ -190,8 +223,10 @@ killer) to stop a stale dev server.
   AFTER `applyConfigOverride` so they see merged pack config. Don't
   switch to static imports there.
 - **The character/player_idle.fbx (24 MB)** in `default-pack/` is
-  unused content the user added. Inflates pack size but doesn't
-  affect runtime. Move out or `.gitignore` when ready.
+  the load-bearing acceptance fixture for ANIMATION_EDITOR AE2 —
+  the FBX importer re-bakes it and bytewise-compares the output
+  against a checked-in expected sheet. Keep it in the pack until
+  AE2 lands and the fixture moves to a test-only location.
 - **Tailwind `@theme`/`@tailwind` warnings on `bun build`** are
   cosmetic — `bun-plugin-tailwind` uses `onBeforeParse` which the
   `bun build` CLI doesn't support. Dev server (`bun --hot`)
@@ -227,12 +262,20 @@ killer) to stop a stale dev server.
 | Engine/pack split — R2: prefabs move to pack | ✅ Done — player prefab in `packages/default-pack/scripts/prefabs/` |
 | Engine/pack split — R3: game-specific systems move to pack | ✅ Done — all 11 systems (incl. modal screens via `api.ui`) in `packages/default-pack/scripts/systems/` |
 | Engine/pack split — R3 follow-up: `api.ui` + pack-script .tsx pipeline | ✅ Done — `Bun.build` compiles pack `.tsx`; Preact externalized via `installPreactRuntime` |
-| Engine/pack split — R4 (S1–S3): pack-shipped shaders w/ role replacement + 38 hooks | ✅ Done — see `docs/plans/ENGINE_PACK_SHADERS.md`; S4 (post-passes), S5 (validation), S6 (chain) pending |
-| Engine/pack split — R5: pack override semantics (default pack + URL override) | ⏳ |
+| Engine/pack split — R4 (S1–S4): pack-shipped shaders w/ role replacement + 38 hooks + post-process passes | ✅ Done — S1 (`0a7fe16`), S2+S3 (`c02d280`), S4 (`dd2063c`); see `docs/plans/ENGINE_PACK_SHADERS.md`. S5 (validation), S6 (chain) pending |
+| Engine/pack split — R5: pack override semantics | ✅ Subsumed by PACK_CHAIN — see `docs/plans/PACK_CHAIN.md` |
 | Tile presets — T1+T2: PresetResolver + JSONC + idMap scenes + build-merge dedupe | ✅ Done — default-pack migrated; legacy bare-int scenes still parse via shim |
 | Tile presets — T3+: validation, editor authoring, preset-library packs | ⏳ See `docs/plans/TILE_PRESETS.md` |
-| Multiplayer M1: net primitives (NetworkId, Replicate, api.network) | ⏳ See `docs/plans/MULTIPLAYER_PLAN.md` |
-| Editor app (apps/editor — React + Tailwind + shadcn) | ⏳ E1-E3 shipped; AE1 (animation editor) + Entities mode (declarative prefab authoring, EDITOR.md §6.3) shipped |
+| Materials M1+M2+M3+M5: per-entity Shader component + cell materials + scene overrides + build-time validation | ✅ Done (commit `bdab12a`) — see `docs/plans/MATERIALS.md` |
+| Materials M4: pack-chain shader cascade | ✅ Done (commit `be31fea`) |
+| Animations A1: `Animation` component + `AnimationSystem` + `api.anim` + multi-angle snap selection + canonical atlas | ✅ Done (commit `ab9dbee`) — see `docs/plans/ANIMATIONS.md`; A2 (mirror + crossfade + events), A3 (editor), A4 (hierarchical) pending |
+| Animation editor AE1: Path A (bring-your-own spritesheet / loose frames) | ✅ Done (commit `52d8e27`) — see `docs/plans/ANIMATION_EDITOR.md`; AE2 (FBX importer) staged (smoke-fbx-bake 90/90; lazy-loaded Three.js code-split + FbxImporter modal + planFbxBake/buildFbxSpriteState reuse AE1 compositor math), AE3 (polish) pending |
+| Audio Au1: Web Audio gain graph + `api.audio.*` + 5-group mixer + Settings sliders | ✅ Done (commit `52d8e27`) — see `docs/plans/AUDIO.md`; Au2 (spatial + music), Au3 (editor), Au4 (reverb) pending |
+| Events Ev1: synchronous pub/sub bus + canonical engine topics + pack-tagged auto-cleanup | ✅ Done (commit `52d8e27`) — see `docs/plans/EVENTS.md`; Ev2 (wildcards), Ev3 (editor event log) pending |
+| Editor iframe pivot I1: `?source=editor` iframe runner + IdbAssetPack engine-side + postMessage bridge | ✅ Done (commit `ab9dbee`) — see `docs/plans/EDITOR_IFRAME.md`; I2 (telemetry + edit-camera), I3 (script hot-reload) pending |
+| PACK_CHAIN P1: schema additions + ChainResolver + multi-pack `?pack=URL` chains + trust modal | ✅ Done (commit `2edb94a`) — see `docs/plans/PACK_CHAIN.md`; P2–P5 pending |
+| Multiplayer M1: net primitives (NetworkId, Replicate, api.network) | ⏳ Unblocked (R3 + Ev1 + Au1 + A1 all landed). See `docs/plans/MULTIPLAYER_PLAN.md` |
+| Editor app (apps/editor — React + Tailwind + shadcn) | ✅ E1–E4 + AE1 + Entities workflow tab + Project Settings modal + dependency manager shipped. See `docs/plans/EDITOR.md` + `docs/plans/EDITOR_IFRAME.md` |
 | Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
 
 ---

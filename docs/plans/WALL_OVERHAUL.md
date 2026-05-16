@@ -13,6 +13,11 @@ This is a multi-session refactor touching both renderers. Treat this
 document as the canonical brief — a fresh Claude session can start
 from here.
 
+**Status (2026-05-16):** Phase 1 (variable wall heights + caps +
+multi-slab + per-cell-corner LOS) shipped. Phase 2 (per-cell floor
++ ceiling heights) and Phase 3 (partial-width walls + true DDA)
+pending.
+
 ---
 
 ## 1. Existing architecture (what to evolve away from)
@@ -20,7 +25,7 @@ from here.
 The map is a 2D grid. Each cell:
 
 ```ts
-// src/Scene.ts
+// packages/engine/src/Scene.ts
 interface Cell {
   wall: number;           // 0 = open, > 0 = solid wall (tile id)
   floor: { tile, reflectiveness, transition };
@@ -33,11 +38,11 @@ floor is implicitly at `z=0`, the ceiling at `z=1`. The camera sits
 between them (default `cameraZ = 0.5`; jump/crouch already shipped).
 
 Rendering:
-- **CPU backend** `src/Renderers/TwoDRenderer.ts` — DDA in
+- **CPU backend** `packages/engine/src/Renderers/TwoDRenderer.ts` — DDA in
   `drawWorld`, one wall hit per ray, wall column + floor/ceiling
   column written together. Per-column wall distance is captured in
   `columnDepth` for the sprite pass to z-clip against.
-- **GPU backend** `src/Renderers/WebGLRenderer.ts` — same DDA on CPU
+- **GPU backend** `packages/engine/src/Renderers/WebGLRenderer.ts` — same DDA on CPU
   produces `u_columns` (1×W RGBA32F: perpDist, wallU, sideMul,
   wallTile). The fragment shader does the per-pixel work.
 
@@ -113,7 +118,7 @@ must still parse for backward compatibility with `scene1.json`.
 
 ### 2.2 Scene JSON
 
-Augment the existing `SceneJSON` (see `src/Scene.ts`) with an
+Augment the existing `SceneJSON` (see `packages/engine/src/Scene.ts`) with an
 optional `cells` array. Old `walls` / `floors` / `ceilings` arrays
 keep working as a shorthand for "full walls + flat floor at z=0 +
 flat ceiling at z=1." Parser code lives in `Scene.fromJSON`.
@@ -145,7 +150,7 @@ flat ceiling at z=1." Parser code lives in `Scene.fromJSON`.
 
 ## 3. DDA traversal
 
-Current DDA in `src/Libs/Raycast.ts` (`castRayToWall`):
+Current DDA in `packages/engine/src/Libs/Raycast.ts` (`castRayToWall`):
 - Steps cell-by-cell along the ray.
 - Stops at the first cell where `scene.isWall(x, y)`.
 
@@ -423,7 +428,7 @@ Out of scope for v1. Stick with CPU-driven DDA.
 
 ## 8. Migration of `scene1.json`
 
-The current scene1 (`resources/packs/default/scenes/scene1.json`)
+The current scene1 (`packages/default-pack/scenes/scene1.json`)
 uses the legacy `walls`/`floors`/`ceilings` shorthand. Two paths:
 
 ### 8.1 Compatibility (recommended)
@@ -438,7 +443,7 @@ Author a new `scene_demo.json` that uses the full new format —
 variable-height rooms, partial walls, raised platforms. Use it as
 the visual regression test for the overhaul.
 
-`scripts/generate-scene.ts` should also be updated to emit the new
+`apps/pack-builder/src/generate-scene.ts` should also be updated to emit the new
 format (still legacy-compatible) and add an opt-in flag for
 height variation.
 
@@ -491,23 +496,23 @@ design; Phase 3 unblocks complex interior geometry.
 
 ## 10. Files to touch (likely)
 
-- `src/Scene.ts` — schema, `fromJSON` parser, legacy-shorthand
+- `packages/engine/src/Scene.ts` — schema, `fromJSON` parser, legacy-shorthand
   converter, `Cell` type, new `WallSegment`.
-- `src/Libs/Raycast.ts` — new `castRayThroughWalls` returning sorted
+- `packages/engine/src/Libs/Raycast.ts` — new `castRayThroughWalls` returning sorted
   hits; keep `castRayToWall` as a back-compat wrapper.
-- `src/Renderers/TwoDRenderer.ts` — wall pass, floor pass, ceiling
+- `packages/engine/src/Renderers/TwoDRenderer.ts` — wall pass, floor pass, ceiling
   pass, per-pixel depth buffer, sprite z-clip via depth.
-- `src/Renderers/WebGLRenderer.ts` — analogous changes, fragment
+- `packages/engine/src/Renderers/WebGLRenderer.ts` — analogous changes, fragment
   shader rewrite, new scene-heights texture, slab list in
   `u_columns`.
-- `src/Renderers/SceneRenderer.ts` — interface unchanged externally
+- `packages/engine/src/Renderers/SceneRenderer.ts` — interface unchanged externally
   (drawWorld / drawSprites signatures stay), internal contracts
   shift.
-- `resources/packs/default/scenes/scene1.json` — keep legacy or add
+- `packages/default-pack/scenes/scene1.json` — keep legacy or add
   alongside.
-- `scripts/generate-scene.ts` — emit new format with optional
+- `apps/pack-builder/src/generate-scene.ts` — emit new format with optional
   height variation.
-- New: `resources/packs/default/scenes/scene_demo.json` — showcase
+- New: `packages/default-pack/scenes/scene_demo.json` — showcase
   the new geometry.
 
 Touchpoints in jump/crouch (already done) are good news — the
@@ -561,17 +566,17 @@ Get answers before Phase 1 starts — they shape the schema.
 
 ```sh
 # Catch up on shipped work
-cat PLAN.md
+cat docs/PLAN.md
 # Read the existing renderer (the meat of the change)
-sed -n '160,400p' src/Renderers/TwoDRenderer.ts
-sed -n '264,360p' src/Renderers/WebGLRenderer.ts
+sed -n '160,400p' packages/engine/src/Renderers/TwoDRenderer.ts
+sed -n '264,360p' packages/engine/src/Renderers/WebGLRenderer.ts
 # Existing DDA + Scene
-cat src/Libs/Raycast.ts
-cat src/Scene.ts
+cat packages/engine/src/Libs/Raycast.ts
+cat packages/engine/src/Scene.ts
 # Look at how jump/crouch already plumbed cameraZ
-grep -n "cameraZ" src -r
+grep -rn "cameraZ" packages/engine/src
 # Smoke test
-bun run build-packs && bunx tsc --noEmit && bun build ./index.html --outdir /tmp/x
+bunx tsc -b && bun run build-packs && bun run build
 ```
 
 Then start on **Phase 1**: extend `Cell` schema, add the

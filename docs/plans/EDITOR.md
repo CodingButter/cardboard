@@ -91,19 +91,18 @@ primitives the editor has to expose.
 +-----------------------------------------------------+
 ```
 
-**Engine embed: in-process, not iframe.** Recommend running the
-engine in the same React app, not inside an iframe.
+**Engine embed: iframe runner.** The editor embeds the game runner
+via an iframe (`?source=editor`) — see
+[EDITOR_IFRAME.md](./EDITOR_IFRAME.md) for the runtime architecture,
+message protocol, and shared-IDB pack contract. This doc stays the
+source of truth for editor-shell scope, IDB project model, and phase
+plans; EDITOR_IFRAME.md owns the engine-embed details.
 
-- Rationale: edits propagate through ordinary function calls. The
-  editor calls `engine.swapScene(newSceneJSON)` directly; no
-  `postMessage` shim, no serialization boundary.
-- The engine already exposes a `Game` class that accepts a canvas;
-  we mount it into a `<canvas>` ref inside the viewport pane.
-- Service-worker scope and CSS don't conflict because both use
-  Tailwind v4 with the same class strategy.
-
-Iframe-isolated alternative: deferred. Revisit only if pack scripts
-prove too destabilizing to the editor shell when they crash.
+Pivot history: the in-process embed approach in earlier revisions
+was superseded in commit `ab9dbee` (I1). The iframe boundary
+eliminated whole bug classes — HUD overlay leak / modal positioning /
+Tailwind isolation / ResizeObserver plumbing — at the cost of a
+postMessage shim. See EDITOR_IFRAME.md §2 for the bug-class list.
 
 ---
 
@@ -417,8 +416,13 @@ identical anonymous breaks across the map.
 
 ### 6.3 Prefab placement (entities)
 
-Once [ENGINE_PACK_SPLIT R1](./ENGINE_PACK_SPLIT.md) lands, scenes
-hold an `entities[]` array. The editor:
+ENGINE_PACK_SPLIT R1 has shipped — scenes hold an `entities[]`
+array. The editor extends this with a dedicated **Entities workflow
+tab** (commit `d8fcbe7`) supporting both raw prefab placement and
+**declarative prefabs**: static component lists plus an optional
+`initScript` that runs after attachment with `(entity, opts, api)`.
+See [IDEAS.md 2026-05-16](../IDEAS.md) — "Hybrid prefabs:
+declarative + initScript" — for the full design.
 
 - Lists every registered prefab name (read from the active pack's
   manifest + scripts at load time).
@@ -428,6 +432,10 @@ hold an `entities[]` array. The editor:
 - Selected entities show their components in the Inspector. Each
   component is a sub-form generated from the component's schema
   (when present) or a generic JSON editor as fallback.
+- The Entities tab also exposes a JS-prefab-to-declarative converter
+  (agent #196 in flight) — `@babel/parser` AST walk extracts static
+  `world.add` calls to declarative entries, leaving dynamic logic in
+  the init script. Side-by-side diff before commit.
 
 ### 6.4 Light placement
 
@@ -445,17 +453,31 @@ they are also-accepted as `scene.lights[]`.
 
 ### 6.5 Manifest editing
 
-A dedicated form for the active project's `manifest.json`. Fields:
-`name`, `version`, `engine`, `startScene` (dropdown of project's
-scenes), `tilePresets` (table of preset library files; see
-[TILE_PRESETS.md](./TILE_PRESETS.md) — individual preset editing
-happens in Map mode, not here), `items`, `sprites`, `lighting`
-bake tuning, [PACK_CHAIN.md § 2](./PACK_CHAIN.md) `id`,
-`description`, `author`, `homepage`, `requires`.
+Manifest editing lives in a dedicated **Project Settings modal**
+(commit `1961fd3` — see [IDEAS.md 2026-05-16](../IDEAS.md) "Project
+Settings modal reorg") opened from the editor shell, not as a tab in
+Map mode. The modal has tabs: **Manifest** / **Dependencies** /
+**Export** / **Advanced**.
 
-The `requires[]` editor surfaces the trust modal flow — adding a
-URL-pinned dep prompts for the integrity hash (with a "compute from
-URL" button that fetches and hashes the bytes).
+- **Manifest tab.** Form for `name`, `version`, `engine`,
+  `startScene` (dropdown of project's scenes), `tilePresets` (table
+  of preset library files; see
+  [TILE_PRESETS.md](./TILE_PRESETS.md) — individual preset editing
+  happens in Map mode), `items`, `sprites`, `lighting` bake tuning,
+  [PACK_CHAIN.md § 2](./PACK_CHAIN.md) `id`, `description`,
+  `author`, `homepage`.
+- **Dependencies tab.** `requires[]` editor with auto-integrity-hash
+  flow (commit `1961fd3` — see IDEAS.md "Dependency manager with
+  auto-integrity-hash"): fetch URL → compute SHA-256 → parse parent
+  manifest → auto-populate integrity, version (^parent), id.
+  Per-dep enable toggle and drag-to-reorder for priority
+  (bottom = highest precedence per last-wins).
+- **Export tab.** Placeholder for pack-export modes (BUILD FULL vs
+  EXTEND — IDEAS.md 2026-05-16 "Pack export modes"), gated on E5.
+- **Advanced tab.** Project-level overrides + reset.
+
+Splitting manifest editing out of Map mode keeps the Map tab focused
+on the grid editor + scene list.
 
 ### 6.6 Entity spawners (pack content)
 
@@ -749,14 +771,14 @@ on top of the URL substrate, not a wall around it.
 
 Each phase ships independently with a runnable result.
 
-### E1 — Project shell + home screen
+### E1 — Project shell + home screen — ✅ Shipped (commit `bdab12a`)
 - Home: list / create / rename / delete projects (IDB-backed).
 - Empty project → manifest editor + scene list (no engine yet).
 - IDB schema + `EditorProjectStore`.
 - "Import .apg" works (unzips into a new project).
 - Acceptance: import default-pack `.apg`, open, see manifest + scene list.
 
-### E2 — EditorAssetPack + live engine in viewport
+### E2 — EditorAssetPack + live engine in viewport — ✅ Shipped (commit `dd2063c`)
 - `EditorAssetPack` extends `AssetPack`, backed by IDB reads.
 - Viewport pane mounts the engine via `Game` against the active
   scene + EditorAssetPack.
@@ -764,8 +786,11 @@ Each phase ships independently with a runnable result.
   but Edit mode still shows live engine (no edit overlay yet).
 - Acceptance: open an imported default-pack project and walk
   around scene1 inside the editor.
+- Note: superseded by I1 iframe pivot (commit `ab9dbee`) — the
+  engine now boots inside an iframe rather than mounting in-process.
+  See [EDITOR_IFRAME.md](./EDITOR_IFRAME.md).
 
-### E3 — Edit mode + tile painting + manifest CRUD
+### E3 — Edit mode + tile painting + manifest CRUD — ✅ Shipped (commit `2edb94a`)
 - Edit mode renders the 2D grid. Tile painting works on `walls`.
   Floor + ceiling layers selectable.
 - Inspector for cell selection: tile id, partial-wall struct.
@@ -774,16 +799,21 @@ Each phase ships independently with a runnable result.
   engine on the edited scene.
 - Acceptance: paint a new room, switch to Play, walk into it.
 
-### E4 — Entities, lights, bake button
+### E4 — Entities, lights, bake button — ✅ Shipped (commit `be31fea`)
 - Entity placement (prefab picker, position cell-snap).
 - Light placement (baked + dynamic, color / intensity / radius).
 - Inspector forms for components on selected entities.
-- `⚡ Bake` button spawns Web Worker, writes baked lightmap to IDB.
-- Acceptance: place a baked light, bake, see it illuminate
-  surfaces in Play mode. Place a dynamic light, see it move /
-  pulse without rebake.
+- `⚡ Bake` button — bake migrated engine-side
+  (`packages/engine/src/Lighting/Bake.ts`); editor invokes the
+  same code path the build does.
+- Declarative-prefab Entities workflow tab (commit `d8fcbe7`,
+  see §6.3 + [IDEAS.md 2026-05-16](../IDEAS.md)) extends E4 with
+  hybrid prefab authoring.
+- Project Settings modal + dependency manager (commit `1961fd3`,
+  see §6.5) — manifest editing moved out of Map tab into a dedicated
+  modal with Manifest / Dependencies / Export / Advanced tabs.
 
-### E5 — Export + local-serve + script editor
+### E5 — Export + local-serve + script editor — ⏳ Pending
 - `📦 Export .apg` button assembles zip, downloads, surfaces SHA-256.
 - Local HTTP route at `/api/editor-pack/:projectId.apg` serves
   the live project as a pack (so `apps/game` can `?pack=...` it).
@@ -809,11 +839,11 @@ E6+ (deferred):
 
 ## 11. Open questions
 
-1. **Engine embed boundary.** In-process (recommended) vs iframe.
-   In-process keeps edits cheap but a crashing pack script could
-   take down the editor shell. Mitigation: wrap pack-script
-   execution in a try/catch barrier and surface errors in a UI
-   strip. Confirm acceptable.
+1. **Engine embed boundary.** ✅ Resolved — iframe pivot landed in
+   commit `ab9dbee` (I1). See
+   [EDITOR_IFRAME.md](./EDITOR_IFRAME.md) for the runtime
+   architecture, postMessage protocol, and the bug classes the
+   iframe eliminated.
 2. **Web Worker for bake — module strategy.** The bake function
    currently lives in `apps/pack-builder`, not `packages/engine`.
    Two options:

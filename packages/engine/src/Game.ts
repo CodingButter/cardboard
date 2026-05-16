@@ -22,7 +22,10 @@ import { Aim, Camera, Facing, Movement, PlayerInput, Position } from "Components
 import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
-import { registerDeclarativePrefabs } from "AssetPack/registerDeclarativePrefabs";
+import {
+  registerDeclarativePrefabs,
+  registerDeclarativePrefabsAsync,
+} from "AssetPack/registerDeclarativePrefabs";
 import { ModAPIImpl, PLAYER_MOVED_FRAME_THROTTLE } from "ModAPI";
 import ItemImages from "ItemImages";
 import { installPreactRuntime } from "PreactRuntime";
@@ -316,7 +319,13 @@ export class Game {
     // had their crack at the ModAPI — that way prefabs can reference
     // components defined by `api.defineComponent(...)` in scripts.
     // EDITOR.md §6.3 + `registerDeclarativePrefabs.ts`.
-    this.registerDeclarativePrefabsFromManifest();
+    //
+    // Phase #196: we use the async variant during boot so any
+    // `prefab.initScript` referenced by a declarative prefab is
+    // pre-warmed (fetched + module-loaded) before the first spawn.
+    // That keeps the contract — spawn → entity carries init-attached
+    // components synchronously — even for the first spawn of a session.
+    await this.registerDeclarativePrefabsFromManifestAsync();
   }
 
   /**
@@ -329,10 +338,25 @@ export class Game {
    * when the user "Save & Test"s a manifest with new prefabs without a
    * full engine reload. Idempotent — re-registering with the same name
    * just replaces the factory.
+   *
+   * The synchronous form here keeps backwards-compat with the editor's
+   * existing call site. The async sibling below pre-warms `initScript`
+   * modules so the first spawn doesn't pay a cold-start cost; the boot
+   * path uses that variant.
    */
   registerDeclarativePrefabsFromManifest(): void {
     if (!this.pack.manifest.prefabs) return;
-    registerDeclarativePrefabs(this.api, this.pack.manifest);
+    registerDeclarativePrefabs(this.api, this.pack.manifest, this.pack);
+  }
+
+  /** Phase #196 — async variant; pre-loads any referenced initScripts. */
+  async registerDeclarativePrefabsFromManifestAsync(): Promise<void> {
+    if (!this.pack.manifest.prefabs) return;
+    await registerDeclarativePrefabsAsync(
+      this.api,
+      this.pack.manifest,
+      this.pack,
+    );
   }
 
   /**

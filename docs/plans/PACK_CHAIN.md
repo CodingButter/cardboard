@@ -486,12 +486,21 @@ Decisions can be deferred until R5 implementation lands.
 
 ## 14. Phases
 
-- **P1**: schema additions + resolver + multi-pack load runtime.
-  No store. Two-pack chain via `?pack=A&pack=B` works. Trust modal
-  warns + persists per-URL trust. (1-2 sessions)
-- **P2**: settings UI Packs panel. Conflict report rendering.
-  Enable/disable toggles. (1 session)
-- **P3**: SRI hashing tool + verification. (½ session)
+- **P1** — ✅ Shipped (commit `2edb94a`): schema additions +
+  resolver + multi-pack load runtime. Two-pack chain via
+  `?pack=A&pack=B` works. Trust modal warns + persists per-URL trust.
+  See `packages/engine/src/AssetPack/ChainResolver.ts`,
+  `packages/engine/src/AssetPack/semver.ts`,
+  `packages/engine/src/AssetPack/loadAssetPack.ts`,
+  `packages/engine/src/AssetPack/IdbAssetPack.ts`.
+- **P2** — Partial: editor-side dependency manager + project
+  settings UI shipped (commit `1961fd3`,
+  see [EDITOR.md §6.5](./EDITOR.md)). Game-side Settings Packs
+  panel + conflict report rendering + enable/disable toggles still
+  pending. (1 session)
+- **P3**: SRI hashing tool + verification. Editor side has
+  auto-integrity-hash flow (commit `1961fd3`). CLI-side hash tool
+  + load-time verification still pending. (½ session)
 - **P4**: Community store API (Supabase + REST endpoints). Loader
   resolves `community:` scheme. (2-3 sessions, partly out-of-repo
   on the Supabase side)

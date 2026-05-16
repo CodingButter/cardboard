@@ -6,6 +6,10 @@ different fragment-shader behaviour for *that* entity, while every
 un-overridden hook inherits from the scene-level → pack-level →
 engine-default cascade.
 
+**Status: All phases shipped.** M1+M2+M3+M5 in commit `bdab12a`; M4
+(pack-chain cascade) in commit `be31fea`. This doc is now the
+historical record + reference for the shipped surface.
+
 Source-of-truth for implementation. Phases M1–M5 below. Cross-refs:
 [ENGINE_PACK_SHADERS.md](./ENGINE_PACK_SHADERS.md) (R4 pack-level
 shaders — the substrate this builds on),
@@ -702,11 +706,11 @@ ghost zombie *underwater* gets green-blue tinting + alpha pulse.
 
 | Phase | Scope | Where it lives | State |
 |---|---|---|---|
-| **M1** | **Sprite-only per-entity hooks.** New `Shader` component, variant collection at scene-load, dispatcher in sprite-frag, per-vertex variant id. Default-pack ghost-sprite smoke test (disabled by default). | engine/src/Components/Shader.ts, engine/src/Renderers/ShaderVariants.ts, default-pack/shaders/ghost-sprite.glsl | **In progress (this PR).** |
-| **M2** | **Cell materials.** Tile presets gain a `shader` field. `u_sceneShaderVariants` texture. World-frag dispatcher across 27 hooks. | TILE_PRESETS interaction, WebGLRenderer scene textures, HookPrelude/ShaderInjection extension | Designed. Not started. |
-| **M3** | **Scene-level overrides.** `scene.shaders` field merged into variant 0 hooks. | Scene loader, ShaderVariants merge order | Designed. Not started. |
-| **M4** | **Pack-chain cascade.** Multi-pack hook layering. Depends on PACK_CHAIN. | ShaderVariants chain walk | Designed. Awaits PACK_CHAIN. |
-| **M5** | **Build-time validation.** Pack-builder verifies every `Shader.spriteHooks` reference. | apps/pack-builder/build-packs.ts | Designed. |
+| **M1** | **Sprite-only per-entity hooks.** New `Shader` component, variant collection at scene-load, dispatcher in sprite-frag, per-vertex variant id. Default-pack ghost-sprite smoke test (disabled by default). | engine/src/Components/Shader.ts, engine/src/Renderers/ShaderVariants.ts, default-pack/shaders/ghost-sprite.glsl | ✅ Shipped (commit `bdab12a`). |
+| **M2** | **Cell materials.** Tile presets gain a `shader` field. `u_sceneShaderVariants` texture. World-frag dispatcher across 27 hooks. | TILE_PRESETS interaction, WebGLRenderer scene textures, HookPrelude/ShaderInjection extension | ✅ Shipped (commit `bdab12a`). |
+| **M3** | **Scene-level overrides.** `scene.shaders` field merged into variant 0 hooks. | Scene loader, ShaderVariants merge order | ✅ Shipped (commit `bdab12a`). |
+| **M4** | **Pack-chain cascade.** Multi-pack hook layering. Depends on PACK_CHAIN. | ShaderVariants chain walk | ✅ Shipped (commit `be31fea`). Uses `packages/engine/src/Renderers/ShaderChainCascade.ts`. |
+| **M5** | **Build-time validation.** Pack-builder verifies every `Shader.spriteHooks` reference. | apps/pack-builder/build-packs.ts | ✅ Shipped (commit `bdab12a`). |
 
 ---
 

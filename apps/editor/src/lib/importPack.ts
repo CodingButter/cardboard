@@ -166,9 +166,14 @@ export async function importPackFromUrl(
   url: string,
   opts: UrlImportOpts = {},
 ): Promise<ImportResult> {
+  // Transparently rewrite CORS-hostile URLs (github.com/.../blob|raw/...
+  // → raw.githubusercontent.com/...) before fetching. The user's
+  // original URL is preserved in error messages + provenance below.
+  const { rewriteCorsHostileUrl } = await import("@two_5_d/engine");
+  const fetchUrl = rewriteCorsHostileUrl(url);
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetch(fetchUrl);
   } catch (err) {
     throw new Error(
       `Failed to fetch pack — ${(err as Error).message}. ` +

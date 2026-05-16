@@ -54,6 +54,7 @@ export {
   DEFAULT_EDITOR_DB_VERSION,
   resolveChain,
   clearChainCache,
+  satisfies,
   rewriteCorsHostileUrl,
   AssetPack,
   type Preset,
@@ -77,7 +78,12 @@ export type {
   SoundGroup,
   DeclarativePrefab,
 } from "./AssetPack";
-export { registerDeclarativePrefabs } from "./AssetPack";
+export {
+  registerDeclarativePrefabs,
+  registerDeclarativePrefabsAsync,
+  _resetInitScriptCache,
+} from "./AssetPack";
+export type { PrefabInitScript } from "./AssetPack";
 
 // Inventory types — pack-side modal UIs (InventoryScreen) need
 // `InventoryShape` so they can type the inventory component they

@@ -89,7 +89,33 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   const [sceneDirty, setSceneDirty] = useState(false);
   const [sceneSaving, setSceneSaving] = useState(false);
   const [sceneSavedAt, setSceneSavedAt] = useState<number | null>(null);
-  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("map");
+  // Workflow mode is persisted per-project in localStorage so refreshing
+  // the page lands you back on the tab you were just on. Different
+  // projects can remember different last-active modes independently.
+  const workflowModeKey = `cardboard_editor_workflow_mode_${projectId}`;
+  const [workflowMode, setWorkflowModeState] = useState<WorkflowMode>(() => {
+    try {
+      const saved = localStorage.getItem(workflowModeKey);
+      if (saved === "map" || saved === "entities" || saved === "scripts" ||
+          saved === "assets" || saved === "animation") {
+        return saved;
+      }
+    } catch {
+      // localStorage may throw in private-browsing / sandboxed contexts.
+    }
+    return "map";
+  });
+  const setWorkflowMode = useCallback(
+    (next: WorkflowMode) => {
+      setWorkflowModeState(next);
+      try {
+        localStorage.setItem(workflowModeKey, next);
+      } catch {
+        // ignore — UX still works, just doesn't persist this session
+      }
+    },
+    [workflowModeKey],
+  );
 
   // Project Settings modal.
   const [settingsOpen, setSettingsOpen] = useState(false);

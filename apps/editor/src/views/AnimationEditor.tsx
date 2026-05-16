@@ -1,4 +1,6 @@
 import React, {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -29,8 +31,20 @@ import {
   type AnimationEditorState,
   type ValidationIssue,
 } from "../lib/animationBaker";
+import type { FbxBakeConfig } from "../lib/fbxBaker";
 import { Button, Input, Label, Modal } from "../components/ui";
 import { cn } from "../lib/cn";
+
+/**
+ * Lazy-loaded FBX importer. AE2's headline feature dynamic-imports
+ * Three.js (~600 KB) only when the user clicks "From FBX (Path B)" in
+ * the "+ New sprite" submenu. Users who only ever touch Path A
+ * (hand-painted spritesheets) never download Three.js. Under Bun's
+ * bundler with `--splitting`, this becomes its own chunk.
+ */
+const FbxImporter = lazy(() =>
+  import("./FbxImporter").then((m) => ({ default: m.FbxImporter })),
+);
 
 /**
  * AE1 of `docs/plans/ANIMATION_EDITOR.md` — bring-your-own
@@ -119,6 +133,20 @@ export function AnimationEditor({
   const [importIdDraft, setImportIdDraft] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
 
+  /**
+   * "+ New sprite" submenu selector. AE2 adds Path B (FBX); the
+   * default is still null (closed) — the Path A modal opens when the
+   * user clicks "From spritesheet" or the dedicated FbxImporter takes
+   * over when they pick "From FBX".
+   */
+  const [newSpriteMenuOpen, setNewSpriteMenuOpen] = useState(false);
+  /** When non-null, the FbxImporter is mounted (lazy-loads Three.js). */
+  const [fbxImporterState, setFbxImporterState] = useState<{
+    blob?: Blob;
+    config?: FbxBakeConfig;
+    spriteId?: string;
+  } | null>(null);
+
   // Preview pane interaction state.
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -201,6 +229,43 @@ export function AnimationEditor({
         projectId,
         spriteId,
       );
+      // ── AE2: route FBX-sourced sprites to the FBX importer ──
+      // Per ANIMATION_EDITOR.md §7.4, opening an existing FBX sprite
+      // restores its config from the spriteSources row and lets the
+      // user adjust + re-bake. The dedicated FbxImporter view handles
+      // the re-edit flow end-to-end.
+      if (source && source.kind === "fbx" && source.fbx) {
+        const fbxBlob = await EditorProjectStore.loadAsset(
+          projectId,
+          source.sourcePath,
+        );
+        if (!(fbxBlob instanceof Blob)) {
+          setSaveError(
+            `Source FBX missing for "${spriteId}" (${source.sourcePath}). ` +
+              `Re-upload via "+ New sprite" → "From FBX".`,
+          );
+          return;
+        }
+        // Reconstruct the bake config from the persisted meta. Clip
+        // durations are loaded by the importer when it re-parses the
+        // FBX — we pass an empty map; the importer fills it in.
+        const { restoreFbxBakeConfig } = await import("../lib/fbxBaker");
+        const config = restoreFbxBakeConfig(
+          spriteId,
+          source.fbx,
+          source.animationsMeta,
+          source.animationOrder ?? Object.keys(source.animationsMeta),
+          source.angles,
+          {},
+        );
+        setFbxImporterState({
+          blob: fbxBlob,
+          config,
+          spriteId,
+        });
+        setActiveId(spriteId);
+        return;
+      }
       if (source) {
         const blob = await EditorProjectStore.loadAsset(
           projectId,
@@ -648,15 +713,43 @@ export function AnimationEditor({
     <div className="flex h-full min-h-[640px]">
       {/* Left rail: sprite list. */}
       <aside className="w-60 border-r border-zinc-800 bg-zinc-950/40 flex flex-col">
-        <div className="px-4 py-3 border-b border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800 relative">
           <Button
             variant="primary"
             size="sm"
             className="w-full"
-            onClick={() => setImportOpen(true)}
+            onClick={() => setNewSpriteMenuOpen((p) => !p)}
           >
             + New sprite
           </Button>
+          {newSpriteMenuOpen ? (
+            <div className="absolute left-4 right-4 mt-1 z-10 rounded border border-zinc-700 bg-zinc-900 shadow-lg overflow-hidden">
+              <button
+                onClick={() => {
+                  setNewSpriteMenuOpen(false);
+                  setImportOpen(true);
+                }}
+                className="block w-full text-left px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800"
+              >
+                <div className="font-medium">From spritesheet</div>
+                <div className="text-zinc-500 text-[11px]">
+                  Path A · hand-painted PNG
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setNewSpriteMenuOpen(false);
+                  setFbxImporterState({});
+                }}
+                className="block w-full text-left px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 border-t border-zinc-800"
+              >
+                <div className="font-medium">From FBX (3D model)</div>
+                <div className="text-zinc-500 text-[11px]">
+                  Path B · auto-render multi-angle
+                </div>
+              </button>
+            </div>
+          ) : null}
         </div>
         <ul className="flex-1 overflow-auto divide-y divide-zinc-800">
           {sheetSpriteIds.length === 0 ? (
@@ -1267,6 +1360,41 @@ export function AnimationEditor({
           ) : null}
         </div>
       </Modal>
+
+      {/* AE2 — Path B FBX importer. Lazy-loaded so users who never
+          touch FBX never pay the Three.js bundle cost. Mounted at the
+          AnimationEditor root so it overlays the whole mode area. */}
+      {fbxImporterState ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 text-zinc-200">
+              <div className="bg-zinc-900 border border-zinc-700 rounded p-6">
+                Loading three.js (~600 KB)…
+              </div>
+            </div>
+          }
+        >
+          <FbxImporter
+            projectId={projectId}
+            initialBlob={fbxImporterState.blob}
+            initialConfig={fbxImporterState.config}
+            initialSpriteId={fbxImporterState.spriteId}
+            onCancel={() => setFbxImporterState(null)}
+            onBaked={(id) => {
+              // Bake complete — close the importer, refresh the sprite
+              // list, and select the newly-baked sprite. We deliberately
+              // don't `openSprite(id)` here because that would re-open
+              // the FBX importer for round-trip (FBX-kind sprites
+              // always route there). The user can click the sprite in
+              // the rail explicitly to re-edit.
+              setFbxImporterState(null);
+              setActiveId(id);
+              refresh();
+              onManifestChanged?.();
+            }}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

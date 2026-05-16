@@ -503,7 +503,7 @@ painful.
 
 ## 12. Phases
 
-### I1 — this slice
+### I1 — ✅ Shipped (commit `ab9dbee`)
 
 - Plan doc lands.
 - `IdbAssetPack` lives in engine; exported from barrel.
@@ -583,7 +583,7 @@ painful.
 
 ---
 
-## 14. Acceptance criteria — I1
+## 14. Acceptance criteria — I1 (✅ met in commit `ab9dbee`)
 
 - `bun run typecheck` passes workspace-wide.
 - `cd apps/editor && bun run typecheck` passes.

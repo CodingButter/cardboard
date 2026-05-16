@@ -7,147 +7,174 @@ under `docs/plans/`.
 If you're a fresh session: read `docs/PLAN.md` first, then this
 doc, then the specific phase doc for whatever you're working on.
 
-Date of last update: **2026-05-15**.
+Date of last update: **2026-05-16**.
 
 ---
 
-## 1. What just shipped (this session window)
+## 1. What just shipped (since 2026-05-15)
 
-### R3 — engine/pack split, game systems moved to pack
-All 9 game-specific systems migrated from `packages/engine/src/Systems/`
-to `packages/default-pack/scripts/systems/`:
+Twelve commits since the previous session-state snapshot, in date
+order:
 
-- `gun-render.js`
-- `inventory-bar-render.js`
-- `minimap-render.js`
-- `pickup.js`
-- `player-input.js`
-- `reticle-render.js`
-- `stats-render.js`
-- (plus the two ECS-feeder systems wired via ModAPI)
-
-**ModAPI surface gained:**
-- `api.inventory.{addItem, removeItem, countItem, getActiveItem}`
-- `api.raycast.castRayToWall`
-- `api.itemImages`
-
-**Smoke test passes:** `bun run typecheck` + `bun run build-packs` +
-`bun run build` all green.
-
-**Deferred from R3 (blocked):** `InventoryScreenSystem.tsx` and
-`SettingsScreenSystem.tsx` stay in `packages/engine/src/Systems/`
-because the pack-script pipeline can't load `.tsx` / Preact
-imports. They need an `api.ui` surface — see task #157.
-
-### Four new plan docs landed
-
-- `docs/plans/EDITOR.md` — in-browser level + pack editor. Live-mode
-  engine, IndexedDB-backed pack, mode-based UI, tile-preset authoring,
-  Monaco scripts, store integration. Already in `docs/PLAN.md` index.
-- `docs/plans/TILE_PRESETS.md` (1120 lines) — preset-driven tile
-  authoring. JSONC format with `extends` + `defaults`, per-scene
-  `idMap` + compact grid, build-merge dedupe with content hashes,
-  `PresetResolver`, default-pack migration path. Phases T1–T5.
-- `docs/plans/ENGINE_PACK_SHADERS.md` (787 lines) — R4 design.
-  Role replacement + post-process passes + auto-injected uniform
-  contract + build-time validation + pack-chain conflict resolution.
-  Phases S1–S4.
-- `docs/plans/STORE.md` (834 lines) — hosted store website + iframe
-  game runner + per-pack PWA + embed-anywhere widget. Phases ST1–ST5.
-
-### Editor app scaffolded
-- `apps/editor/` exists as a scaffold (Bun + React + Tailwind, no
-  functional editor yet).
-
-### Tailwind bunfig fix
-- Added `bunfig.toml` to `apps/game/` and `apps/editor/` to restore
-  Tailwind plugin processing on the dev server (regression after the
-  monorepo migration where the dev server wasn't loading the
-  `bun-plugin-tailwind` config).
+1. **`0a7fe16`** — R4 S1 pack shaders + Fumadocs site + plan docs
+   (tile presets, store, shader hooks).
+2. **`c02d280`** — R4 S2+S3 (helper promotion + 38-hook shader hooks)
+   + docs landing page.
+3. **`e786c3d`** — Tile presets T1+T2 (resolver + JSONC + idMap
+   scenes + build-merge dedupe) + shader-hooks docs + playable game
+   embed on docs site.
+4. **`aa069dd`** — `api.ui` modal-systems migration → pack
+   (R3 follow-up complete; `InventoryScreenSystem.tsx` and
+   `SettingsScreenSystem.tsx` now live in
+   `packages/default-pack/scripts/systems/`).
+5. **`bdab12a`** — Full materials system (M1+M2+M3+M5: per-entity
+   `Shader` ECS component, cell materials, scene-level overrides,
+   build-time validation) + editor E1 + docs scene picker.
+6. **`dd2063c`** — Editor E2 (live engine viewport) + R4 S4
+   (post-process passes).
+7. **`2edb94a`** — PACK_CHAIN P1 (`ChainResolver`, multi-pack
+   `?pack=URL` chains, trust modal) + Editor E3 + new plan docs
+   (ANIMATIONS, AUDIO, EVENTS) + CRT smoke pack.
+8. **`be31fea`** — Materials M4 (pack-chain shader cascade) +
+   Editor E4 (bake move engine-side at
+   `packages/engine/src/Lighting/Bake.ts` + entity/light placement
+   UX) + editor hosted on GitHub Pages.
+9. **`ab9dbee`** — Editor iframe pivot I1 (`?source=editor` runner,
+   IdbAssetPack engine-side, postMessage bridge) + animation system
+   A1 (`Animation` component, `AnimationSystem`, `api.anim`, snap
+   angle selection) + scene4 anim demo + GitHub CORS URL rewrite.
+10. **`52d8e27`** — Au1 audio (`AudioRegistry`, `api.audio`, 5-group
+    gain graph, settings sliders) + Ev1 events (`EventsRegistry`,
+    25 canonical topics, pack-tagged auto-cleanup) + AE1 animation
+    editor (Path A — bring-your-own spritesheet/loose frames).
+11. **`d8fcbe7`** — Entities workflow tab + declarative prefabs
+    (static components + optional `initScript`) + UI scale +
+    scrollbar polish + iframe-pivot dev-server fix.
+12. **`1961fd3`** — Project Settings modal (Manifest / Dependencies /
+    Export / Advanced tabs) + dependency manager with auto-integrity
+    hash + scrollbar consistency.
 
 ---
 
-## 2. Open tasks (queue)
+## 2. Open tasks (current task list)
+
+### In progress
+
+- **#196 — Declarative prefab JS-to-hybrid converter (agent running).**
+  `@babel/parser` AST walk over existing JS prefabs; static
+  `world.add` calls extract to declarative entries, dynamic logic
+  stays in `initScript`. Side-by-side diff before commit. Folds
+  into Entities workflow tab + EDITOR.md §6.3.
+- **#200 — ANIMATION_EDITOR AE2: FBX importer (agent running).**
+  Three.js + FBXLoader lazy-load on Animation-mode entry; orbit
+  controls, model preview, animation scrubber, forward-direction
+  gizmo; ortho-camera per-angle bake → canonical spritesheet
+  matching ANIMATIONS.md §5. Default-pack `character/player_idle.fbx`
+  is the load-bearing acceptance fixture.
+- **#193 — Semver enforcement on requires[].version (agent running).**
+  ChainResolver extension. `requires.version: "^1.2.3"` checks
+  parent's `manifest.version` satisfies the range; throws on
+  mismatch with both versions shown. Supports exact/caret/tilde.
 
 ### Queued
 
-- **#150 Doc site** — pull `docs/plans/*` into a published doc site.
-  Captured for later.
-- **#155 Housekeeping pass (this doc + PLAN.md)** — DONE this session.
-  Mark as closed after the commit lands.
-- **#156 Tile-presets impl** — implement `docs/plans/TILE_PRESETS.md`
-  starting at T1 (data format + `PresetResolver` + default-pack
-  migration).
-- **#157 `api.ui` surface for modal screens** — designed surface for
-  pack scripts to register modal Preact components. Unblocks moving
-  `InventoryScreenSystem` + `SettingsScreenSystem` to the default pack
-  (R3 follow-up).
-- **#158 R4 impl** — implement `docs/plans/ENGINE_PACK_SHADERS.md`
-  starting at S1 (role replacement only, no validation, single pack).
+- **#198 — Tile preset workflow in cell inspector.** Click preset
+  path → edit in modal. Per-preset usage stats. Highlight-all-cells
+  button. Unlink-to-anonymous flow. TILE_PRESETS T4 territory.
+- **#199 — In-engine developer console.** Quake/Source-style with
+  backtick toggle. `api.console` namespace. Built-in commands
+  (help/spawn/tp/set/get/eval/scene), pack-registered commands,
+  autocomplete + history, themable via
+  `api.ui.registerModal("dev_console", …)`. Plan doc CONSOLE.md
+  not yet written. Includes the command-policy / permissions
+  system (commands.json + build-strip + role-based gating).
+- **#202 — Procedural assets (multi-phase).** Image + audio recipe
+  DSL. Tiny recipe files (~200 bytes) replace rasterized assets.
+  Layered op library; deterministic WebGL fragments + Web Audio
+  node graphs; IDB cache after first generate; seeded per-instance
+  variation. Editor exposes node-graph or layer-stack UI. Plan
+  doc PROCEDURAL_ASSETS.md not yet written. Phases PROC1–PROC5.
+- **#192 — Pack export modes (BUILD FULL vs EXTEND).** Folds into
+  EDITOR E5 export pipeline.
 
-### Sequencing preference (per user)
-**R4 first, then tile-presets immediately after.** S1 is the
-recommended starting point — minimal scope, gets the uniform-injection
-contract proven, defers validation + multi-pack conflict resolution.
+### Captured but no task yet
 
----
-
-## 3. Open R3 follow-up
-
-`InventoryScreenSystem.tsx` and `SettingsScreenSystem.tsx` are still
-under `packages/engine/src/Systems/`. They consume Preact + Tailwind
-and can't be transpiled by the current pack-script pipeline (which
-loads `.js` ES modules out of `scripts/`).
-
-The unblock is task **#157** — design `api.ui` so pack scripts can
-register modal components without needing to ship JSX/TSX. Likely
-shape:
-
-```ts
-api.ui.registerModal(id, { open, close, render: (api) => h })
-api.ui.openModal(id)
-api.ui.closeModal(id)
-```
-
-Either the engine hosts the Preact tree and packs return VDOM
-nodes via `api.h` / `api.ui.widgets.*`, or the pack-build pipeline
-gains TSX-transpile support (heavier). The former is preferred —
-see the "Mod widget library" note in earlier sessions.
+- PACK_PROXY: Supabase Edge Function pack proxy for CORS-hostile
+  hosts. Backstop layered with the GitHub URL rewrite. Plan doc
+  PACK_PROXY.md not yet written.
 
 ---
 
-## 4. Active design decisions worth preserving
+## 3. Recent design decisions worth preserving
 
-- **Monaco over CodeMirror** for the editor's script panel —
-  chosen for TypeScript IntelliSense against a shipped `ModAPI.d.ts`.
-- **Tile presets are JSONC** — hand-authorable. Anonymous entries
-  use content-hash IDs; named library entries use stable string IDs.
-  See `docs/plans/TILE_PRESETS.md` for the full format.
-- **Pack shaders are opt-in** — engine ships default fragment/vertex
-  pairs for each role (world, sprite, sky, post). Packs override a
-  role by shipping `shaders/<role>.frag` (etc.) and/or add named
-  post-process passes. Uniform contract is auto-injected.
-- **Store iframe is multi-purpose** — chrome (store header bar +
-  pack picker) + security sandbox (origin isolation) + PWA install
-  unit (one PWA per pack, embedded inside the store shell).
-- **Save data namespaces by pack-id, NOT origin** — so a save made
-  while playing inside the store iframe is readable when the same
-  pack is loaded directly (and vice-versa). Storage key prefix:
-  `pack:<pack-id>:save:*`.
+- **Editor iframe pivot.** Editor embeds the game runner via iframe
+  (`?source=editor`) rather than mounting the engine in-process.
+  Same-origin IDB sharing + postMessage protocol. Eliminated whole
+  bug classes (HUD overlay leak, modal positioning, Tailwind
+  isolation, ResizeObserver plumbing). See EDITOR_IFRAME.md.
+- **R3 follow-up closed.** `api.ui` ships; pack `.tsx` build via
+  `Bun.build` with Preact externalized through `installPreactRuntime`;
+  `InventoryScreenSystem` + `SettingsScreenSystem` live pack-side.
+- **Materials = three-tier cascade.** pack → scene → material;
+  per-entity `Shader` ECS component; engine assembles one program
+  with per-pixel branching by variant id. M4 chain cascade ships
+  the `ShaderChainCascade.ts` resolver.
+- **Bake moved engine-side.** `packages/engine/src/Lighting/Bake.ts`
+  is the canonical bake module — both `apps/pack-builder/src/build-packs.ts`
+  and the editor's bake button hit the same code path.
+- **Hybrid prefabs.** Declarative prefabs reference an optional
+  `initScript` that runs after static components attach, with
+  `(entity, opts, api)`. The editor's JS-prefab→hybrid converter
+  preserves dynamic logic while extracting static `world.add` calls.
+- **Pack-chain dependency manager UI is editor-side.** Auto-fetch
+  → SHA-256 → parse parent manifest → populate integrity / version
+  / id. Per-dep enable toggle, drag-to-reorder for priority.
+  Game-side Settings Packs panel is PACK_CHAIN P2 (queued).
 
 ---
 
-## 5. File-touched map (recent)
+## 4. File-touched map (since 2026-05-15)
 
 | Area | Files |
 |------|-------|
-| R3 systems moved | `packages/default-pack/scripts/systems/{gun-render,inventory-bar-render,minimap-render,pickup,player-input,reticle-render,stats-render}.js` |
-| ModAPI extensions | `packages/engine/src/ModAPI.ts` — added `api.inventory.*`, `api.raycast.castRayToWall`, `api.itemImages` |
-| Engine systems remaining (modals) | `packages/engine/src/Systems/{InventoryScreenSystem,SettingsScreenSystem}.tsx` |
-| Editor scaffold | `apps/editor/` (full tree) |
-| Tailwind dev fix | `apps/game/bunfig.toml`, `apps/editor/bunfig.toml` |
-| New plan docs | `docs/plans/{EDITOR,TILE_PRESETS,ENGINE_PACK_SHADERS,STORE}.md` |
-| Index update | `docs/PLAN.md` (this session) |
+| **R3 follow-up — `api.ui` + pack .tsx** | `packages/default-pack/scripts/systems/inventory-screen.tsx`, `settings-screen.tsx`; `packages/engine/src/ModAPI/UIRegistry.ts` + `installPreactRuntime`; pack-builder `.tsx` compile path |
+| **Materials (M1–M5)** | `packages/engine/src/Components/Shader.ts`; `packages/engine/src/Renderers/{ShaderVariants,ShaderChainCascade,ShaderInjection,HookParser,HookPrelude,ShaderRoleRegistry,ShaderValidator,shaderHeaders,shaderHelpers}.ts`; manifest schema additions; default-pack ghost-sprite + scene-material smoke tests |
+| **Animations (A1)** | `packages/engine/src/Components/Animation.ts`; `packages/engine/src/Systems/AnimationSystem.ts`; `packages/engine/src/Libs/SpriteAtlas.ts`; `packages/engine/src/ModAPI/AnimRegistry.ts` + `api.anim`; renderer per-vertex `a_uvOffset` / `a_uvScale`; `packages/default-pack/scenes/scene4.json` anim demo |
+| **Audio (Au1)** | `packages/engine/src/ModAPI/AudioRegistry.ts`; `api.audio.{play,playLoop,playReplace,stop,stopAll}`; Web Audio gain graph (master + 5 groups); `GameConfig.audio` + Settings sliders; default-pack gunshot + pickup chime |
+| **Events (Ev1)** | `packages/engine/src/ModAPI/EventsRegistry.ts`; `packages/engine/src/ModAPI/canonical-events.ts`; pack-tagged auto-cleanup; default-pack pickup + gun-render emit canonical topics |
+| **Animation editor (AE1)** | `apps/editor/src/views/AnimationEditor.tsx`; loose-frame import + cell-grid picker; canvas2d composite → canonical spritesheet PNG; manifest writer; IDB `spriteSources` store |
+| **Editor iframe pivot (I1)** | `apps/game/src/editor-bridge.ts`; `apps/game/src/boot-editor.ts`; `packages/engine/src/AssetPack/IdbAssetPack.ts` (promoted engine-side); `apps/editor/src/views/EditorViewport.tsx` rewrite (iframe + postMessage) |
+| **Shader chain (R4 S1–S4)** | `packages/engine/src/Renderers/{PostPassChain,ShaderChainCascade,ShaderInjection,HookParser,HookPrelude,ShaderValidator,ShaderVariants,shaderHeaders,shaderHelpers}.ts`; `packages/engine/src/Renderers/WebGLRenderer.ts` rewires |
+| **Pack chain (P1)** | `packages/engine/src/AssetPack/ChainResolver.ts`; `packages/engine/src/AssetPack/semver.ts`; `packages/engine/src/AssetPack/loadAssetPack.ts`; multi-pack `?pack=A&pack=B` runtime; trust modal |
+| **Tile presets (T1+T2)** | `packages/engine/src/AssetPack/PresetResolver.ts`; `apps/pack-builder/src/{build-presets,migrate-to-presets}.ts`; default-pack migrated to `tilePresets` + `idMap` scenes |
+| **Editor (E1–E4 + Entities + Project Settings)** | `apps/editor/src/views/{HomeScreen,ProjectView,EditorViewport,GridEditor,EntitiesEditor,AnimationEditor,ProjectSettingsModal}.tsx`; declarative prefab Entities workflow tab; manifest editor + dependency manager moved to Project Settings modal |
+| **Bake moved engine-side** | `packages/engine/src/Lighting/Bake.ts` (new home); `apps/pack-builder/src/build-packs.ts` callsite |
+| **PLAN updates** | `docs/PLAN.md` (rewritten — adds 6 new plan-doc index rows, 10+ new phase-status rows); `docs/SESSION_STATE.md` (this file) |
+| **New plan docs landed** | `docs/plans/{MATERIALS,ANIMATIONS,ANIMATION_EDITOR,AUDIO,EVENTS,EDITOR_IFRAME,PACK_CHAIN,ENGINE_PACK_SHADERS,TILE_PRESETS,STORE}.md` |
+
+---
+
+## 5. Recommended next implementation work
+
+- **MULTIPLAYER M1 (unblocked).** R3 + Ev1 + Au1 + A1 all landed —
+  `api.network` is the only remaining engine surface. Start with
+  the M1 primitives (`NetworkId` + `Replicate` components +
+  `api.network.{connect,send,onMessage}`).
+- **LIGHTING_ENTITIES_REFACTOR R3/R4.** Emissive surfaces still
+  bypass the ECS — make them entities with `Emissive` + `Anchored`
+  components. R4 adds `Path` + `AnimateEmissive` systems with the
+  demo scene torch.
+- **WALL_OVERHAUL Phase 2.** Per-cell floor + ceiling heights.
+  Phase 1 + caps shipped; Phase 2 is the natural follow-on.
+- **PACK_CHAIN P2.** Game-side Settings Packs panel (the editor
+  already has its dependency manager).
+- **TILE_PRESETS T3** — manifest validation + Levenshtein typo
+  detection. Cheap; high error-message ROI.
+- **ENGINE_PACK_SHADERS S5** — build-time GLSL validation (try
+  `headless-gl`; fall back to syntactic parse).
+
+Plus the three in-flight agents (#196, #200, #193) and the queued
+tasks above (#198, #199, #202, #192).
 
 ---
 
@@ -182,42 +209,21 @@ see the "Mod widget library" note in earlier sessions.
 bun install                          # workspace resolution
 bunx tsc -b                          # composite typecheck
 bun run build-packs                  # bakes + zips default.apg
-bun --cwd apps/game build            # production bundle
+bun run build                        # production game bundle
+bun run build:editor                 # editor static build
 ```
 
-All four should pass cleanly. Cosmetic `@theme` / `@tailwind`
-warnings from `bun build` are expected (plugin uses `onBeforeParse`,
-which the `bun build` CLI doesn't run).
+All should pass cleanly. Cosmetic `@theme` / `@tailwind` warnings
+from `bun build` are expected (plugin uses `onBeforeParse`, which
+the `bun build` CLI doesn't run).
 
 ---
 
-## 8. Recommended next implementation work
-
-**Option A — R4 / S1 (preferred per user):** start
-`docs/plans/ENGINE_PACK_SHADERS.md` phase S1.
-- Role replacement only.
-- No build-time validation yet.
-- Single-pack only (skip pack-chain conflict resolution).
-- Goal: prove the uniform auto-injection contract on the existing
-  WebGL world shader by letting `default-pack` ship a passthrough
-  override.
-
-**Option B — Tile-presets / T1:** start
-`docs/plans/TILE_PRESETS.md` phase T1.
-- Data format (JSONC `extends` + `defaults`).
-- `PresetResolver` class.
-- Migrate `default-pack` scenes to the new format.
-
-User has expressed preference: **finish R4 first, then tile-presets
-immediately after.**
-
----
-
-## 9. Next-session bootstrap
+## 8. Next-session bootstrap
 
 ```sh
 cat docs/PLAN.md
 cat docs/SESSION_STATE.md
-cat docs/plans/ENGINE_PACK_SHADERS.md   # if starting R4 / S1
-cat docs/plans/TILE_PRESETS.md          # if starting tile-presets
+cat docs/IDEAS.md                   # if user references a recent idea
+cat docs/plans/<topic>.md           # for the phase being worked
 ```

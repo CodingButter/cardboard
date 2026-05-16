@@ -618,22 +618,20 @@ Editor-only. Production builds don't include the overlay.
 
 | Phase | Scope | State |
 |---|---|---|
-| **Ev1** | Core `EventsAPI` (on / once / off / emit, no wildcards). Canonical engine events (§4.1–4.7). Auto-cleanup on pack reload via `currentPackId` tagging. Default-pack systems (pickup, gun-render) start emitting their topics (§4.8). Tests cover registration + dispatch + cleanup. | Designed. Not started. |
+| **Ev1** | Core `EventsAPI` (on / once / off / emit, no wildcards). Canonical engine events (§4.1–4.7). Auto-cleanup on pack reload via `currentPackId` tagging. Default-pack systems (pickup, gun-render) start emitting their topics (§4.8). Tests cover registration + dispatch + cleanup. | ✅ Shipped (commit `52d8e27`). Registry lives at `packages/engine/src/ModAPI/EventsRegistry.ts`; canonical topics in `packages/engine/src/ModAPI/canonical-events.ts`. |
 | **Ev2** | Wildcards (`name:*`, `*`). Pack-id propagated through snapshots so subscribers can introspect emitter pack. Documented ordering + re-entrancy. Optional manifest declaration `events: { emits, subscribes }` for store-side docs; pack-builder regex-validates declared emits actually appear in scripts. | Designed. Not started. |
 | **Ev3** | Editor real-time event log overlay (filter / search / record / replay). Per-handler timing badges in the overlay. Replay JSON format. | Designed. Awaits EDITOR scaffold. |
 
-### 11.1 Ev1 file map
+### 11.1 Ev1 file map (as shipped)
 
-- `packages/engine/src/ModAPI/EventRegistry.ts` — NEW. Class + dispatch.
+- `packages/engine/src/ModAPI/EventsRegistry.ts` — class + dispatch.
+- `packages/engine/src/ModAPI/canonical-events.ts` — canonical topic names + payload types.
 - `packages/engine/src/ModAPI/types.ts` — `EventsAPI` + `EventSubscription`; `ModAPI.events`.
-- `packages/engine/src/ModAPI/ModAPIImpl.ts` — instantiate + expose.
-- `packages/engine/src/Game.ts` — `setActivePack` wrap; emit `pack:loaded`, `scene:loaded`, `frame:before/after`, `entity:spawned` (from `spawnPrefab`).
-- `packages/engine/src/ModalRegistry.ts` — emit `modal:opened/closed` on `setOpen` edges.
-- `packages/engine/src/Controllers/KeyboardController.ts` + `MouseController.ts` — forward DOM events.
-- `packages/engine/src/ECS/World.ts` — emit `entity:despawned` before removal.
-- `packages/default-pack/scripts/systems/pickup.js` — emit `pickup:collected`.
-- `packages/default-pack/scripts/systems/gun-render.js` — emit `weapon:fired`.
-- `packages/engine/src/ModAPI/EventRegistry.test.ts` — dispatch order, throw isolation, once, off variants, pack cleanup.
+- `packages/engine/src/Game.ts` — emit `pack:loaded`, `scene:loaded`, `frame:before/after`, `entity:spawned` / `entity:despawned`.
+- Modal lifecycle emits `modal:opened/closed` on `setOpen` edges.
+- Controllers forward DOM events for `input:*` topics.
+- `packages/default-pack/scripts/systems/pickup.js` — emits `pickup:collected`.
+- `packages/default-pack/scripts/systems/gun-render.js` — emits `weapon:fired`.
 
 ---
 

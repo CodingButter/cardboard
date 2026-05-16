@@ -9,6 +9,14 @@ runtime with bounded LOS raycasts.
 This is the canonical brief — both for the current session and any
 fresh session that picks it up.
 
+**Status (2026-05-16):** Phases 1+2+4+5 shipped + split-lightmap
+polish + K=4 N=4 jittered LOS. Phase 3 (per-wall samples) and
+Phase 6 (spot lights) pending.
+
+Companion plan: [LIGHTING_ENTITIES_REFACTOR.md](./LIGHTING_ENTITIES_REFACTOR.md)
+— turn lights and emissives into first-class entities. R1+R2 of
+that plan shipped via ENGINE_PACK_SPLIT R1; R3+R4 remain.
+
 ---
 
 ## 1. Goals & scope
@@ -43,10 +51,10 @@ authoring → build-time → runtime → shader
 scene.json (lights + emissive flags)
         │
         ▼
-scripts/build-packs.ts            (existing)
+apps/pack-builder/src/build-packs.ts            (existing)
         │
         ▼
-scripts/bake-lights.ts            (NEW)
+packages/engine/src/Lighting/Bake.ts            (NEW)
    - reads scene, runs DDA-LOS bake for each light
    - emits per-cell-corner lightmap + per-wall-segment lightmap
         │
@@ -154,7 +162,7 @@ huge, but compatible with the current `.apg` zip format either way.
 
 ## 4. Bake pipeline
 
-`scripts/bake-lights.ts` — invoked from `scripts/build-packs.ts` for
+`packages/engine/src/Lighting/Bake.ts` — invoked from `apps/pack-builder/src/build-packs.ts` for
 each scene file in each pack.
 
 ```pseudo
@@ -292,7 +300,7 @@ to every pixel — for moonlight / fog glow effects.
 ## 6. Dynamic lights — `Light` component
 
 ```ts
-// src/Components.ts
+// packages/engine/src/Components/Light.ts
 export interface LightData {
   color: [number, number, number];
   intensity: number;
@@ -329,7 +337,7 @@ frame (already handled by the input system).
 
 ### Build pipeline change
 
-`scripts/build-packs.ts` calls `bakeScene` for each scene before
+`apps/pack-builder/src/build-packs.ts` calls `bakeScene` for each scene before
 zipping. Bake output is written into a `.apg`-internal `.baked.json`
 alongside the source scene, or merged in-place — TBD. Net effect:
 shipped `.apg` files include lightmaps.
@@ -342,7 +350,7 @@ Cheap because bake is fast.
 
 ## 8. Phased delivery
 
-### Phase 1 — Plumbing + uniform light (zero gameplay change)
+### Phase 1 — Plumbing + uniform light (zero gameplay change) — ✅ Shipped
 1. Add `lights` field + `lightmap` field to SceneJSON.
 2. `Scene.fromJSON` parses both. When `lightmap` absent, generates
    uniform 1.0 cornerRGB.
@@ -351,32 +359,32 @@ Cheap because bake is fast.
    by sample). With uniform 1.0, no visible change.
 5. Smoke test — every existing scene still renders correctly.
 
-### Phase 2 — Bake step
-1. `scripts/bake-lights.ts`: corners + visibility via DDA + falloff.
-2. `scripts/build-packs.ts`: invoke bake before zipping.
+### Phase 2 — Bake step — ✅ Shipped
+1. `packages/engine/src/Lighting/Bake.ts`: corners + visibility via DDA + falloff.
+2. `apps/pack-builder/src/build-packs.ts`: invoke bake before zipping.
 3. Add lights to scene_heights_demo for the user to see the result.
 4. Demo: dark room with a few floor lights, light pools visible.
 
-### Phase 3 — Wall lightmap
+### Phase 3 — Wall lightmap — ⏳ Pending
 1. Bake wall-segment samples too.
 2. Both renderers sample `wallRGB` during the wall pass.
 3. Without this, walls would sample at their cell-corner average —
    acceptable but blocky. Phase 3 makes walls match floors.
 
-### Phase 4 — Emissive surfaces
+### Phase 4 — Emissive surfaces — ✅ Shipped
 1. Add `emissive` to FloorSpec / CeilingSpec / WallSegment.
 2. Bake step auto-spawns area lights for emissive surfaces.
 3. Runtime adds `emissive.color × intensity` to lit colour.
 4. Demo: glowing ceiling tile, glowing rune wall.
 
-### Phase 5 — Dynamic lights
+### Phase 5 — Dynamic lights — ✅ Shipped
 1. `Light` component + ModAPI hook.
 2. Renderers iterate visible Light entities per frame.
 3. Per-pixel DDA LOS (capped count for canvas2d; full count for WebGL).
 4. Demo: player-held flashlight attached to held weapon, follows the
    reticle.
 
-### Phase 6 — Spot lights + cone falloff
+### Phase 6 — Spot lights + cone falloff — ⏳ Pending
 1. Light.type = "spot" + direction + cone params.
 2. Bake & runtime both compute angular falloff.
 3. Flashlights use this.
@@ -389,20 +397,21 @@ when you light them").
 
 ## 9. Files to touch
 
-- `src/Scene.ts` — `LightDef`, `SceneLightmap`, parser extensions,
+- `packages/engine/src/Scene.ts` — `LightDef`, `SceneLightmap`, parser extensions,
   `Scene.lightmap`, `Scene.sampleLight`.
-- `src/Components.ts` — `Light` component, `Emissive` on surface
-  definitions.
-- `src/Prefabs.ts` — optional helper for player-held lights.
-- `src/Renderers/TwoDRenderer.ts` — sample static lightmap per
+- `packages/engine/src/Components/Light.ts` — `Light` component;
+  `Emissive` on surface definitions in `Scene.ts`.
+- `packages/default-pack/scripts/prefabs/` — optional helper for player-held lights.
+- `packages/engine/src/Renderers/TwoDRenderer.ts` — sample static lightmap per
   pixel; dynamic light accumulator; multiply at the end.
-- `src/Renderers/WebGLRenderer.ts` — analogous; new uniforms + UBO;
+- `packages/engine/src/Renderers/WebGLRenderer.ts` — analogous; new uniforms + UBO;
   shader gets a lighting block.
-- `scripts/build-packs.ts` — bake invocation per scene.
-- `scripts/bake-lights.ts` — NEW, the bake script.
-- `src/Libs/Raycast.ts` — slab-aware LOS variant (Phase 2 enough,
+- `apps/pack-builder/src/build-packs.ts` — bake invocation per scene.
+- `packages/engine/src/Lighting/Bake.ts` — the bake module (moved
+  engine-side in commit `be31fea`).
+- `packages/engine/src/Libs/Raycast.ts` — slab-aware LOS variant (Phase 2 enough,
   Phase 4 if we want emissive walls to bake LOS-correctly).
-- `resources/packs/default/scenes/scene_heights_demo.json` — add a
+- `packages/default-pack/scenes/scene_heights_demo.json` — add a
   few lights for the demo.
 
 ---
@@ -449,13 +458,13 @@ Defaults until otherwise specified:
 
 ```sh
 # Catch up
-cat PLAN.md
-cat LIGHTING_OVERHAUL.md
+cat docs/PLAN.md
+cat docs/plans/LIGHTING_OVERHAUL.md
 # Existing scene type
-sed -n '1,250p' src/Scene.ts
+sed -n '1,250p' packages/engine/src/Scene.ts
 # Renderer light-sample insertion points
-grep -n "fogMul\|floorR =\|floorG =\|floorB =" src/Renderers/TwoDRenderer.ts | head
-grep -n "fcColor\|wallColor" src/Renderers/WebGLRenderer.ts | head
+grep -n "fogMul\|floorR =\|floorG =\|floorB =" packages/engine/src/Renderers/TwoDRenderer.ts | head
+grep -n "fcColor\|wallColor" packages/engine/src/Renderers/WebGLRenderer.ts | head
 ```
 
 Then start with Scene.ts: add `LightDef`, `SceneLightmap` types,

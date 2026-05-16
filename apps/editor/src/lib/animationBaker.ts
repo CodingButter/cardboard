@@ -421,11 +421,12 @@ export function applySpriteToManifest(
 export function toSpriteSourceMeta(
   projectId: string,
   state: AnimationEditorState,
+  overrides?: Partial<Pick<SpriteSourceMeta, "kind" | "fbx">>,
 ): SpriteSourceMeta {
-  return {
+  const out: SpriteSourceMeta = {
     projectId,
     spriteId: state.spriteId,
-    kind: "spritesheet",
+    kind: overrides?.kind ?? "spritesheet",
     sourcePath: state.sourcePath,
     grid: {
       frameWidth: state.frameWidth,
@@ -442,6 +443,8 @@ export function toSpriteSourceMeta(
     animationOrder: [...state.animationOrder],
     bakedAt: state.bakedAt,
   };
+  if (overrides?.fbx) out.fbx = overrides.fbx;
+  return out;
 }
 
 /**

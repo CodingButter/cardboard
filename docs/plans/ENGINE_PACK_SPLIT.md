@@ -1,15 +1,25 @@
 # Engine / Pack split — long-term architectural plan
 
-The end-state target: `src/` becomes a **pure ECS-raycaster engine** with
+**Status (2026-05-16):** R0 (monorepo restructure) + R1 (scene
+`entities[]` + baked flag + named lookup) + R2 (prefabs in pack) +
+R3 (game-specific systems in pack) + R3 follow-up (`api.ui` + pack
+`.tsx` pipeline) all shipped. R4 + R5 have been split off to their
+own canonical docs — see the dedicated sections below for the
+redirect notes. The "phased rollout" subsections below remain for
+historical record.
+
+The end-state target: `packages/engine/src/` becomes a **pure
+ECS-raycaster engine** with
 zero game-specific content. Everything that is "this specific game" —
 prefabs, gameplay systems, shaders, the player definition, weapons,
 inventory UX — lives in **asset packs**. The default pack
-(`resources/packs/default/`) is the standard library; URL-loaded packs
+(`packages/default-pack/`) is the standard library; URL-loaded packs
 load on top and override piece-by-piece.
 
 The honest test for "done": someone forks the repo, replaces only the
 default pack folder, and ships a turn-based dungeon crawler — without
-ever touching `src/`. If yes, the architecture is correct.
+ever touching `packages/engine/src/`. If yes, the architecture is
+correct.
 
 This is multi-session refactor work — bigger than the lighting
 overhaul. Plan it phased so each step is independently shippable and
@@ -20,7 +30,7 @@ the demo keeps rendering between phases.
 ## Architecture at the end
 
 ```
-src/                         ← pure engine
+packages/engine/src/         ← pure engine
 ├── ECS/                     World, Component<T>, Entity (already engine)
 ├── Engine.ts                rAF loop (already engine)
 ├── Renderers/               Two backends (already engine, content-agnostic)
@@ -32,7 +42,7 @@ src/                         ← pure engine
 ├── Scene/                   Scene loader (grids + entities[])
 └── main.ts                  Bootstrap
 
-resources/packs/default/     ← standard library content
+packages/default-pack/     ← standard library content
 ├── manifest.json
 ├── config.json
 ├── images/                  textures
@@ -44,12 +54,12 @@ resources/packs/default/     ← standard library content
 │   └── boot.js              registers everything above
 └── scenes/
 
-resources/packs/<your-mod>/  ← overrides only what you want to change
+packages/<your-mod>/  ← overrides only what you want to change
 └── manifest.json
    ↳ "extends": "default"
 ```
 
-## Core API contract — what stays in src/
+## Core API contract — what stays in `packages/engine/src/`
 
 These are non-negotiable engine concerns:
 
@@ -70,7 +80,7 @@ These are non-negotiable engine concerns:
 - **ModAPI** — the stable surface every pack consumes. Versioned via
   `manifest.engine`.
 
-Some components MUST stay declared in `src/` because the engine reads
+Some components MUST stay declared in `packages/engine/src/` because the engine reads
 them by name: `Position`, `Facing`, `Camera`, `Light`. The renderer
 queries them every frame. Other components — `Inventory`, `Weapon`,
 `Pickup`, `Aim`, `Movement`, `PlayerInput` — are game-specific and
@@ -133,7 +143,7 @@ time).
 
 ## Phased rollout
 
-### R1 — Scene `entities[]` + baked flag + named lookup
+### R1 — Scene `entities[]` + baked flag + named lookup — ✅ Shipped
 **Goal**: scenes describe initial world state via entities. Drop
 `scene.spawn` and `scene.lights[]`. Player becomes a `{ prefab:
 "player", components: { Position, Facing } }` entry. Bake reads from
@@ -142,7 +152,7 @@ entities. Light component gets the `baked` flag.
 **Subtasks:**
 - Add `SceneJSON.entities[]` typed as `{ name?, prefab?, components }`.
 - Add `Scene.entities` runtime array + `world.findByName(name)` helper.
-- Move `createPlayer` to a built-in prefab in src/ (still engine for
+- Move `createPlayer` to a built-in prefab in `packages/engine/src/` (still engine for
   now — moves to default pack in R2).
 - Loader walks `entities[]` and spawns each, applying prefab then
   overriding with `components` block.
@@ -153,30 +163,35 @@ entities. Light component gets the `baked` flag.
   entities.
 - `onWorldReady` hook in ModAPI for "find after spawn".
 
-**Files**: `src/Scene/`, `src/ECS/`, `src/Components/Light.ts`,
-`src/ModAPI/`, `scripts/bake-lights.ts`, all scene JSONs in
-`resources/packs/default/scenes/`, `resources/packs/default/scripts/hello.js`.
+**Files**: `packages/engine/src/Scene.ts`, `packages/engine/src/ECS/`,
+`packages/engine/src/Components/Light.ts`,
+`packages/engine/src/ModAPI/`,
+`packages/engine/src/Lighting/Bake.ts` (callsite:
+`apps/pack-builder/src/build-packs.ts`), all scene JSONs in
+`packages/default-pack/scenes/`,
+`packages/default-pack/scripts/hello.js`.
 
 **Estimate**: 1 session.
 
-### R2 — Prefabs move to the default pack
+### R2 — Prefabs move to the default pack — ✅ Shipped
 **Goal**: `createPlayer` and any other prefab is content. Engine has
 zero hardcoded gameplay.
 
 **Subtasks:**
-- Create `resources/packs/default/scripts/prefabs/` directory.
+- Create `packages/default-pack/scripts/prefabs/` directory.
 - Move `createPlayer` logic into `player.js` mod prefab.
 - Engine bootstrap: load default pack, run its register-phase
   scripts before scene-load so prefabs are available.
-- Delete `src/Prefabs/`.
+- Delete `packages/engine/src/Prefabs/`.
 
-**Files**: `src/Prefabs/`, `src/Game.ts`,
-`resources/packs/default/scripts/prefabs/`,
-`resources/packs/default/manifest.json` (add scripts entries).
+**Files**: `packages/engine/src/Prefabs/` (deleted),
+`packages/engine/src/Game.ts`,
+`packages/default-pack/scripts/prefabs/`,
+`packages/default-pack/manifest.json` (add scripts entries).
 
 **Estimate**: 1 session.
 
-### R3 — Game-specific systems move to packs
+### R3 — Game-specific systems move to packs — ✅ Shipped (incl. R3 follow-up: `api.ui` + pack `.tsx` build, commit `aa069dd`)
 **Goal**: gameplay loops live in packs. Engine ships only "pure
 infrastructure" systems (renderer, sprite collection, light
 collection, modal runner).
@@ -203,52 +218,39 @@ collection, modal runner).
 - `SpriteRenderSystem`, `LightCollectionSystem` — they're engine
   bridges from ECS to renderer, not gameplay.
 
-**Files**: `src/Systems/`, `src/ModAPI/`,
-`resources/packs/default/scripts/systems/`.
+**Files**: `packages/engine/src/Systems/`,
+`packages/engine/src/ModAPI/`,
+`packages/default-pack/scripts/systems/`.
 
 **Estimate**: 2-3 sessions. The biggest piece because it forces the
 ModAPI to grow up.
 
-### R4 — Pack-shipped shaders with uniform auto-injection
-**Goal**: packs ship `.frag` and `.vert` files. Engine reads them,
-auto-injects standard uniform declarations (`u_resolution`,
-`u_columns`, `u_lightmapFloor`, etc.) from a registry.
+### R4 — Pack-shipped shaders → see ENGINE_PACK_SHADERS.md
 
-**Subtasks:**
-- `manifest.shaders` field listing shader files.
-- Engine has a uniform-declaration registry keyed by "world" /
-  "sprite" / "sky" pass.
-- Shader pre-processor: prepend `#version 300 es` + uniforms +
-  helpers, paste user's main(), compile.
-- Packs override by re-declaring the same shader name.
-- Multi-pass shader chains for post-fx are R4+ stretch.
+R4's original 17-line stub has been **superseded by
+[ENGINE_PACK_SHADERS.md](./ENGINE_PACK_SHADERS.md)** — a six-phase
+plan (S1–S6) covering role replacement (Mode 1), post-process
+passes (Mode 2), and 38-hook shader hooks (Mode 3), with build-time
+validation and pack-chain conflict resolution.
 
-**Files**: `src/Renderers/`, `src/AssetPack/`, manifest schema.
+S1–S4 have shipped (commits `0a7fe16`, `c02d280`, `dd2063c`). S5
+(validation) and S6 (chain) remain. All new shader work tracks
+under that document.
 
-**Estimate**: 1-2 sessions.
+### R5 — Pack override semantics → see PACK_CHAIN.md
 
-### R5 — Pack override semantics
-**Goal**: explicit "default pack loads first, URL pack loads on top
-and overrides". Defines what "override" means per asset type.
+R5's original one-page sketch has been **subsumed by
+[PACK_CHAIN.md](./PACK_CHAIN.md)** — a full multi-pack design
+covering declared dependencies, URL chains, override semantics per
+asset type, conflict detection, trust modal, settings UI, and an
+optional community store. The asset-type override matrix
+(scenes / scripts / shaders / manifest / config) lives in
+PACK_CHAIN §7.
 
-**Override rules:**
-- **Tile textures**: by tile id, last-write wins.
-- **Manifest fields**: deep-merge.
-- **Scripts**: appended (default pack's scripts run, then override
-  pack's). Override prefabs / systems take effect on later scene
-  load.
-- **Scenes**: by path, override pack's wins.
-- **Shaders**: by name, override pack's wins.
-- **Config**: deep-merge.
-
-**Subtasks:**
-- `manifest.extends: "default"` field.
-- Loader fetches both packs, layers them.
-- Scene URLs resolve in override-then-default order.
-
-**Files**: `src/AssetPack/`, `src/main.ts`.
-
-**Estimate**: 1 session.
+P1 has shipped (commit `2edb94a`) — schema additions +
+`ChainResolver` + multi-pack `?pack=A&pack=B` chains + trust modal.
+P2–P5 (settings UI, SRI tooling, community store, publishing) are
+the remaining work.
 
 ## Open questions before R1
 

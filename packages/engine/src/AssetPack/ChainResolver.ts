@@ -22,6 +22,7 @@
 
 import type { AssetPack } from "./AssetPack";
 import { ZipAssetPack } from "./ZipAssetPack";
+import { satisfies } from "./semver";
 import type { PackRequiresEntry } from "./types";
 
 /** Hex-encode a byte buffer (lowercase, no separator). */
@@ -162,6 +163,14 @@ function urlForRequires(entry: PackRequiresEntry, dependentSource: string): stri
 interface QueueEntry {
   url: string;
   integrity?: string;
+  /**
+   * Semver range from the introducing `requires[]` entry. Checked
+   * against the parent pack's `manifest.version` immediately after
+   * `fetchPack()` returns — see § 4 of PACK_CHAIN.md. `undefined`
+   * means no constraint (back-compat with manifests authored before
+   * `requires[].version` was enforced).
+   */
+  versionRange?: string;
   /** Source label of the manifest that introduced this entry (for errors). */
   introducedBy: string;
 }
@@ -199,7 +208,7 @@ export async function resolveChain(
   const queue: QueueEntry[] = [{ url: rootUrl, integrity: rootIntegrity, introducedBy: "<root>" }];
 
   while (queue.length > 0) {
-    const { url, integrity, introducedBy } = queue.shift()!;
+    const { url, integrity, versionRange, introducedBy } = queue.shift()!;
     if (packs.has(url)) continue;
 
     let pack: AssetPack;
@@ -209,6 +218,25 @@ export async function resolveChain(
       const msg = (err as Error).message ?? String(err);
       throw new Error(`Resolving pack chain (introduced by ${introducedBy}): ${msg}`);
     }
+
+    // Version-range enforcement — § 4 of PACK_CHAIN.md. Runs AFTER
+    // `fetchPack()` (so integrity has already been verified) and BEFORE
+    // the pack is registered in the topo graph. A mismatch hard-fails
+    // with a message shaped like the integrity error so pack-builder
+    // and editor surfaces both render it the same way. `undefined` /
+    // empty `versionRange` short-circuits inside `satisfies()` for
+    // back-compat with manifests authored before this check existed.
+    if (versionRange !== undefined && versionRange !== "") {
+      const parentVersion = pack.manifest.version;
+      if (!satisfies(parentVersion, versionRange)) {
+        throw new Error(
+          `Pack ${url}: version mismatch. ` +
+            `Required: ${versionRange}. Found: ${parentVersion}.\n` +
+            `Update your requires[].version to match, or pin a different pack URL.`,
+        );
+      }
+    }
+
     packs.set(url, pack);
 
     const requires = pack.manifest.requires ?? [];
@@ -222,7 +250,12 @@ export async function resolveChain(
       const depUrl = urlForRequires(entry, url);
       depUrls.push(depUrl);
       if (!packs.has(depUrl)) {
-        queue.push({ url: depUrl, integrity: entry.integrity, introducedBy: url });
+        queue.push({
+          url: depUrl,
+          integrity: entry.integrity,
+          versionRange: entry.version,
+          introducedBy: url,
+        });
       }
     }
     deps.set(url, depUrls);

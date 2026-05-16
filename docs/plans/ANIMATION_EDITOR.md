@@ -900,7 +900,7 @@ mode could corrupt the editor's round-trip. Mitigation:
 
 Three phases. Each ships independently and produces a runnable result.
 
-### AE1 — Path A: bring-your-own (no 3D)
+### AE1 — Path A: bring-your-own (no 3D) — ✅ Shipped (commit `52d8e27`)
 
 Scope:
 - UI for "+ New sprite from spritesheet" (Path A.1).
@@ -929,7 +929,7 @@ Acceptance:
   match the engine's atlas layout, drop the manifest into the active
   scene, walk into the zombie in Play mode, see it animate.
 
-### AE2 — Path B: FBX auto-render (the killer feature)
+### AE2 — Path B: FBX auto-render (the killer feature) — ⏳ In progress (agent #200)
 
 Scope:
 - Three.js + FBXLoader lazy-load on Animation-mode entry.
@@ -955,7 +955,7 @@ Acceptance:
   reference into a scene, walk around the player sprite in Play mode
   and see the angle change as the camera moves.
 
-### AE3 — Loose-frame batch + polish
+### AE3 — Loose-frame batch + polish — ⏳ Pending
 
 Scope:
 - Drag-a-folder support for Path A.2 (currently AE1 ships it but with
@@ -1180,7 +1180,12 @@ editor exists.
 
 ## 12. Acceptance smoke test (AE1+AE2 combined)
 
-End-to-end check, runnable at the end of AE2:
+**AE1 acceptance has been met** (commit `52d8e27`) — Path A
+(spritesheet + loose-frame imports) round-trips through the editor
+and produces a working animated sprite consumed by the engine.
+
+The end-to-end check below is the AE2 acceptance gate (FBX importer
+in progress per agent #200):
 
 1. Open the editor at `/`.
 2. Create a new project, name it "AnimationEditor smoke test."

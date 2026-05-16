@@ -629,6 +629,37 @@ async function buildPack(
     }
   }
 
+  // ── Phase #196: prefab.initScript discovery ─────────────────────
+  // Hybrid declarative prefabs can reference an `initScript` path
+  // (per `DeclarativePrefab.initScript`). When the script is .ts /
+  // .tsx it has to go through the same bundle pipeline as
+  // `manifest.scripts[]`. The compiled .js takes its place under the
+  // same map; the manifest's `prefabs[id].initScript` field is
+  // rewritten to point at the .js so the engine's pack-script loader
+  // finds it. We re-use the same `scriptPathRewrites` map so the
+  // single-pass manifest rewrite below catches both.
+  if (manifest?.prefabs) {
+    for (const [, prefab] of Object.entries(manifest.prefabs)) {
+      const initPath = prefab.initScript;
+      if (!initPath) continue;
+      if (!isCompilablePackScript(initPath)) continue;
+      if (scriptPathRewrites.has(initPath)) continue;
+      const absSource = join(packRoot, initPath);
+      try {
+        const compiled = await buildPackScript(absSource);
+        const compiledPath = compiledPackScriptPath(initPath);
+        compiledScripts.set(compiledPath, compiled);
+        scriptPathRewrites.set(initPath, compiledPath);
+        scriptSourcesToSkip.add(initPath);
+        console.log(`    compiled ${initPath} → ${compiledPath} (initScript)`);
+      } catch (err) {
+        throw new Error(
+          `pack-build: failed to compile prefab initScript ${initPath}: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
   // Any `scripts/ui/*.tsx` (or other deep helpers) are sucked in by
   // the bundler — they ship inside the compiled entrypoint already.
   // Exclude them from byte-for-byte copy so the .apg doesn't carry
@@ -638,12 +669,25 @@ async function buildPack(
 
   // Rebuild manifest.json with rewritten scripts[] paths before the
   // emit pass — the zipped manifest must reference the compiled .js
-  // names the engine sees at runtime.
+  // names the engine sees at runtime. We also rewrite
+  // `prefabs[].initScript` paths (Phase #196) so the engine sees the
+  // compiled .js even when the source was `.ts` / `.tsx`.
   let manifestText: string | null = null;
   if (manifest && scriptPathRewrites.size > 0) {
+    const rewrittenPrefabs = manifest.prefabs
+      ? Object.fromEntries(
+          Object.entries(manifest.prefabs).map(([id, p]) => {
+            if (p.initScript && scriptPathRewrites.has(p.initScript)) {
+              return [id, { ...p, initScript: scriptPathRewrites.get(p.initScript) }];
+            }
+            return [id, p];
+          }),
+        )
+      : undefined;
     const rewritten = {
       ...manifest,
       scripts: (manifest.scripts ?? []).map((p) => scriptPathRewrites.get(p) ?? p),
+      ...(rewrittenPrefabs ? { prefabs: rewrittenPrefabs } : {}),
     };
     manifestText = JSON.stringify(rewritten, null, 2);
   }

@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot server.ts",
-    "build": "bun build index.html --outdir public",
+    "build": "bun build index.html --outdir public --splitting",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@babel/types": "^7.29.0",
     "@two_5_d/default-pack": "workspace:*",
     "@two_5_d/engine": "workspace:*",
     "clsx": "^2.1.1",
@@ -17,10 +18,12 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss": "^4.3.0"
+    "tailwindcss": "^4.3.0",
+    "three": "^0.169.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.0",
+    "@types/babel__parser": "^7.1.5",
     "@types/jszip": "^3.4.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

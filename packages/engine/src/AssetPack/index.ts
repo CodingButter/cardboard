@@ -21,7 +21,12 @@ export type {
   DeclarativePrefab,
 } from "./types";
 export { EQUIP_SLOTS, ITEM_IMAGE_VARIANTS, POST_PASS_UNIFORMS } from "./types";
-export { registerDeclarativePrefabs } from "./registerDeclarativePrefabs";
+export {
+  registerDeclarativePrefabs,
+  registerDeclarativePrefabsAsync,
+  _resetInitScriptCache,
+} from "./registerDeclarativePrefabs";
+export type { PrefabInitScript } from "./registerDeclarativePrefabs";
 export { discoverItemVariants } from "./discoverItemVariants";
 export { AssetPack } from "./AssetPack";
 export { ZipAssetPack } from "./ZipAssetPack";
@@ -32,6 +37,7 @@ export {
 } from "./IdbAssetPack";
 export { DEFAULT_PACK_URL, loadAssetPack } from "./loadAssetPack";
 export { resolveChain, clearChainCache } from "./ChainResolver";
+export { satisfies } from "./semver";
 export { rewriteCorsHostileUrl } from "./rewriteUrl";
 export {
   PresetResolver,

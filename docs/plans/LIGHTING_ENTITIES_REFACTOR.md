@@ -1,5 +1,12 @@
 # Lighting → Entities refactor
 
+**Status (2026-05-16):** R1 (scene `entities[]` + legacy `lights[]`
+→ entity expansion) shipped as part of ENGINE_PACK_SPLIT R1. R2
+(`Named` component + `api.world.findByName`) also shipped — see
+[ENGINE_PACK_SPLIT.md](./ENGINE_PACK_SPLIT.md). R3 (`Emissive` +
+`Anchored` components) and R4 (`Path` + `AnimateEmissive` systems +
+demo) remain. This doc stays the source-of-truth for R3+R4.
+
 Migrate lights and emissives from a mix of static-JSON / surface-fields /
 ECS-components into a uniform "everything is an entity" model. Authoring,
 mods, the bake, and the runtime all read the same source of truth.
@@ -10,26 +17,33 @@ in <2 agent sessions.
 
 ---
 
-## 1. Current state
+## 1. Current state (post-R1/R2 — 2026-05-16)
 
-Lights and emissives live in **three disjoint buckets**.
+R1 + R2 of this plan **shipped as part of ENGINE_PACK_SPLIT R1**.
+Today's reality:
 
-**Static lights** are bare JSON records in `scene.lights[]` (`LightDef`,
-`Scene.ts:735-742`). The constructor stuffs them onto `Scene.lights`
-(`Scene.ts:369, 394`) but they are never entities — they exist only to
-feed the bake (`bake-lights.ts:127`).
+- Scenes carry an `entities[]` array
+  (`packages/engine/src/Scene.ts`). The legacy `scene.lights[]`
+  shorthand is auto-expanded into `entities[]` with `Position +
+  Light` components at load time, so the rest of the pipeline only
+  sees entities.
+- `world.findByName` exists (`packages/engine/src/ECS/World.ts`) +
+  is exposed on the ModAPI as `api.world.findByName`. Static lights
+  declared with `name` in scene JSON are addressable by mods.
+- The bake (`packages/engine/src/Lighting/Bake.ts`) walks the
+  expanded `entities[]` for `Light + Position` rows — both
+  scene-declared and legacy-`lights[]`-derived.
 
-**Dynamic lights** are real entities — anything with `Light + Position`
-gets collected each frame by `LightCollectionSystem`
-(`Systems/LightCollectionSystem.ts:21-34`). The `Light` component
-(`Components.ts:218-227`) is the only entry that respects the ECS, and
-is mod-spawnable today (`resources/packs/default/scripts/hello.js:131-149`).
+What remains:
 
-**Emissive surfaces** are per-surface data fields on `WallSegment.emissive`,
-`FloorData.emissive`, `CeilingData.emissive` (`Scene.ts:63, 98, 110`). The
-bake synthesises 3×3 point-light grids (`bake-lights.ts:324-422`); the
-renderer adds emissive RGB to the surface pixel. No entity, no name, no
-component-graph hook.
+- **Emissive surfaces** are still per-surface data fields on
+  `WallSegment.emissive`, `FloorData.emissive`,
+  `CeilingData.emissive`. The bake synthesises 3×3 point-light
+  grids; the renderer adds emissive RGB to the surface pixel.
+  These are NOT yet entities — R3 below addresses that.
+- **No `Path` or `AnimateEmissive` systems exist** in
+  `packages/engine/src/Systems/`. R4's demo (a torch following a
+  scripted path; a rune pulsing) hasn't been built.
 
 ---
 
@@ -160,7 +174,7 @@ already lit per-frame.
 
 ## 5. Migration path
 
-### Phase R1 — `entities[]` plumbing + legacy expansion
+### Phase R1 — `entities[]` plumbing + legacy expansion — ✅ Shipped (via ENGINE_PACK_SPLIT R1)
 
 1. Add `SceneJSON.entities?: SceneEntityDecl[]`; expose
    `Scene.entities` as parsed data.
@@ -174,7 +188,7 @@ already lit per-frame.
 No mod-API changes; no new components. After R1 nothing visually
 differs — but lights live in the world.
 
-### Phase R2 — naming + `findByName`
+### Phase R2 — naming + `findByName` — ✅ Shipped (via ENGINE_PACK_SPLIT R1)
 
 1. `SceneEntityDecl.name?: string`. Stored on a new `Named` component
    (`{ name: string }`) when present.
@@ -184,7 +198,7 @@ differs — but lights live in the world.
 3. Mods can now `api.world.findByName("torch_north")` and attach
    `Path`, `AnimateEmissive`, custom scripts, etc.
 
-### Phase R3 — `Emissive` + `Anchored` components
+### Phase R3 — `Emissive` + `Anchored` components — ⏳ Pending
 
 1. Add `Emissive` and `Anchored` components in `Components.ts`.
 2. In `Scene.fromJSON`, expand every `WallSegment.emissive` /
@@ -196,7 +210,7 @@ differs — but lights live in the world.
 4. Refactor renderers' "add emissive RGB" path to query the world /
    declared entities by anchored-cell lookup, not `cell.floor.emissive`.
 
-### Phase R4 — `Path` + `AnimateEmissive` systems + demo
+### Phase R4 — `Path` + `AnimateEmissive` systems + demo — ⏳ Pending
 
 1. Add `Path` component (waypoints + speed + loop flag) and a
    `PathFollowSystem` that mutates `Position`.
@@ -212,33 +226,31 @@ differs — but lights live in the world.
 
 ## 6. Files to touch
 
-**R1**
-- `src/Scene.ts` — `SceneEntityDecl`, `SceneJSON.entities`, legacy
-  `lights[]` → entities expansion in `fromJSON`.
-- `src/Game.ts` — spawn `scene.entities` into the world before
-  `runPackScripts`.
-- `scripts/bake-lights.ts` — read entities instead of `lights[]`.
+**R1 (shipped)** — see `packages/engine/src/Scene.ts`,
+`packages/engine/src/Game.ts`, `packages/engine/src/Lighting/Bake.ts`
+(callsite `apps/pack-builder/src/build-packs.ts`).
 
-**R2**
-- `src/Components.ts` — `Named` component.
-- `src/ECS/World.ts` — `findByName(name)`.
-- `src/ModAPI.ts` — expose `findByName` (or `findAllByName`).
+**R2 (shipped)** — see `packages/engine/src/Components/` for
+`Named`, `packages/engine/src/ECS/World.ts` for `findByName`, and
+`packages/engine/src/ModAPI/` for the surface.
 
-**R3**
-- `src/Components.ts` — `Emissive`, `Anchored`.
-- `src/Scene.ts` — emissive-surface → entity expansion.
-- `scripts/bake-lights.ts` — `collectEmissiveLights` reads entities.
-- `src/Renderers/TwoDRenderer.ts`, `src/Renderers/WebGLRenderer.ts` —
-  emissive lookup by anchored cell (cache per scene load).
+**R3 (pending)**
+- `packages/engine/src/Components/` — `Emissive`, `Anchored` (new).
+- `packages/engine/src/Scene.ts` — emissive-surface → entity expansion.
+- `packages/engine/src/Lighting/Bake.ts` — `collectEmissiveLights`
+  reads entities.
+- `packages/engine/src/Renderers/TwoDRenderer.ts`,
+  `packages/engine/src/Renderers/WebGLRenderer.ts` — emissive
+  lookup by anchored cell (cache per scene load).
 
-**R4**
-- `src/Components.ts` — `Path`, `AnimateEmissive`.
-- `src/Systems/PathFollowSystem.ts` (NEW).
-- `src/Systems/AnimateEmissiveSystem.ts` (NEW) — or a single
-  `LightAnimationSystem` if the patterns generalise.
-- `src/Game.ts` — register the new systems.
-- `resources/packs/default/scenes/scene_heights_demo.json`,
-  `resources/packs/default/scripts/hello.js` — demo.
+**R4 (pending)**
+- `packages/engine/src/Components/` — `Path`, `AnimateEmissive` (new).
+- `packages/engine/src/Systems/PathFollowSystem.ts` (NEW).
+- `packages/engine/src/Systems/AnimateEmissiveSystem.ts` (NEW) — or
+  a single `LightAnimationSystem` if the patterns generalise.
+- `packages/engine/src/Game.ts` — register the new systems.
+- `packages/default-pack/scenes/scene_heights_demo.json`,
+  `packages/default-pack/scripts/hello.js` — demo.
 
 ---
 

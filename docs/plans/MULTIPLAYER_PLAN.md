@@ -88,7 +88,7 @@ Everything else is content / pack work.
 A multiplayer pack lands as one boot script that registers:
 
 ```ts
-// resources/packs/multiplayer/scripts/boot.js
+// packages/multiplayer-pack/scripts/boot.js
 export default (api) => {
   api.defineComponent("NetworkOwner", {});   // who controls this entity
   api.registerPrefab("remote_player", remotePlayerFactory);
@@ -185,7 +185,7 @@ None of these are deep — small refactors when the time comes.
 ## Phased rollout
 
 ### M1 — Engine primitives
-- Add `NetworkId` + `Replicate` components in `src/Components/`.
+- Add `NetworkId` + `Replicate` components in `packages/engine/src/Components/`.
 - Add `api.network` ModAPI surface (WebRTC + WebSocket).
 - Add `api.events` pub/sub.
 - Add a snapshot helper: `world.snapshotReplicated()` returns a flat
@@ -241,22 +241,31 @@ None of these are deep — small refactors when the time comes.
 
 ---
 
-## Hard dependency on engine/pack split
+## Hard dependency on engine/pack split — ✅ Satisfied (2026-05-16)
 
-Multiplayer benefits enormously from `ENGINE_PACK_SPLIT.md` being at
-least through R3 (game-specific systems migrated to packs) for two
+**ENGINE_PACK_SPLIT R3 + Ev1 (api.events) + Au1 (api.audio) +
+A1 (api.anim) all landed. M1 is ready to start.**
+
+Multiplayer benefits enormously from
+[ENGINE_PACK_SPLIT.md](./ENGINE_PACK_SPLIT.md) being at least
+through R3 (game-specific systems migrated to packs) for two
 reasons:
 
-1. **Net system as a pack** — if all systems are still hardcoded in
-   src/, the multiplayer pack can't actually live as a pack.
-2. **ModAPI maturity** — `api.network`, `api.events`, `api.input`,
-   `api.onWorldReady` are all engine surfaces that R3's ModAPI
-   redesign needs to spec anyway.
+1. **Net system as a pack** — if all systems are still hardcoded
+   in `packages/engine/src/`, the multiplayer pack can't actually
+   live as a pack. R3 shipped.
+2. **ModAPI maturity** — `api.network` (pending here in M1),
+   `api.events` (shipped Ev1), `api.input` (shipped R3),
+   `api.onWorldReady` (shipped R1) are the engine surfaces that
+   R3's ModAPI redesign specs. The remaining gap is `api.network`,
+   which M1 adds.
 
-Doing multiplayer BEFORE the engine/pack split forces ad-hoc engine
-modifications. Doing it AFTER fits naturally into the architecture.
+Doing multiplayer BEFORE the engine/pack split would force ad-hoc
+engine modifications. Doing it AFTER fits naturally into the
+architecture.
 
-**Recommended order**: ENGINE_PACK_SPLIT R1-R3 → MULTIPLAYER M1-M3.
+**Order**: ENGINE_PACK_SPLIT R1–R3 ✅ → MULTIPLAYER M1–M3 (now
+unblocked).
 
 ---
 

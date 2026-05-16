@@ -989,7 +989,7 @@ merge step (§ 8) consolidates anonymous entries on export.
 
 ## 13. Phases
 
-### T1 — Data format + resolver + default-pack migration (≈1-2 sessions)
+### T1 — Data format + resolver + default-pack migration (≈1-2 sessions) — ✅ Shipped (commit `e786c3d`)
 
 - Define `Preset` / `ResolvedPresetData` types in
   `packages/engine/src/AssetPack/types.ts`.
@@ -1006,7 +1006,7 @@ merge step (§ 8) consolidates anonymous entries on export.
 have `idMap`, and `bun run build-packs && bun --cwd apps/game build`
 ships a visually-identical game.
 
-### T2 — Build-merge step (≈1 session)
+### T2 — Build-merge step (≈1 session) — ✅ Shipped (commit `e786c3d`)
 
 - Implement `apps/pack-builder/src/build-presets.ts` (§ 8).
 - Wire into `apps/pack-builder/src/build-packs.ts` after manifest
@@ -1018,7 +1018,7 @@ ships a visually-identical game.
 collapses to one anonymous preset across two consecutive builds
 with byte-stable output.
 
-### T3 — Manifest validation + error messages (≈½-1 session)
+### T3 — Manifest validation + error messages (≈½-1 session) — ⏳ Pending
 
 - Allowed-keys set + Levenshtein typo detection (§ 10).
 - Hard-error on inline cell objects in scenes (the deprecation
@@ -1029,7 +1029,7 @@ with byte-stable output.
 **Done when**: a manifest with `textur` (typo) fails build with a
 "did you mean texture?" message and a non-zero exit.
 
-### T4 — Editor authoring UX (≈2-3 sessions; cross-references EDITOR.md)
+### T4 — Editor authoring UX (≈2-3 sessions; cross-references EDITOR.md) — ⏳ Pending (cell-inspector preset workflow queued, agent #198 territory)
 
 - Land the EDITOR.md § 6 surface that produces preset IDs in scene
   grids.
@@ -1040,7 +1040,7 @@ with byte-stable output.
 break-link / promote / save / export — produces an `.apg` byte-
 identical to the input modulo the cells the user changed.
 
-### T5 — Preset-library packs (≈1 session)
+### T5 — Preset-library packs (≈1 session) — ⏳ Pending
 
 - A pack that ships ONLY `manifest.tilePresets[]` + the JSONC
   files (no scenes, no scripts, no entities) loads as a valid

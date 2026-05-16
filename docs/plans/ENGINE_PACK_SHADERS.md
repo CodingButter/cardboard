@@ -60,8 +60,10 @@ Last revised: 2026-05-15.
   as deferred in §14.
 - **Compute / SSBO / MRT / GBuffers.** Single-pass forward; one
   `vec4 outColor` per role.
-- **Pack-supplied lightmap baking.** Bake (`apps/pack-builder/
-  src/bake-lights.ts`) stays engine-side. Packs can sample the
+- **Pack-supplied lightmap baking.** Bake
+  (`packages/engine/src/Lighting/Bake.ts`, invoked from
+  `apps/pack-builder/src/build-packs.ts`) stays engine-side.
+  Packs can sample the
   baked lightmap; cannot replace the bake.
 - **WGSL / WebGPU.** WebGL2 only.
 - **Hot reload of pack shaders.** Editing a pack `.frag` requires
@@ -1278,8 +1280,9 @@ look discards.
 ## 14. Phases
 
 R4 splits into six shippable steps. Each leaves the engine
-working on its own. **S1 has shipped.** S2 is a prerequisite for
-S3.
+working on its own. **S1, S2, S3, and S4 have shipped** (commits
+`0a7fe16`, `c02d280`, `c02d280`, `dd2063c` respectively). S5
+(validation) and S6 (pack-chain conflict resolution) remain.
 
 ### S1 — Role replacement, no validation, single pack (DONE)
 
@@ -1298,7 +1301,7 @@ S3.
 Deliverable: single-pack Mode 1 role override works.
 Status: shipped (commit `5907c21` + follow-ups).
 
-### S2 — Promote engine helpers + defines to the auto-injected header
+### S2 — Promote engine helpers + defines to the auto-injected header — ✅ Shipped (commit `c02d280`)
 
 Prerequisite for both Mode 1 ergonomics and Mode 3 hook bodies
 (hooks want to call helpers like `sampleTile` and
@@ -1322,7 +1325,7 @@ Prerequisite for both Mode 1 ergonomics and Mode 3 hook bodies
 Deliverable: helpers usable from any pack body.
 Estimate: 0.5 session.
 
-### S3 — Shader hooks (Mode 3)
+### S3 — Shader hooks (Mode 3) — ✅ Shipped (commit `c02d280`)
 
 The headline new feature.
 
@@ -1351,7 +1354,7 @@ Deliverable: any of the 38 cataloged hooks can be overridden by
 a single pack, with the documented semantics.
 Estimate: 2–3 sessions (catalog is the bulk).
 
-### S4 — Post-process passes (Mode 2)
+### S4 — Post-process passes (Mode 2) — ✅ Shipped (commit `dd2063c`)
 
 Was previously planned earlier; reordered to after S3 because
 hooks deliver more modder value first.
@@ -1366,7 +1369,7 @@ hooks deliver more modder value first.
 Deliverable: Mode 1 + Mode 2 + Mode 3 all work for a single pack.
 Estimate: 1 session.
 
-### S5 — Build-time validation
+### S5 — Build-time validation — ⏳ Pending
 
 Applies to all three modes.
 
@@ -1386,7 +1389,7 @@ Applies to all three modes.
 Deliverable: bad shaders / hooks never ship in a `.apg`.
 Estimate: 1 session.
 
-### S6 — Pack-chain resolution + conflict reporting
+### S6 — Pack-chain resolution + conflict reporting — ⏳ Pending (PACK_CHAIN P1 dependency landed)
 
 - Extend `resolveChain` (lands as part of
   [PACK_CHAIN.md](./PACK_CHAIN.md) P1) to walk packs for

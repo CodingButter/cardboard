@@ -141,6 +141,35 @@ export interface SpriteSourceMeta {
   animationOrder?: string[];
   /** Last bake epoch ms. */
   bakedAt: number;
+  /**
+   * AE2 Path B (FBX) extension — present iff `kind === "fbx"`. Captured
+   * at bake time so re-opening the sprite reproduces every config knob.
+   * Per `docs/plans/ANIMATION_EDITOR.md` §7.1.
+   *
+   * The `sourcePath` for FBX sprites points at `_source/<id>.fbx` (the
+   * raw FBX bytes, persisted to IDB as a binary asset). `grid` is still
+   * populated, but reflects the OUTPUT cell size since the FBX has no
+   * notion of input cells; `cols`/`rows` mirror the per-axis cell count
+   * that landed in the canonical sheet.
+   */
+  fbx?: {
+    /** Author-authored rotation applied to the model before rendering, in radians. */
+    forwardRotation: { x: number; y: number; z: number };
+    /** Camera elevation above horizon in radians (default ~0.14 ≈ 8°). */
+    cameraElevation: number;
+    /** Output cell size in pixels (mirrored into `grid.frameWidth`/`frameHeight`). */
+    cellSize: number;
+    /** Per-output-animation frame count, keyed by manifest animation name. */
+    framesPerAnimation: Record<string, number>;
+    /**
+     * Map from FBX clip name → output animation name. The editor uses
+     * this to surface the rename mapping; on bake the engine-visible
+     * animation key is the value, not the key.
+     */
+    clipMapping: Record<string, string>;
+    /** Subset of FBX clip names the author opted into baking. */
+    enabledClips: string[];
+  };
 }
 
 interface EditorDB extends DBSchema {

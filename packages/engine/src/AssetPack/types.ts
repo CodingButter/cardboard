@@ -286,6 +286,29 @@ export interface DeclarativePrefab {
   tags?: string[];
   /** Optional one-liner shown in the editor's prefab list. */
   description?: string;
+  /**
+   * Optional ES-module path (inside the pack) for a per-spawn init
+   * script. Hybrid declarative prefabs use this to mix static
+   * component data with imperative logic — the script's default
+   * export is invoked with `(entity, opts, api)` AFTER all the
+   * static `components` have been attached, so it can read live
+   * component values, register systems, attach pack-defined
+   * components, or roll in `opts`-driven dynamic data.
+   *
+   * Authoring conventions:
+   *  - The script is a regular pack-script (`.js` / `.ts` / `.tsx`)
+   *    that default-exports `function(entity, opts, api): void`.
+   *  - `.ts` / `.tsx` paths are compiled to `.js` by the pack
+   *    builder (same pipeline as `manifest.scripts[]`) and the
+   *    manifest entry is rewritten to the compiled `.js` path.
+   *  - Errors thrown from the init script are logged and the spawn
+   *    still returns the (partially-initialized) entity with its
+   *    static components attached. One bad initScript shouldn't
+   *    take down a session.
+   *
+   * Phase #196 of `docs/PLAN.md`.
+   */
+  initScript?: string;
 }
 
 /**
@@ -372,8 +395,9 @@ export const POST_PASS_UNIFORMS = ["u_color", "u_resolution", "u_time", "u_frame
  *
  * `id` is the human-readable dependency id and lets the resolver
  * dedupe across two packs that pull in the same dep by url. `version`
- * is a semver range (P1 reserves the field but only validates exact
- * equality when both sides set it).
+ * is a semver range enforced against the fetched parent pack's
+ * `manifest.version` — see PACK_CHAIN.md § 4 and `AssetPack/semver.ts`
+ * for the supported syntax (exact pin, caret `^x.y.z`, tilde `~x.y.z`).
  *
  * See `docs/plans/PACK_CHAIN.md` § 2 + § 6.
  */
@@ -382,7 +406,15 @@ export interface PackRequiresEntry {
   id?: string;
   /** Direct URL to the `.apg` (per § 3 URL-substrate principle). */
   url?: string;
-  /** Semver range or pin. Reserved — P1 only does exact-equality checks. */
+  /**
+   * Semver range matched against the fetched pack's `manifest.version`.
+   * ENFORCED by `ChainResolver.resolveChain` after the integrity check
+   * — a mismatch throws with a "version mismatch" error. See
+   * `AssetPack/semver.ts` for the supported subset (exact, caret,
+   * tilde; compound ranges + prereleases deferred to v2). Empty or
+   * unset = no constraint (back-compat with pre-enforcement manifests).
+   * See PACK_CHAIN.md § 4.
+   */
   version?: string;
   /** SRI hash (`sha256-…` / `sha384-…`) of the fetched `.apg` bytes. */
   integrity?: string;
