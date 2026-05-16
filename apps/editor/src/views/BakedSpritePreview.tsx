@@ -223,9 +223,19 @@ export function BakedSpritePreview({
     if (angleIndex >= effectiveAngles) setAngleIndex(0);
   }, [effectiveAngles, angleIndex]);
 
-  const animDef = activeAnim
-    ? sprite.animations?.[activeAnim]
-    : undefined;
+  // Memoize `animDef` so the timer effect's dep array sees a stable
+  // reference. Without this, `sprite.animations?.[activeAnim]` is
+  // re-evaluated every render — and even though the *property access*
+  // returns the same object as long as `sprite`/`activeAnim` are
+  // stable, in practice the parent occasionally rebuilds `sprite` (e.g.
+  // after a re-bake's `setManifest`), and the previous implementation
+  // would silently re-arm the playback `setInterval` on every render.
+  // The interval was being cleared before its first tick, leaving the
+  // preview pinned to frame 0. See suspect #2 in the bug write-up.
+  const animDef = useMemo(
+    () => (activeAnim ? sprite.animations?.[activeAnim] : undefined),
+    [sprite, activeAnim],
+  );
   const totalFrames = animDef?.frames.length ?? 0;
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -241,10 +251,38 @@ export function BakedSpritePreview({
   // `loop: false` stops on the last frame; `loop: true` wraps to 0.
   // We reach for `setInterval` rather than rAF — the per-frame
   // cadence is tens-to-hundreds of ms, and an interval keeps the
-  // logic readable. Re-arms whenever any input changes.
+  // logic readable.
+  //
+  // BUG 2 (preview pinned to frame 0) — root cause: this effect's
+  // dep array used `animDef`, an OBJECT reference derived from the
+  // sprite prop. Even though `animDef` is `useMemo`'d above, the
+  // parent (`AnimationEditor`) holds the sprite via state and can
+  // re-render this component whenever ANY parent state changes
+  // (active-rail clicks, save-status toasts, modal toggles, etc.).
+  // Each of those parent re-renders flows down the same `manifest`
+  // object, but the live editor reload paths replace `manifest` with
+  // a fresh deserialised object — even when the contents are
+  // identical — which churns `sprite` → churns `animDef` → React's
+  // `Object.is` dep check sees a new reference → cleanup + new
+  // `setInterval` → the interval is cleared before its first tick
+  // fires → frame never advances. The single-frame highlight on the
+  // atlas grid and the live canvas both stayed pinned to frame 0.
+  //
+  // Fix: depend on the *primitive* fields the effect actually reads
+  // (`activeAnim` identifier + `frameDuration` + `loop` flag +
+  // `totalFrames`) instead of the whole `animDef` object. Primitives
+  // compare by value, so re-renders with referentially-fresh-but-
+  // value-identical `animDef`s no longer thrash the interval. The
+  // interval callback still closes over the latest `animDef` via the
+  // render-scope binding, which is correct because the effect DOES
+  // re-arm when any of the value-fields change.
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frameDuration = animDef?.frameDuration ?? 0;
+  const animLoop = animDef?.loop !== false;
   useEffect(() => {
-    if (!playing || !animDef || totalFrames === 0) {
+    // `totalFrames === 0` covers both "no animation" and "animation
+    // with zero frames" — no need to also null-check animDef here.
+    if (!playing || totalFrames === 0) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -255,21 +293,21 @@ export function BakedSpritePreview({
       setFrameIdx((f) => {
         const next = f + 1;
         if (next >= totalFrames) {
-          if (animDef.loop !== false) return 0;
+          if (animLoop) return 0;
           // Non-looping — stop and pin to the last frame.
           setPlaying(false);
           return totalFrames - 1;
         }
         return next;
       });
-    }, Math.max(0.01, animDef.frameDuration) * 1000);
+    }, Math.max(0.01, frameDuration) * 1000);
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [playing, animDef, totalFrames]);
+  }, [playing, totalFrames, frameDuration, animLoop]);
 
   // Grid params for the overlay. `frameWidth`/`frameHeight` are
   // optional on SpriteDef (single-image sprites omit them); when

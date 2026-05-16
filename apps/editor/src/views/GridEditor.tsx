@@ -20,6 +20,7 @@ import {
   hexToRgb,
   rgbToHex,
 } from "../components/ComponentForm";
+import { bakeSceneLightmap } from "../lib/lightmapBaker";
 
 /**
  * E3 — 2D top-down grid editor for the editor's Edit mode.
@@ -118,6 +119,17 @@ export interface GridEditorProps {
   /** Optional sprite-id list — drives the Sprite component picker.
    *  Sourced from `manifest.sprites` by the parent. */
   spriteIds?: ReadonlyArray<string>;
+  /** Flush any in-memory edits to IDB before the ⚡ Bake button reads
+   *  the scene back. The parent owns dirty state + the saveAsset path;
+   *  GridEditor only knows about the in-memory `scene` prop, so we
+   *  defer the pre-bake persist to it. Returning a rejected promise
+   *  aborts the bake. */
+  onPersistScene?: () => Promise<void>;
+  /** Notify the parent that the on-disk scene was rewritten externally
+   *  (i.e. the bake just landed). The parent typically re-loads the
+   *  scene from IDB and posts a `{type:"scene-changed"}` message to
+   *  the engine iframe so the runtime picks up the new lightmap. */
+  onSceneSavedExternally?: (path: string) => void;
 }
 
 /** Reasonable default-pack prefabs surfaced when the editor hasn't
@@ -441,6 +453,8 @@ export function GridEditor({
   onSceneChange,
   prefabNames,
   spriteIds,
+  onPersistScene,
+  onSceneSavedExternally,
 }: GridEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -472,6 +486,54 @@ export function GridEditor({
     y: number;
     cell: { x: number; y: number };
   } | null>(null);
+  /** ⚡ Bake-lightmap button state. `idle` is the default; `running`
+   *  disables the button + shows a progress string; `done` shows the
+   *  last completion blurb until the user mutates the scene again
+   *  (any onSceneChange flips us back to `idle`). */
+  const [bakeStatus, setBakeStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "running"; message: string }
+    | { kind: "done"; message: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const handleBake = useCallback(async () => {
+    setBakeStatus({ kind: "running", message: "Starting bake…" });
+    try {
+      // Flush pending edits to IDB so the worker reads the latest scene.
+      if (onPersistScene) {
+        await onPersistScene();
+      }
+      const result = await bakeSceneLightmap(
+        projectId,
+        scenePath,
+        (status) => setBakeStatus({ kind: "running", message: status }),
+      );
+      setBakeStatus({
+        kind: "done",
+        message: `Baked · ${result.stats.lights} light(s) · ${result.stats.ms.toFixed(0)} ms`,
+      });
+      // Notify the parent so it can re-load the now-lightmap-bearing
+      // scene + tell the engine iframe to reloadScene. The bake
+      // mutated only the `lightmap` field, but the parent's in-memory
+      // copy is stale — easiest is to let it re-read from IDB.
+      onSceneSavedExternally?.(scenePath);
+    } catch (err) {
+      setBakeStatus({
+        kind: "error",
+        message: (err as Error)?.message ?? String(err),
+      });
+    }
+  }, [projectId, scenePath, onPersistScene, onSceneSavedExternally]);
+
+  // Whenever the in-memory scene mutates after a successful bake, drop
+  // back to idle so the toolbar doesn't keep claiming "Baked". Errors
+  // stick until the user clicks the button again or dismisses.
+  useEffect(() => {
+    if (bakeStatus.kind === "done") setBakeStatus({ kind: "idle" });
+    // intentionally omit bakeStatus from deps so the effect ONLY fires
+    // when the scene object identity changes (i.e. a paint mutation).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene]);
 
   // Resolve prefab list — caller-supplied names win; otherwise fall
   // back to a small built-in list so the editor's entity tool is
@@ -1190,6 +1252,35 @@ export function GridEditor({
               {l} ({l[0]?.toUpperCase()})
             </button>
           ))}
+          <div className="mx-2 h-4 w-px bg-zinc-800" />
+          <button
+            onClick={handleBake}
+            disabled={bakeStatus.kind === "running"}
+            className={cn(
+              "px-2 py-1 rounded border text-xs",
+              bakeStatus.kind === "running" &&
+                "opacity-60 cursor-wait border-amber-500 text-amber-300",
+              bakeStatus.kind === "done" &&
+                "border-emerald-500 text-emerald-300 hover:bg-zinc-800",
+              bakeStatus.kind === "error" &&
+                "border-red-500 text-red-300 hover:bg-zinc-800",
+              bakeStatus.kind === "idle" &&
+                "border-zinc-700 text-zinc-200 hover:bg-zinc-800",
+            )}
+            title={
+              bakeStatus.kind === "error"
+                ? bakeStatus.message
+                : "Bake the scene's lights into a static lightmap (Web Worker)"
+            }
+          >
+            {bakeStatus.kind === "running"
+              ? bakeStatus.message
+              : bakeStatus.kind === "done"
+                ? bakeStatus.message
+                : bakeStatus.kind === "error"
+                  ? "⚡ Bake failed (retry)"
+                  : "⚡ Bake lighting"}
+          </button>
           <div className="mx-2 h-4 w-px bg-zinc-800" />
           <span className="text-zinc-500">{width}×{height}</span>
           <div className="mx-2 h-4 w-px bg-zinc-800" />

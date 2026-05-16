@@ -169,8 +169,65 @@ export interface SpriteSourceMeta {
     clipMapping: Record<string, string>;
     /** Subset of FBX clip names the author opted into baking. */
     enabledClips: string[];
+    /**
+     * Render controls — applied identically to the live preview and
+     * the offscreen bake so the spritesheet matches what the author
+     * sees. Optional for backwards compatibility with FBX sprites
+     * baked before R-block landed; consumers should fall back to
+     * `DEFAULT_FBX_RENDER_META` when absent.
+     */
+    render?: FbxRenderMeta;
   };
 }
+
+/**
+ * Render-pipeline knobs for an FBX bake. Persisted inside
+ * `SpriteSourceMeta.fbx.render` so re-opening a sprite restores the
+ * lighting + tone setup. The same shape is consumed by both the live
+ * preview in `FbxImporter.tsx` and the offscreen bake in
+ * `fbxBaker.ts` so the spritesheet output matches the viewport pixel-
+ * for-pixel (modulo orbit camera vs canonical angle camera).
+ */
+export interface FbxRenderMeta {
+  /** Ambient light intensity (0..2). Drives `THREE.AmbientLight`. */
+  ambient: number;
+  /** Key (directional) light intensity (0..2). */
+  keyIntensity: number;
+  /** Preset for key-light direction relative to the model. */
+  keyDirection: "front" | "side" | "back" | "overhead";
+  /** Fill light intensity (0..1). Soft directional from the opposite side. */
+  fillIntensity: number;
+  /** Background — transparent for engine sprites, solid for QA renders. */
+  background:
+    | { kind: "transparent" }
+    | { kind: "solid"; color: string };
+  /**
+   * Lit (use FBX materials with Three's default phong/standard
+   * shading) vs flat (replace with MeshBasicMaterial — retro unlit).
+   */
+  tone: "lit" | "flat";
+  /**
+   * Toggle shadow casting + receiving on the FBX root. Cheap; just
+   * flips `renderer.shadowMap.enabled` + `castShadow` / `receiveShadow`.
+   */
+  shadow: boolean;
+}
+
+/**
+ * Documented defaults — also used by `defaultFbxBakeConfig` so a
+ * freshly-loaded FBX renders with sensible lighting before the author
+ * touches any knob. Existing FBX bakes without persisted render meta
+ * fall back to these so re-opening an old sprite still looks lit.
+ */
+export const DEFAULT_FBX_RENDER_META: FbxRenderMeta = {
+  ambient: 0.5,
+  keyIntensity: 1.0,
+  keyDirection: "front",
+  fillIntensity: 0.3,
+  background: { kind: "transparent" },
+  tone: "lit",
+  shadow: false,
+};
 
 interface EditorDB extends DBSchema {
   projects: {

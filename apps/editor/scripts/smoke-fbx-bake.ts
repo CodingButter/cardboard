@@ -42,13 +42,16 @@ import {
 import {
   buildFbxSpriteDef,
   buildFbxSpriteState,
+  cloneRenderConfig,
   defaultFbxBakeConfig,
+  DEFAULT_FBX_RENDER_CONFIG,
   fbxConfigToMeta,
   planFbxBake,
   restoreFbxBakeConfig,
   sanitizeClipName,
   type FbxBakeConfig,
 } from "../src/lib/fbxBaker";
+import { DEFAULT_FBX_RENDER_META } from "../src/lib/EditorProjectStore";
 import { saveBakedSprite } from "../src/lib/animationBaker";
 
 let passed = 0;
@@ -176,6 +179,7 @@ async function main() {
         anglesOverride: 1,
       },
     ],
+    render: cloneRenderConfig(DEFAULT_FBX_RENDER_CONFIG),
   };
   const plan = planFbxBake(cfg);
   // idle (8 angles × 8f) + walk (8 angles × 8f) + die (1 angle × 4f)
@@ -528,6 +532,7 @@ async function main() {
         clipDurationSec: 0,
       },
     ],
+    render: cloneRenderConfig(DEFAULT_FBX_RENDER_CONFIG),
   };
   const staticPlan = planFbxBake(staticCfg);
   assertEqual(
@@ -556,6 +561,168 @@ async function main() {
     mirroredPlan.outRows,
     5,
     "5-angle plan ships 5 rows (mirror derived at runtime)",
+  );
+
+  // ── 11. Render-meta block (R-controls) ──
+  //
+  // Coverage:
+  //   - defaultFbxBakeConfig populates `render` with the documented
+  //     defaults (so a freshly-loaded FBX renders lit out of the box).
+  //   - fbxConfigToMeta round-trips the render block into the
+  //     persisted FBX meta.
+  //   - restoreFbxBakeConfig fills in defaults when the persisted meta
+  //     predates the R-block (legacy bake).
+  //   - cloneRenderConfig produces independent objects (mutating the
+  //     clone doesn't taint the global default).
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG,
+    DEFAULT_FBX_RENDER_META,
+    "DEFAULT_FBX_RENDER_CONFIG re-exports the EditorProjectStore default",
+  );
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.ambient,
+    0.5,
+    "default ambient = 0.5",
+  );
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.keyIntensity,
+    1.0,
+    "default keyIntensity = 1.0",
+  );
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.keyDirection,
+    "front",
+    "default keyDirection = front",
+  );
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.fillIntensity,
+    0.3,
+    "default fillIntensity = 0.3",
+  );
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.background.kind,
+    "transparent",
+    "default background = transparent",
+  );
+  assertEqual(DEFAULT_FBX_RENDER_CONFIG.tone, "lit", "default tone = lit");
+  assertEqual(DEFAULT_FBX_RENDER_CONFIG.shadow, false, "default shadow = false");
+
+  // defaultFbxBakeConfig stamps the render block.
+  const defaultsRender = defaultFbxBakeConfig("zombie", [
+    { name: "Idle", duration: 1.0 },
+  ]);
+  assert(defaultsRender.render !== undefined, "defaultFbxBakeConfig fills .render");
+  assertEqual(
+    defaultsRender.render.ambient,
+    DEFAULT_FBX_RENDER_CONFIG.ambient,
+    "defaultFbxBakeConfig render.ambient = default",
+  );
+  assertEqual(
+    defaultsRender.render.tone,
+    "lit",
+    "defaultFbxBakeConfig render.tone = lit",
+  );
+
+  // Mutating the cloned render doesn't affect the global default.
+  defaultsRender.render.ambient = 1.5;
+  assertEqual(
+    DEFAULT_FBX_RENDER_CONFIG.ambient,
+    0.5,
+    "mutating cloned render doesn't taint global default",
+  );
+
+  // fbxConfigToMeta carries the render block through to the persisted meta.
+  const customCfg: FbxBakeConfig = {
+    ...cfg,
+    render: {
+      ambient: 0.2,
+      keyIntensity: 1.8,
+      keyDirection: "overhead",
+      fillIntensity: 0.5,
+      background: { kind: "solid", color: "#102030" },
+      tone: "flat",
+      shadow: true,
+    },
+  };
+  const customMeta = fbxConfigToMeta(customCfg);
+  assert(customMeta.render !== undefined, "fbxConfigToMeta persists render block");
+  assertEqual(customMeta.render!.ambient, 0.2, "persisted render.ambient");
+  assertEqual(
+    customMeta.render!.keyDirection,
+    "overhead",
+    "persisted render.keyDirection",
+  );
+  assertEqual(customMeta.render!.tone, "flat", "persisted render.tone");
+  assertEqual(customMeta.render!.shadow, true, "persisted render.shadow");
+  assertEqual(
+    customMeta.render!.background,
+    { kind: "solid", color: "#102030" },
+    "persisted render.background round-trips solid+color",
+  );
+
+  // Round-trip: customCfg → meta → restoreFbxBakeConfig should reproduce render.
+  const customState = buildFbxSpriteState(
+    customCfg,
+    planFbxBake(customCfg),
+    "_source/player.fbx",
+  );
+  const restoredCustom = restoreFbxBakeConfig(
+    customCfg.spriteId,
+    customMeta,
+    customState.animationsMeta,
+    customState.animationOrder,
+    customCfg.angleCount,
+    {
+      "mixamo.com:Idle": 1.0,
+      "mixamo.com:Walk": 0.8,
+      "mixamo.com:Die": 1.5,
+    },
+  );
+  assertEqual(
+    restoredCustom.render.ambient,
+    0.2,
+    "restored render.ambient round-trips",
+  );
+  assertEqual(
+    restoredCustom.render.background,
+    { kind: "solid", color: "#102030" },
+    "restored render.background round-trips",
+  );
+  assertEqual(
+    restoredCustom.render.tone,
+    "flat",
+    "restored render.tone round-trips",
+  );
+
+  // Legacy: meta without render block falls back to defaults on restore.
+  const legacyMeta = { ...customMeta };
+  delete (legacyMeta as { render?: unknown }).render;
+  const restoredLegacy = restoreFbxBakeConfig(
+    customCfg.spriteId,
+    legacyMeta as typeof customMeta,
+    customState.animationsMeta,
+    customState.animationOrder,
+    customCfg.angleCount,
+    {
+      "mixamo.com:Idle": 1.0,
+      "mixamo.com:Walk": 0.8,
+      "mixamo.com:Die": 1.5,
+    },
+  );
+  assertEqual(
+    restoredLegacy.render.ambient,
+    DEFAULT_FBX_RENDER_CONFIG.ambient,
+    "legacy meta without render falls back to default.ambient",
+  );
+  assertEqual(
+    restoredLegacy.render.tone,
+    "lit",
+    "legacy meta falls back to default.tone = lit",
+  );
+  assertEqual(
+    restoredLegacy.render.background.kind,
+    "transparent",
+    "legacy meta falls back to default transparent background",
   );
 
   console.log();

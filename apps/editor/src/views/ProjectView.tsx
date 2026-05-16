@@ -412,6 +412,25 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
               }}
               onPersistScene={persistScene}
               iframeRef={viewportFrameRef}
+              onSceneRewrittenExternally={async (path) => {
+                // The ⚡ Bake button rewrote IDB. Re-load the scene
+                // JSON so the in-memory editScene picks up the new
+                // `lightmap` field — without this, the next paint
+                // would overwrite the bake on auto-save.
+                if (path !== editScenePath) return;
+                const fresh = await EditorProjectStore.loadAsset(
+                  projectId,
+                  path,
+                );
+                if (typeof fresh !== "string") return;
+                try {
+                  setEditScene(JSON.parse(fresh) as MutableScene);
+                  setSceneDirty(false);
+                  setSceneSavedAt(Date.now());
+                } catch {
+                  // ignore — the bake wrote valid JSON, but defensive
+                }
+              }}
               // Surface every prefab the engine will register at boot —
               // declarative ones (manifest.prefabs[name]) AND sprite IDs
               // — so the GridEditor entity tool's prefab picker stays in

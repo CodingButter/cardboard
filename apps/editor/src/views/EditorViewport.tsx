@@ -61,6 +61,10 @@ export interface EditorViewportProps {
   /** Sprite IDs available to the GridEditor Sprite component picker.
    *  Sourced from `manifest.sprites` by the parent. */
   spriteIds?: ReadonlyArray<string>;
+  /** GridEditor's ⚡ Bake button calls this after persisting a new
+   *  lightmap to IDB. The parent re-loads the scene + we tell the
+   *  iframe to reloadScene so the engine picks up the bake. */
+  onSceneRewrittenExternally?: (path: string) => void;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
@@ -82,6 +86,7 @@ export function EditorViewport({
   iframeRef: externalIframeRef,
   prefabNames,
   spriteIds,
+  onSceneRewrittenExternally,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror the iframe element through the parent-supplied ref so the
@@ -264,6 +269,19 @@ export function EditorViewport({
             onSceneChange={onEditSceneChange}
             prefabNames={prefabNames}
             spriteIds={spriteIds}
+            onPersistScene={onPersistScene}
+            onSceneSavedExternally={(path) => {
+              // The bake rewrote IDB; tell the engine iframe so the
+              // running game picks up the new lightmap. The parent
+              // re-loads its in-memory copy via
+              // `onSceneRewrittenExternally` so the next paint
+              // doesn't clobber the bake.
+              iframeRef.current?.contentWindow?.postMessage(
+                { type: "scene-changed", path },
+                "*",
+              );
+              onSceneRewrittenExternally?.(path);
+            }}
           />
         </div>
       ) : mode === "edit" ? (
