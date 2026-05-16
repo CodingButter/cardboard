@@ -246,7 +246,7 @@ export function EditorViewport({
         ref={iframeRef}
         src={src}
         title="Engine viewport"
-        allow="pointer-lock; fullscreen; gamepad; screen-wake-lock"
+        allow="fullscreen; gamepad; screen-wake-lock"
         className={cn(
           "block w-full h-full",
           mode === "edit" && "invisible pointer-events-none",

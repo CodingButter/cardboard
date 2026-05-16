@@ -74,7 +74,9 @@ export type {
   ArmorItemStats,
   SoundDef,
   SoundGroup,
+  DeclarativePrefab,
 } from "./AssetPack";
+export { registerDeclarativePrefabs } from "./AssetPack";
 
 // Inventory types — pack-side modal UIs (InventoryScreen) need
 // `InventoryShape` so they can type the inventory component they

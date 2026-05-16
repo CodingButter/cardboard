@@ -259,6 +259,36 @@ export type ShaderHookRole = "skyHooks" | "worldHooks" | "spriteHooks";
 export type ShaderEntry = ShaderRole | ShaderHookRole;
 
 /**
+ * Editor-authored declarative prefab — a manifest-side counterpart to
+ * the JS-based `api.registerPrefab(...)` flow used by `default-pack`'s
+ * `scripts/prefabs/player.js`.
+ *
+ * `components` is `componentName → componentData` where the data must
+ * match the component's schema. At pack-load time the engine walks
+ * `manifest.prefabs[]` (after `runPackScripts()` so any pack-defined
+ * components are already registered) and registers a factory that:
+ *
+ *  - spawns a fresh entity in the world,
+ *  - adds each declared component with its data,
+ *  - merges any spawn-time `opts` (e.g. `api.spawn("zombie", { x, y })`
+ *    overrides `Position.x` / `Position.y`).
+ *
+ * Editor-authored prefabs coexist with JS-based prefabs; a name
+ * collision logs a "replacing" warning per `PrefabRegistry` semantics.
+ * See `docs/plans/EDITOR.md` §6.3.
+ */
+export interface DeclarativePrefab {
+  /** Prefab id — same as the Record key. Kept on the value for clarity. */
+  name: string;
+  /** componentName → component-data-per-its-schema. */
+  components: Record<string, unknown>;
+  /** Optional tag list (filtering in the editor's prefab list). */
+  tags?: string[];
+  /** Optional one-liner shown in the editor's prefab list. */
+  description?: string;
+}
+
+/**
  * Sound-group routing. Each group has its own gain node and Settings
  * slider — `master` is the global multiplier feeding the destination,
  * the other four feed into `master`. See `docs/plans/AUDIO.md` §5.1.
@@ -486,4 +516,12 @@ export interface PackManifest {
    * identical to pre-Au1).
    */
   sounds?: Record<string, SoundDef>;
+  /**
+   * Editor-authored declarative prefabs — see `DeclarativePrefab`.
+   * Keys are the prefab ids passed to `api.spawn("id", opts)`. Walked
+   * AFTER `runPackScripts()` so JS scripts have a chance to register
+   * any pack-defined components the declarative shapes reference.
+   * See `docs/plans/EDITOR.md` §6.3.
+   */
+  prefabs?: Record<string, DeclarativePrefab>;
 }

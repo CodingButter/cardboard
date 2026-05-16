@@ -105,5 +105,8 @@
     "musicVolume":   0.7,
     "ambientVolume": 0.8,
     "voiceVolume":   1.0
+  },
+  "ui": {
+    "scale": 1.0
   }
 }

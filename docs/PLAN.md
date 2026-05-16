@@ -232,7 +232,7 @@ killer) to stop a stale dev server.
 | Tile presets — T1+T2: PresetResolver + JSONC + idMap scenes + build-merge dedupe | ✅ Done — default-pack migrated; legacy bare-int scenes still parse via shim |
 | Tile presets — T3+: validation, editor authoring, preset-library packs | ⏳ See `docs/plans/TILE_PRESETS.md` |
 | Multiplayer M1: net primitives (NetworkId, Replicate, api.network) | ⏳ See `docs/plans/MULTIPLAYER_PLAN.md` |
-| Editor app (apps/editor — React + Tailwind + shadcn) | ⏳ Scaffold landed; design in `docs/plans/EDITOR.md` |
+| Editor app (apps/editor — React + Tailwind + shadcn) | ⏳ E1-E3 shipped; AE1 (animation editor) + Entities mode (declarative prefab authoring, EDITOR.md §6.3) shipped |
 | Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
 
 ---

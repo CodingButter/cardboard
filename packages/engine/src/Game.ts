@@ -22,6 +22,7 @@ import { Aim, Camera, Facing, Movement, PlayerInput, Position } from "Components
 import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
+import { registerDeclarativePrefabs } from "AssetPack/registerDeclarativePrefabs";
 import { ModAPIImpl, PLAYER_MOVED_FRAME_THROTTLE } from "ModAPI";
 import ItemImages from "ItemImages";
 import { installPreactRuntime } from "PreactRuntime";
@@ -311,6 +312,27 @@ export class Game {
         console.error(`Script ${path}: failed to load —`, err);
       }
     }
+    // Editor-authored declarative prefabs land AFTER JS scripts have
+    // had their crack at the ModAPI — that way prefabs can reference
+    // components defined by `api.defineComponent(...)` in scripts.
+    // EDITOR.md §6.3 + `registerDeclarativePrefabs.ts`.
+    this.registerDeclarativePrefabsFromManifest();
+  }
+
+  /**
+   * Walk `pack.manifest.prefabs` and register each entry as a
+   * declarative prefab. Per EDITOR.md §6.3 these coexist with the
+   * JS-based `api.registerPrefab(...)` path; the prefab registry warns
+   * on collisions and the later registration wins.
+   *
+   * Called from `runPackScripts()` (after scripts) and from the editor
+   * when the user "Save & Test"s a manifest with new prefabs without a
+   * full engine reload. Idempotent — re-registering with the same name
+   * just replaces the factory.
+   */
+  registerDeclarativePrefabsFromManifest(): void {
+    if (!this.pack.manifest.prefabs) return;
+    registerDeclarativePrefabs(this.api, this.pack.manifest);
   }
 
   /**
@@ -563,6 +585,19 @@ export class Game {
 
   private resizeObserver: ResizeObserver | null = null;
 
+  /** Cache the most recently-applied UI-scale font size so we only
+   *  touch the DOM when the value actually changed. */
+  private lastUiFontSize = "";
+
+  private readonly syncUiScale = (): void => {
+    const scale = CONFIG.ui?.scale ?? 1;
+    const clamped = Math.max(0.5, Math.min(3, scale));
+    const next = `${(16 * clamped).toFixed(2)}px`;
+    if (next === this.lastUiFontSize) return;
+    document.documentElement.style.fontSize = next;
+    this.lastUiFontSize = next;
+  };
+
   /** State to preserve across an HMR reload. */
   snapshot(): GameState {
     return { world: this.world, keyboard: this.keyboard, mouse: this.mouse };
@@ -611,6 +646,13 @@ export class Game {
     // `api.audio.groupVolume.set(...)` (e.g. JSON import). Cheap —
     // five float comparisons — and a no-op while audio is dormant.
     this.api.audio.syncFromConfig();
+
+    // UI scale → <html>.style.fontSize. Tailwind rem-based classes
+    // pick this up automatically so modals scale without per-class
+    // multiplication. Pack-side HUD systems multiply canvas2d coords
+    // by api.config.ui.scale themselves (rem doesn't apply to canvas).
+    // Cheap — single string comparison via the cached font size below.
+    this.syncUiScale();
 
     // `frame:after` — Ev1 §4.7. Fires at the bottom of update after
     // every system + UI flush. Symmetric with `frame:before`.

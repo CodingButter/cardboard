@@ -69,6 +69,11 @@ export default class MouseController {
     // wheel regardless of `deltaMode`. Using `Math.sign` collapses pixel
     // vs line vs page modes to a uniform "one switch per notch".
     if (event.deltaY === 0) return;
+    // Suppress the default page-scroll behaviour. Pack scripts use the
+    // wheel to cycle the hotbar (etc.) — they don't want the browser
+    // to ALSO scroll the document underneath. Requires the listener
+    // to be registered with `passive: false`.
+    event.preventDefault();
     this.wheelNotches += Math.sign(event.deltaY);
     if (this.emitEvent !== null) {
       this.emitEvent("input:wheel", {
@@ -93,7 +98,10 @@ export default class MouseController {
     this.target.addEventListener("mousemove", this.handleMouseMove);
     this.target.addEventListener("mousedown", this.handleMouseDown);
     this.target.addEventListener("mouseup", this.handleMouseUp);
-    this.target.addEventListener("wheel", this.handleWheel, { passive: true });
+    // passive: false so `handleWheel` can call preventDefault() — pack
+    // scripts cycle the hotbar via the wheel and don't want the browser
+    // to ALSO scroll the document underneath.
+    this.target.addEventListener("wheel", this.handleWheel, { passive: false });
   }
 
   /** Detach listeners. Call when tearing down the game. */

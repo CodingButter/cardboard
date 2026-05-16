@@ -20,6 +20,7 @@ import { cn } from "../lib/cn";
 import { EditorViewport, type ViewportMode } from "./EditorViewport";
 import type { MutableScene } from "./GridEditor";
 import { AnimationEditor } from "./AnimationEditor";
+import { EntitiesEditor } from "./EntitiesEditor";
 
 /**
  * Read-only-ish project view for E1.
@@ -63,7 +64,7 @@ const WORKFLOW_MODES: ReadonlyArray<{
   {
     id: "entities",
     label: "Entities",
-    hint: "Entity inspector (uses today's surface)",
+    hint: "Declarative prefab authoring (EDITOR.md §6.3)",
   },
   {
     id: "scripts",
@@ -544,6 +545,22 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
               onManifestChanged={() => {
                 // Refresh manifest + asset list so the other modes
                 // pick up the new sprite without a remount.
+                refresh();
+              }}
+            />
+          </div>
+        </main>
+      ) : workflowMode === "entities" ? (
+        <main className="px-0 py-0">
+          {/* Entities mode — declarative prefab authoring per
+              EDITOR.md §6.3. Replaces the combined viewport+manifest+
+              scenes panel; iframe + GridEditor stay torn down. */}
+          <div className="h-[calc(100vh-128px)] border-t border-zinc-800">
+            <EntitiesEditor
+              projectId={projectId}
+              onManifestChanged={() => {
+                // Pull a fresh manifest so the manifest editor + scene
+                // list reflect the new prefab block on next mode swap.
                 refresh();
               }}
             />

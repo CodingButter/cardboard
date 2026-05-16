@@ -267,6 +267,22 @@ export interface GameConfig {
     ambientVolume: number;
     voiceVolume: number;
   };
+
+  /**
+   * UI scaling — single source of truth for HUD + modal scale.
+   *
+   * - Engine writes `<html style="font-size: ${16 * scale}px">` so
+   *   Tailwind `rem`-relative classes in modals scale automatically.
+   * - Pack-side HUD systems (hotbar, minimap, stats, reticle, gun)
+   *   read `api.config.ui.scale` and multiply their canvas2d pixel
+   *   coords. They're not `rem`-aware because they draw to a canvas.
+   *
+   * Range: 0.75 – 2.0. Default 1.0 = today's behavior.
+   */
+  ui: {
+    /** Multiplier applied to all UI text + element sizes. */
+    scale: number;
+  };
 }
 
 /**

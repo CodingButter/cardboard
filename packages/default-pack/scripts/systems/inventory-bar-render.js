@@ -22,9 +22,13 @@ export default (api) => {
     const ctx = renderer.ctx;
     const H = ctx.canvas.height;
     const W = ctx.canvas.width;
-    const slotSize = H * 0.075;
-    const gap = H * 0.008;
-    const padding = H * 0.02;
+    // CONFIG.ui.scale is the single UI-scaling source of truth — see
+    // GameConfig.ts. All canvas2d HUD systems multiply their base
+    // sizes by it; modal Tailwind classes scale via <html>.fontSize.
+    const uiScale = api.config.ui?.scale ?? 1;
+    const slotSize = H * 0.075 * uiScale;
+    const gap = H * 0.008 * uiScale;
+    const padding = H * 0.02 * uiScale;
     const n = inventory.hotbar.length;
 
     const totalWidth = n * slotSize + (n - 1) * gap;

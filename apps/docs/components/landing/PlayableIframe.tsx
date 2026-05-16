@@ -81,7 +81,7 @@ export function PlayableIframe() {
         <iframe
           src={src}
           title="cardboard demo"
-          allow="pointer-lock; fullscreen; gamepad; screen-wake-lock"
+          allow="fullscreen; gamepad; screen-wake-lock"
           loading="lazy"
           className="block h-full w-full"
           style={{

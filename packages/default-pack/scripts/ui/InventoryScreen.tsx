@@ -236,7 +236,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
       }}
       onWheel={handleModalWheel}
     >
-      <div class="flex flex-col gap-3 rounded-lg border border-amber-700/60 bg-zinc-900/95 p-5 shadow-2xl">
+      <div class="cardboard-scroll flex max-h-[90vh] max-w-[90vw] flex-col gap-3 overflow-y-auto rounded-lg border border-amber-700/60 bg-zinc-900/95 p-5 shadow-2xl">
         <div class="flex items-start gap-5">
           <CharacterPanel
             inventory={inventory}

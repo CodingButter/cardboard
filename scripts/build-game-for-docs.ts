@@ -33,6 +33,19 @@ const GAME_CSS_IN = join(GAME_DIR, "index.css");
 const PACKS_SRC = join(GAME_DIR, "public/packs");
 const DOCS_PUBLIC_PLAY = join(ROOT, "apps/docs/public/play");
 const DOCS_PUBLIC_PLAY_PACKS = join(DOCS_PUBLIC_PLAY, "packs");
+const EDITOR_PUBLIC_PLAY = join(ROOT, "apps/editor/public/play");
+const EDITOR_PUBLIC_PLAY_PACKS = join(EDITOR_PUBLIC_PLAY, "packs");
+/**
+ * Two stage targets:
+ *  - `apps/docs/public/play/`   → docs landing iframe at /cardboard/play/
+ *  - `apps/editor/public/play/` → editor's Play-mode iframe in dev
+ * Both serve identical bytes; cheaper to stage once and copy twice than
+ * to build twice. EDITOR_PUBLIC_PLAY is gitignored (build product).
+ */
+const PLAY_TARGETS: Array<{ dir: string; packs: string; label: string }> = [
+  { dir: DOCS_PUBLIC_PLAY, packs: DOCS_PUBLIC_PLAY_PACKS, label: "docs" },
+  { dir: EDITOR_PUBLIC_PLAY, packs: EDITOR_PUBLIC_PLAY_PACKS, label: "editor" },
+];
 
 const args = new Set(Bun.argv.slice(2));
 const SKIP_PACKS = args.has("--skip-packs") || process.env.SKIP_PACKS === "1";
@@ -106,36 +119,42 @@ async function copyRecursive(src: string, dst: string): Promise<void> {
   }
 }
 
-async function step4_copyDistToDocs(): Promise<void> {
-  log(`step 4: copy ${GAME_DIST} → ${DOCS_PUBLIC_PLAY}`);
-  if (existsSync(DOCS_PUBLIC_PLAY)) {
-    rmSync(DOCS_PUBLIC_PLAY, { recursive: true, force: true });
+async function step4_copyDistToTargets(): Promise<void> {
+  for (const t of PLAY_TARGETS) {
+    log(`step 4 (${t.label}): copy ${GAME_DIST} → ${t.dir}`);
+    if (existsSync(t.dir)) {
+      rmSync(t.dir, { recursive: true, force: true });
+    }
+    await copyRecursive(GAME_DIST, t.dir);
   }
-  await copyRecursive(GAME_DIST, DOCS_PUBLIC_PLAY);
 }
 
 async function step5_copyPack(): Promise<void> {
-  log(`step 5: copy default.apg → ${DOCS_PUBLIC_PLAY_PACKS}`);
-  await mkdir(DOCS_PUBLIC_PLAY_PACKS, { recursive: true });
   const apg = join(PACKS_SRC, "default.apg");
   if (!existsSync(apg)) {
     throw new Error(`Expected ${apg} to exist after build-packs.`);
   }
-  await copyFile(apg, join(DOCS_PUBLIC_PLAY_PACKS, basename(apg)));
+  for (const t of PLAY_TARGETS) {
+    log(`step 5 (${t.label}): copy default.apg → ${t.packs}`);
+    await mkdir(t.packs, { recursive: true });
+    await copyFile(apg, join(t.packs, basename(apg)));
+  }
 }
 
 async function summarize(): Promise<void> {
-  const files = readdirSync(DOCS_PUBLIC_PLAY);
-  const apg = join(DOCS_PUBLIC_PLAY_PACKS, "default.apg");
-  const apgStat = existsSync(apg) ? Bun.file(apg).size : 0;
-  log(`done. ${DOCS_PUBLIC_PLAY} contains:`);
-  for (const f of files.sort()) log(`  ${f}`);
-  log(`  packs/default.apg = ${(apgStat / 1024 / 1024).toFixed(2)} MB`);
+  for (const t of PLAY_TARGETS) {
+    const files = readdirSync(t.dir);
+    const apg = join(t.packs, "default.apg");
+    const apgStat = existsSync(apg) ? Bun.file(apg).size : 0;
+    log(`done (${t.label}). ${t.dir} contains:`);
+    for (const f of files.sort()) log(`  ${f}`);
+    log(`  packs/default.apg = ${(apgStat / 1024 / 1024).toFixed(2)} MB`);
+  }
 }
 
 await step1_buildPacks();
 await step2_bunBuildGame();
 await step3_tailwindOverwrite();
-await step4_copyDistToDocs();
+await step4_copyDistToTargets();
 await step5_copyPack();
 await summarize();
