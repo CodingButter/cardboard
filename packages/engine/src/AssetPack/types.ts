@@ -373,6 +373,21 @@ export interface PostPassDef {
 }
 
 /**
+ * One manifest-declared component (WORLD_STATE.md §4 + §10.3). Engine
+ * uses only `name`; `schema` and `tags` are editor-only metadata that
+ * round-trip opaquely so component pickers can filter without
+ * hard-coding built-ins.
+ */
+export interface ComponentDef {
+  /** Component identifier referenced by entities + Systems component. */
+  name: string;
+  /** Editor-side schema describing fields; engine treats as opaque. */
+  schema?: Record<string, unknown>;
+  /** Free-form classification tags for editor filtering. */
+  tags?: readonly string[];
+}
+
+/**
  * Auto-injected post-pass uniforms a pack body can read without
  * redeclaration. Exposed for editor tooling that wants to surface the
  * contract; the runtime header is built from these names verbatim.

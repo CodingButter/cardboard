@@ -16,6 +16,7 @@ export type {
   ShaderHookRole,
   ShaderEntry,
   PostPassDef,
+  ComponentDef,
   SoundGroup,
   SoundDef,
   DeclarativePrefab,
