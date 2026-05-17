@@ -29,6 +29,8 @@ import type {
   AudioAPI,
   BindingsAPI,
   BuiltInComponents,
+  DebugAPI,
+  DebugStatsSnapshot,
   EventsAPI,
   FrameFn,
   InputAPI,
@@ -188,6 +190,17 @@ export class ModAPIImpl implements ModAPI {
     disposeScript(path: string): void;
     disposeAll(): void;
   };
+  /**
+   * Engine telemetry surface — Q5 of `docs/plans/EDITOR_REDESIGN.md`
+   * §12. Minimal pass-through today: reads live `World.entityCount()`
+   * and reports zeros for renderer / frame-timing counters. The full
+   * `StatsCollector` wiring (frame timing + draw calls + audio voices)
+   * lands when `Game.update` / `Game.render` start feeding the
+   * collector — see `Debug/stats.ts`. The shape is stable so callers
+   * (editor iframe bridge, in-game `stats` console command) don't
+   * have to change when the real numbers come online.
+   */
+  readonly debug: DebugAPI;
 
   /**
    * Internal handle to the UI registry. The engine's `Game.update`
@@ -245,6 +258,18 @@ export class ModAPIImpl implements ModAPI {
     // entity's components one last time (EVENTS.md §4.2).
     this.world.onDespawn = (entity) => {
       this.events.emit("entity:despawned", { entity });
+    };
+    // Minimal debug surface — see the field's doc comment for why the
+    // renderer / timing fields are stubbed. The closure captures
+    // `this.world` so a later `world` reassignment (currently never
+    // happens) would be picked up automatically.
+    this.debug = {
+      stats: (): DebugStatsSnapshot => ({
+        fps: 0,
+        frameMs: 0,
+        drawCalls: 0,
+        entityCount: this.world.entityCount(),
+      }),
     };
   }
 

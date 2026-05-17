@@ -1,8 +1,6 @@
 import { main, type GameState } from "@two_5_d/engine";
 import { bootForEditor } from "./src/boot-editor";
 import { applyPackIdentity } from "./src/pack-identity";
-import { applyPackIdentity } from "./src/pack-identity";
-import { applyPackIdentity } from "./src/pack-identity";
 
 /**
  * HMR-aware bootstrap.

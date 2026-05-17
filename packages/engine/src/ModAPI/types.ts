@@ -534,6 +534,27 @@ export interface AudioAPI {
   };
 }
 
+/**
+ * Engine telemetry surface — Q5 of `docs/plans/EDITOR_REDESIGN.md` §12.
+ *
+ * Pack scripts and the iframe bridge (EDITOR_IFRAME.md I2) read
+ * `api.debug.stats()` for the per-frame perf snapshot. The current
+ * implementation is a minimal pass-through that reads the live
+ * `World` + `Scene`; renderer / audio counters report 0 until the
+ * full `StatsCollector` wiring lands (see `Debug/stats.ts`).
+ */
+export interface DebugStatsSnapshot {
+  readonly fps: number;
+  readonly frameMs: number;
+  readonly drawCalls: number;
+  readonly entityCount: number;
+}
+
+export interface DebugAPI {
+  /** Snapshot of recent frame timing + counters. Safe to call any time. */
+  stats(): DebugStatsSnapshot;
+}
+
 /** The api passed to every pack script. */
 export interface ModAPI {
   /** The active ECS world. Stable across the session. */
@@ -604,6 +625,11 @@ export interface ModAPI {
    * `docs/plans/EVENTS.md`.
    */
   readonly events: EventsAPI;
+  /**
+   * Engine telemetry — `stats()` for the editor iframe bridge and
+   * in-game dev console. See `DebugAPI`.
+   */
+  readonly debug: DebugAPI;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */
