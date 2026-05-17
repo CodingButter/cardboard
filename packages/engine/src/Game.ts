@@ -444,7 +444,7 @@ export class Game {
    * (typically: wrong pack loaded, or the pack's boot scripts didn't
    * run before scene load).
    */
-  spawnInitialEntities(): void {
+  async spawnInitialEntities(): Promise<void> {
     if (!this.freshWorld) return;
     const { x, y, facing } = this.scene.spawn;
     // Boot scene's name comes from the manifest's startScene; main.ts
@@ -453,6 +453,13 @@ export class Game {
     if (this.currentScenePath === "") {
       this.currentScenePath = this.pack.manifest.startScene;
     }
+    // WORLD_STATE.md §10.2 — pack-shipped `world.json` seeds initial
+    // singleton state. Runs BEFORE `world:ready` so any pack-script
+    // `onWorldReady` handler reading `api.singleton(Name)` sees the
+    // pre-populated value. Gracefully no-ops when the pack ships no
+    // `world.json` (the common case today — the default pack hasn't
+    // adopted it yet per the plan's tracking table).
+    await this.seedSingletonsFromPack();
     // WORLD_STATE.md §6.1 — fire `world:ready` ONCE per Game lifetime,
     // AFTER `runPackScripts()` and BEFORE the first scene-controller
     // spawn. Pack scripts use it for one-time setup that doesn't
@@ -489,6 +496,47 @@ export class Game {
    */
   setInitialScenePath(path: string): void {
     this.currentScenePath = path;
+  }
+
+  /**
+   * WORLD_STATE.md §10.2 — read the pack's optional `world.json` and
+   * pre-populate every listed singleton. Each `singletons[name]` entry
+   * is attached via `api.singleton(name)` (which get-or-creates the
+   * entity) followed by a shallow `Object.assign` so the live
+   * component reference carries the seed data. Singletons not listed
+   * here are still get-or-created lazily on first `api.singleton(name)`
+   * call.
+   *
+   * Errors are caught + logged. A pack with no `world.json` (today's
+   * default-pack) hits the early-return path and the engine boots
+   * byte-identically to the pre-§10.2 behaviour.
+   */
+  private async seedSingletonsFromPack(): Promise<void> {
+    if (!this.pack.has("world.json")) return;
+    let parsed: { singletons?: Record<string, Record<string, unknown>> };
+    try {
+      const raw = await this.pack.textBody("world.json");
+      parsed = JSON.parse(raw) as {
+        singletons?: Record<string, Record<string, unknown>>;
+      };
+    } catch (err) {
+      console.error("[world.json] parse failed — skipping singleton seed:", err);
+      return;
+    }
+    const singletons = parsed.singletons;
+    if (!singletons || typeof singletons !== "object") return;
+    for (const [name, value] of Object.entries(singletons)) {
+      if (!value || typeof value !== "object") continue;
+      try {
+        const handle = this.api.singleton<Record<string, unknown>>(name);
+        Object.assign(handle, value);
+      } catch (err) {
+        console.warn(
+          `[world.json] failed to seed singleton "${name}" —`,
+          err,
+        );
+      }
+    }
   }
 
   /**

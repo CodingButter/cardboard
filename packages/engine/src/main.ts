@@ -199,8 +199,10 @@ export async function bootFromChain(
   // identically to pre-SL2 (no AudioContext, no IDB writes).
   await game.api.proceduralAudio.loadFromPack();
 
-  // 5b. Spawn the initial world entities (player today).
-  game.spawnInitialEntities();
+  // 5b. Spawn the initial world entities (player today). Async now
+  // that `world.json` singleton seeding (WORLD_STATE.md §10.2) reads
+  // a pack body inside the boot path.
+  await game.spawnInitialEntities();
 
   // 5c. Collect per-entity shader variants (M1 of MATERIALS.md).
   bootStatus("Compiling shader variants…");
