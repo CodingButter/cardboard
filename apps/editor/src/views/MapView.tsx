@@ -35,6 +35,7 @@ import type {
   SceneLightmapJSON,
 } from "@two_5_d/engine";
 import { PresetEditView } from "./PresetEditView";
+import { MapPalette } from "./MapPalette";
 import { useStatusBar } from "../shell/StatusBarContext";
 import { useEditorActions } from "../shell/EditorActionsContext";
 import { useLocalStorage } from "../lib/useLocalStorage";
@@ -913,27 +914,84 @@ export function MapView({
   return (
     <div
       className={
-        // While Playtest is active we collapse the right rail (Cell
-        // Preview / Inspector / Scene Settings) so the iframe gets the
-        // full centre + right area — only the new PlaytestOverlay
-        // stats rail remains visible alongside it. The grid stays a
-        // grid (single column) so the inner `<aside>` simply doesn't
-        // occupy a track; React still keeps it mounted but invisible
-        // via `hidden`, which preserves any state inside (e.g. the
-        // CellPreview's WebGL canvas — cheap to keep, expensive to
-        // re-init).
+        // §6.5 shell-body grammar — Scene tab is a 3-rail layout:
+        // LEFT (Scene picker + Tile preset palette + anonymous toggle)
+        // · CENTER (canvas + inner toolbar / MapToolbar) · RIGHT (Cell
+        // Preview + Cell Inspector).
+        //
+        // Rail widths are sourced from the editor design tokens
+        // (`--rail-left`, `--rail-right`) declared in index.css §5.
+        // `gap-section` is the §5 `--gap-section` rhythm token — the
+        // outer grid uses it so the inter-column gutter matches the
+        // intra-rail vertical rhythm.
+        //
+        // Playtest mode collapses the side rails so the iframe owns the
+        // full body. Both rails stay MOUNTED but `hidden`, which keeps
+        // CellPreview's WebGL context (and the palette's resolver/IDB
+        // cache) alive across the Edit ↔ Playtest round-trip.
         playtestActive
-          ? "relative grid h-full grid-cols-[1fr] min-h-0"
-          : "relative grid h-full grid-cols-[1fr_380px] min-h-0"
+          ? "relative grid h-full grid-cols-[1fr] min-h-0 bg-[var(--color-bg-app)]"
+          : "relative grid h-full grid-cols-[var(--rail-left)_1fr_var(--rail-right)] gap-section min-h-0 bg-[var(--color-bg-app)] p-[var(--gap-section)]"
       }
     >
-      {/* CENTER pane — canvas (via EditorViewport).
-          The R4b header Toolbar was removed in cleanup: layer/mode/
-          scene-path info now lives in the shell StatusBar (pushed via
-          `useStatusBar().setSections` below). GridEditor's internal
-          brush palette still owns the brush + layer state for this
-          phase; full split lands in the GridEditor follow-up. */}
-      <div className="relative flex flex-col min-h-0 border-r border-zinc-800">
+      {/* LEFT rail — per §7.2: Scene picker (top) → Tile preset palette
+          → anonymous-preset toggle (within MapPalette). Composed via
+          R2 primitives (PanelHeader, CollapsibleSection, ScrollArea
+          inside MapPalette, ToggleSwitch inside MapPalette) so the
+          rail visually matches the rest of the editor's shell. */}
+      <aside
+        className="panel-surface flex flex-col gap-section min-h-0 rounded-card overflow-hidden"
+        hidden={playtestActive}
+      >
+        {/* Scene-picker section — read-only summary of the active scene
+            (the TopBar dropdown is the canonical switcher per §6.2). */}
+        <CollapsibleSection title="Scene" defaultOpen>
+          <div className="text-[11px] text-zinc-400">
+            {scenePath ? (
+              <span
+                className="font-mono text-zinc-300 break-all"
+                title={scenePath}
+              >
+                {scenePath.replace(/^scenes\//, "")}
+              </span>
+            ) : (
+              <span className="text-zinc-500">No scene loaded</span>
+            )}
+          </div>
+        </CollapsibleSection>
+
+        {/* Tile preset palette — hoisted out of GridEditor into its own
+            component so the left rail honours the §6.5 three-rail
+            grammar. MapPalette owns the PanelHeader("Tile Presets") +
+            filter input + ToggleSwitch (show-anonymous) + ScrollArea
+            internally. */}
+        <div className="flex-1 min-h-0 flex flex-col card-surface overflow-hidden">
+          <MapPalette
+            projectId={projectId}
+            activePresetId={activePresetId}
+            onActivePresetChange={setActivePresetId}
+            showAnonymousPresets={showAnonymousPresets}
+            onShowAnonymousPresetsChange={setShowAnonymousPresets}
+            onEditPreset={(id) => setEditingPresetId(id)}
+            onPresetContextMenu={(id, x, y) =>
+              setPresetContextMenu({
+                open: true,
+                presetId: id,
+                screenX: x,
+                screenY: y,
+              })
+            }
+          />
+        </div>
+      </aside>
+
+      {/* CENTER pane — canvas (via EditorViewport). GridEditor's
+          internal left palette + right inspector are hidden via the
+          new `hidePalette` / `hideInspector` props so this column
+          carries only the canvas + its inner toolbar (Bake / size /
+          zoom + MapToolbar). Per §6.5 the centre uses `flex flex-col
+          gap-section min-h-0`. */}
+      <main className="panel-surface relative flex flex-col gap-section min-h-0 rounded-card overflow-hidden">
         {/* #246 — two-row Map toolbar (Layers + Tools). Sits below the
             shell PrimaryTabs and above the EditorViewport. Owns the
             active layer + tool state is forwarded into the
@@ -1029,6 +1087,10 @@ export function MapView({
                 screenY: y,
               })
             }
+            // §7.2 — palette + inspector live in MapView's outer rails,
+            // not GridEditor's internal asides.
+            hidePalette
+            hideInspector
           />
         </div>
 
@@ -1091,34 +1153,34 @@ export function MapView({
             </div>
           </div>
         ) : null}
-      </div>
+      </main>
 
-      {/* RIGHT rail — Cell Preview + Cell Inspector + Scene list +
-          Scene Settings + Quick Tools. Hidden (but kept mounted)
-          while Playtest mode is active so the iframe gets the full
-          centre + right area; CellPreview keeps its WebGL context
-          alive across the round-trip. */}
+      {/* RIGHT rail — per §7.2: Cell Preview (3D, top) + Cell Inspector
+          (bottom). Both sections live inside R2 CollapsibleSection
+          primitives so the user can fold panels they don't need.
+          Hidden (but kept mounted) while Playtest mode is active so the
+          iframe gets the full centre + right area; CellPreview keeps
+          its WebGL context alive across the round-trip. */}
       <aside
-        className="flex flex-col min-h-0 bg-zinc-950/40"
+        className="panel-surface flex flex-col gap-section min-h-0 rounded-card overflow-hidden"
         hidden={playtestActive}
       >
         <ScrollArea fade={false} className="h-full">
-          <div className="p-3 space-y-3">
-            {/* ── 3D Preview card ──────────────────────────────── */}
-            <section className="rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden">
-              <PanelHeader
-                size="sm"
-                title="3D Preview"
-                action={
-                  <Badge variant="emerald" outlined>
-                    LIVE
-                  </Badge>
-                }
-              />
+          <div className="p-[var(--gap-panel)] flex flex-col gap-section">
+            {/* ── Cell Preview ──────────────────────────────────── */}
+            <CollapsibleSection
+              title="Cell Preview"
+              defaultOpen
+              trailing={
+                <Badge variant="emerald" outlined>
+                  LIVE
+                </Badge>
+              }
+            >
               {/* Auto-rotate moved into the new settings panel's Camera
                   section (#268) — consolidates all preview controls
                   under the Filter icon. */}
-              <div className="p-3">
+              <div className="-mx-3 -my-2">
                 <CellPreview
                   projectId={projectId}
                   presetId={selection?.selectedPresetId ?? null}
@@ -1160,7 +1222,7 @@ export function MapView({
                   lightmapSource={cellPreviewLightmapSource}
                 />
               </div>
-            </section>
+            </CollapsibleSection>
 
             {/* ── Cell Inspector card ──────────────────────────── */}
             <CollapsibleSection
