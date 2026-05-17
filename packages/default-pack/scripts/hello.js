@@ -177,6 +177,48 @@ export default (api) => {
     console.log(`[mod] A1 anim smoke-test: anim_marker spawned at (${markerX.toFixed(1)}, ${markerY.toFixed(1)})`);
   }
 
+  // ── A1 of ANIMATIONS.md — animation smoke test ─────────────────────
+  // When `manifest.animationsSmokeTest === true`, spawn one anim_marker
+  // sprite near the player. The marker uses a 4-angle × 4-frame sheet
+  // declared in the manifest — walking around it cycles the background
+  // hue (proving multi-angle selection) and the centered arrow's
+  // brightness pulses through 4 frames (proving AnimationSystem).
+  // Disabled by default — flip the manifest flag + rebuild to enable.
+  const animSmokeOn = api.pack.manifest.animationsSmokeTest === true;
+  const hasAnimMarker =
+    api.world.first(api.components.Sprite, api.components.Animation) !== undefined;
+  if (animSmokeOn && !hasAnimMarker) {
+    const player = api.world.first(api.components.PlayerInput, api.components.Position);
+    const playerPos = player
+      ? api.components.Position.getOrThrow(player)
+      : new api.Vec2(4, 4);
+    // Place 2 cells in front of the player, snapped to a tile centre.
+    const markerX = Math.floor(playerPos.x) + 2.5;
+    const markerY = Math.floor(playerPos.y) + 0.5;
+    const m = api.world.spawn();
+    api.world
+      .add(m, api.components.Position, new api.Vec2(markerX, markerY))
+      // Marker has a Facing so the multi-angle math has a frame-of-reference
+      // (= 0 rad / "east"); without it the angle code short-circuits to 0.
+      .add(m, api.components.Facing, 0)
+      .add(m, api.components.Sprite, {
+        imageId: "anim_marker",
+        worldHeight: 0.6,
+        yOffset: 0,
+      })
+      .add(m, api.components.Animation, {
+        current: "idle",
+        frame: 0,
+        elapsed: 0,
+      })
+      .add(m, api.components.MinimapMarker, {
+        color: "#ffff66",
+        radius: 0.18,
+        drawForwardRay: false,
+      });
+    console.log(`[mod] A1 anim smoke-test: anim_marker spawned at (${markerX.toFixed(1)}, ${markerY.toFixed(1)})`);
+  }
+
   // ── Phase 5 dynamic-lights demo ────────────────────────────────────
   // Spawn two moving Light entities on the heights demo scene so the
   // user can visually confirm the runtime light pipeline. Gating by
