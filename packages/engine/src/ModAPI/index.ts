@@ -39,5 +39,13 @@ export { RendererSystemRegistry } from "./RendererSystemRegistry";
 export { UIRegistry } from "./UIRegistry";
 export { SettingsRegistry } from "./SettingsRegistry";
 export { BindingsRegistry } from "./BindingsRegistry";
+export { ConsoleRegistry } from "./ConsoleAPI";
+export type {
+  ConsoleAPI,
+  ConsoleEntry,
+  ConsoleLevel,
+  ConsoleSubscriber,
+  ConsoleGetEntriesOptions,
+} from "./ConsoleAPI";
 export { ModAPIImpl } from "./ModAPIImpl";
 export type { ModAPIDeps } from "./ModAPIImpl";

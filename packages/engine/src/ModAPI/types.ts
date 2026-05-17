@@ -662,6 +662,14 @@ export interface ModAPI {
    * in-game dev console. See `DebugAPI`.
    */
   readonly debug: DebugAPI;
+  /**
+   * Developer-console recording surface — `docs/plans/CONSOLE.md` MVP.
+   * Buffers `log` / `info` / `warn` / `error` calls + lets the editor's
+   * live log panel subscribe for streaming entries. Future phases
+   * (C1–C4) widen this with command registration, parsing, policy
+   * gating, etc.; the recording methods declared here stay stable.
+   */
+  readonly console: import("./ConsoleAPI").ConsoleAPI;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */

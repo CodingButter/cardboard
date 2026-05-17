@@ -63,6 +63,7 @@ import { AnimRegistry } from "./AnimRegistry";
 import { AudioRegistry } from "./AudioRegistry";
 import { RecipeStore } from "ProceduralAudio";
 import { EventsRegistry } from "./EventsRegistry";
+import { ConsoleRegistry, type ConsoleAPI } from "./ConsoleAPI";
 
 /**
  * Dependencies the engine wires into the ModAPI implementation. Kept
@@ -203,6 +204,14 @@ export class ModAPIImpl implements ModAPI {
    * have to change when the real numbers come online.
    */
   readonly debug: DebugAPI;
+  /**
+   * Developer-console recording surface — CONSOLE.md MVP. Held as
+   * the concrete `ConsoleRegistry` for parity with `events` / `audio`
+   * above (so future engine internals can reach private extras
+   * without casting); pack scripts see only the `ConsoleAPI` slice
+   * exposed via `ModAPI`.
+   */
+  readonly console: ConsoleAPI;
 
   /**
    * Internal handle to the UI registry. The engine's `Game.update`
@@ -252,6 +261,10 @@ export class ModAPIImpl implements ModAPI {
     // ModalsRegistry wrapper fires `modal:opened` / `modal:closed`
     // through the bus on every `setOpen` edge.
     this.events = new EventsRegistry();
+    // Console recording surface — CONSOLE.md MVP. Built early so any
+    // boot-time pack-script setup that uses `api.console.log` lands
+    // entries in the buffer without ordering hazards.
+    this.console = new ConsoleRegistry();
     // Wire DOM-event surfacing on the controllers (EVENTS.md §4.5).
     // Native keydown/up → bus AFTER the controller updates its
     // pressedKeys; pack handlers querying `isKeyPressed` inside an
