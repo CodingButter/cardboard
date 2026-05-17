@@ -898,6 +898,91 @@ export function GridEditor({
       const cell = screenToCell(e.clientX, e.clientY);
       if (!cell) return;
 
+      // ── #254 — Select-tool right-click opens MapView's cell context
+      // menu. We compute the right-click payload eagerly so MapView
+      // doesn't have to redo the cell-resolve dance.
+      if (tool === "select" && e.button === 2) {
+        e.preventDefault();
+        if (onCellContextMenu) {
+          const presetId = presetForCell(scene, layer, cell.x, cell.y);
+          let isSolidWall = false;
+          if (layer === "walls" && presetId && resolver) {
+            const data = resolver.get(presetId);
+            if (data?.data.collision === "solid") isSolidWall = true;
+          }
+          onCellContextMenu({
+            x: cell.x,
+            y: cell.y,
+            layer: layer as
+              | "walls"
+              | "floors"
+              | "ceiling"
+              | "lighting"
+              | "entities",
+            presetId,
+            isSolidWall,
+            screenX: e.clientX,
+            screenY: e.clientY,
+          });
+        }
+        return;
+      }
+
+      // ── Select tool — left-click sets selection (read-only).
+      if (tool === "select" && e.button === 0) {
+        setSelected(cell);
+        setInspector({ kind: "cell", x: cell.x, y: cell.y });
+        return;
+      }
+
+      // ── Eyedropper — left-click adopts the cell's preset.
+      if (tool === "eyedropper" && e.button === 0) {
+        const id = presetForCell(scene, layer, cell.x, cell.y);
+        if (id) setActivePreset(id);
+        setSelected(cell);
+        setInspector({ kind: "cell", x: cell.x, y: cell.y });
+        return;
+      }
+
+      // ── Erase tool — left-click clears the cell on the active layer.
+      if (tool === "erase" && e.button === 0) {
+        dragRef.current = { button: 0, last: `${cell.x},${cell.y}` };
+        setSelected(cell);
+        setInspector({ kind: "cell", x: cell.x, y: cell.y });
+        paintCell(cell.x, cell.y, "erase");
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
+
+      // ── Move tool (#286) — pick up an entity / light under the cursor.
+      // Drag updates fire from onPointerMove via dragRef.last = "move:*".
+      if (tool === "move" && e.button === 0) {
+        const entities = scene.entities ?? [];
+        const entIdx = entities.findIndex((ent) => {
+          const p = getEntityPosition(ent);
+          return p && Math.floor(p.x) === cell.x && Math.floor(p.y) === cell.y;
+        });
+        if (entIdx >= 0) {
+          setSelected(cell);
+          setInspector({ kind: "entity", index: entIdx });
+          dragRef.current = { button: 0, last: `move:entity:${entIdx}` };
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          return;
+        }
+        const lights = scene.lights ?? [];
+        const lightIdx = lights.findIndex(
+          (l) => Math.floor(l.x) === cell.x && Math.floor(l.y) === cell.y,
+        );
+        if (lightIdx >= 0) {
+          setSelected(cell);
+          setInspector({ kind: "light", index: lightIdx });
+          dragRef.current = { button: 0, last: `move:light:${lightIdx}` };
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          return;
+        }
+        return;
+      }
+
       // ── Light tool — drop a new light at the clicked cell.
       // Left-click adds at default values; right-click on an existing
       // light removes it.
@@ -998,7 +1083,18 @@ export function GridEditor({
         e.preventDefault();
       }
     },
-    [pan, screenToCell, paintCell, tool, scene, onSceneChange],
+    [
+      pan,
+      screenToCell,
+      paintCell,
+      tool,
+      scene,
+      onSceneChange,
+      layer,
+      onCellContextMenu,
+      resolver,
+      setActivePreset,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -1018,13 +1114,73 @@ export function GridEditor({
       const drag = dragRef.current;
       if (drag.button !== null) {
         const key = `${cell.x},${cell.y}`;
+        // #286 — Move tool drag: tokenised dragRef.last identifies the
+        // entity / light we're dragging. Honour snapToGrid: snap →
+        // centre of cell; no snap → continuous float position.
+        if (
+          tool === "move" &&
+          typeof drag.last === "string" &&
+          drag.last.startsWith("move:")
+        ) {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const rect = canvas.getBoundingClientRect();
+          const fx = (e.clientX - rect.left - pan.x) / cellSize;
+          const fy = (e.clientY - rect.top - pan.y) / cellSize;
+          const targetX = snapToGrid ? cell.x + 0.5 : fx;
+          const targetY = snapToGrid ? cell.y + 0.5 : fy;
+          const parts = drag.last.split(":");
+          const kind = parts[1];
+          const idx = Number(parts[2] ?? "-1");
+          if (kind === "entity" && idx >= 0) {
+            const ent = scene.entities?.[idx];
+            if (ent) {
+              const pos = getEntityPosition(ent);
+              const z = pos?.z;
+              const next = replaceEntity(
+                scene,
+                idx,
+                setEntityPosition(ent, targetX, targetY, z),
+              );
+              onSceneChange(next);
+              setSelected({
+                x: Math.floor(targetX),
+                y: Math.floor(targetY),
+              });
+            }
+          } else if (kind === "light" && idx >= 0) {
+            const light = scene.lights?.[idx];
+            if (light) {
+              const next = replaceLight(scene, idx, {
+                ...light,
+                x: targetX,
+                y: targetY,
+              });
+              onSceneChange(next);
+              setSelected({
+                x: Math.floor(targetX),
+                y: Math.floor(targetY),
+              });
+            }
+          }
+          return;
+        }
         if (drag.last !== key) {
           drag.last = key;
           paintCell(cell.x, cell.y, drag.button === 0 ? "paint" : "erase");
         }
       }
     },
-    [screenToCell, paintCell],
+    [
+      screenToCell,
+      paintCell,
+      tool,
+      scene,
+      onSceneChange,
+      snapToGrid,
+      pan,
+      cellSize,
+    ],
   );
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -1355,6 +1511,72 @@ export function GridEditor({
     ? resolver?.get(selectedPresetId)
     : undefined;
 
+  // ── R4b — emit selection snapshot to MapView for the right-rail
+  // Cell Preview + Cell Inspector. Built on every render but parent's
+  // own `setSelection` dedupes on identity.
+  React.useEffect(() => {
+    if (!onMapSelectionChange) return;
+    const presetOptions: Array<{
+      id: string;
+      label: string;
+      data: import("@two_5_d/engine").ResolvedPresetData;
+      sourcePath: string;
+    }> = [];
+    if (resolver) {
+      for (const preset of resolver) {
+        if (preset.id.startsWith("__legacy.")) continue;
+        presetOptions.push({
+          id: preset.id,
+          label: preset.data.displayName ?? preset.id,
+          data: preset.data,
+          sourcePath: preset.sourcePath,
+        });
+      }
+    }
+    let floorPresetId: string | null = null;
+    let ceilingPresetId: string | null = null;
+    if (selected) {
+      floorPresetId = presetForCell(scene, "floors", selected.x, selected.y);
+      ceilingPresetId = presetForCell(scene, "ceiling", selected.x, selected.y);
+    }
+    const floorPreset = floorPresetId ? resolver?.get(floorPresetId) : undefined;
+    const ceilingPreset = ceilingPresetId
+      ? resolver?.get(ceilingPresetId)
+      : undefined;
+    onMapSelectionChange({
+      selected,
+      hover,
+      layer,
+      entityCount: scene.entities?.length ?? 0,
+      selectedPresetId,
+      selectedPresetData: selectedPreset?.data ?? null,
+      selectedPresetTextureUrl: selectedPreset
+        ? loadTexture(selectedPreset.data.texture)
+        : null,
+      floorPresetId,
+      floorPresetData: floorPreset?.data ?? null,
+      floorPresetTextureUrl: floorPreset
+        ? loadTexture(floorPreset.data.texture)
+        : null,
+      ceilingPresetId,
+      ceilingPresetData: ceilingPreset?.data ?? null,
+      ceilingPresetTextureUrl: ceilingPreset
+        ? loadTexture(ceilingPreset.data.texture)
+        : null,
+      presetOptions,
+    });
+  }, [
+    selected,
+    hover,
+    layer,
+    scene,
+    selectedPresetId,
+    selectedPreset,
+    resolver,
+    loadTexture,
+    onMapSelectionChange,
+  ]);
+
   return (
     <div className="flex h-full w-full bg-zinc-950 text-zinc-100">
       {/* Left: preset palette. */}
@@ -1413,6 +1635,13 @@ export function GridEditor({
               <button
                 key={p.presetId}
                 onClick={() => setActivePreset(p.presetId)}
+                onDoubleClick={() => onEditPreset?.(p.presetId)}
+                onContextMenu={(e) => {
+                  // #284 — right-click opens the palette context menu.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onPresetContextMenu?.(p.presetId, e.clientX, e.clientY);
+                }}
                 className={cn(
                   "flex items-center gap-2 w-full rounded px-2 py-1 text-left text-xs",
                   isActive
@@ -1423,8 +1652,8 @@ export function GridEditor({
                 )}
                 title={
                   isAnon
-                    ? `${p.presetId} — Anonymous preset (per-cell variant)`
-                    : p.presetId
+                    ? `${p.presetId} — Anonymous preset (per-cell variant) · double-click to edit`
+                    : `${p.presetId} · double-click to edit`
                 }
               >
                 <span
@@ -1451,49 +1680,58 @@ export function GridEditor({
 
       {/* Middle: canvas + toolbar. */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* #284 — Bake / size / zoom row stays as the top inner toolbar.
+            The legacy tool / layer chips are gone; the MapToolbar that
+            MapView injects below is the canonical surface (#246). */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 text-xs">
-          <span className="text-zinc-500 uppercase tracking-wide">Tool</span>
-          {(
-            [
-              { id: "paint" as const, label: "Paint (P)", hint: "Paint tiles" },
-              { id: "entity" as const, label: "Entity (E)", hint: "Place entities" },
-              { id: "light" as const, label: "Light (L)", hint: "Place lights" },
-            ]
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTool(t.id)}
-              className={cn(
-                "px-2 py-1 rounded border",
-                tool === t.id
-                  ? "bg-amber-500 text-zinc-950 border-amber-500"
-                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
-              )}
-              title={t.hint}
-            >
-              {t.label}
-            </button>
-          ))}
-          <div className="mx-2 h-4 w-px bg-zinc-800" />
-          <span className="text-zinc-500 uppercase tracking-wide">Layer</span>
-          {(["walls", "floors", "ceiling"] as const).map((l) => (
-            <button
-              key={l}
-              onClick={() => setLayer(l)}
-              disabled={tool !== "paint"}
-              className={cn(
-                "px-2 py-1 rounded border",
-                tool !== "paint" && "opacity-50 cursor-not-allowed",
-                layer === l
-                  ? "bg-amber-500 text-zinc-950 border-amber-500"
-                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
-              )}
-              title={`Edit ${l} layer (${l[0]?.toUpperCase()})`}
-            >
-              {l} ({l[0]?.toUpperCase()})
-            </button>
-          ))}
-          <div className="mx-2 h-4 w-px bg-zinc-800" />
+          {!toolbarSlot ? (
+            // Legacy chip toolbar — only rendered when no MapToolbar
+            // is plumbed in (e.g. older entrypoints).
+            <>
+              <span className="text-zinc-500 uppercase tracking-wide">Tool</span>
+              {(
+                [
+                  { id: "paint" as const, label: "Paint (P)", hint: "Paint tiles" },
+                  { id: "entity" as const, label: "Entity (E)", hint: "Place entities" },
+                  { id: "light" as const, label: "Light (L)", hint: "Place lights" },
+                ]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTool(t.id)}
+                  className={cn(
+                    "px-2 py-1 rounded border",
+                    tool === t.id
+                      ? "bg-amber-500 text-zinc-950 border-amber-500"
+                      : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
+                  )}
+                  title={t.hint}
+                >
+                  {t.label}
+                </button>
+              ))}
+              <div className="mx-2 h-4 w-px bg-zinc-800" />
+              <span className="text-zinc-500 uppercase tracking-wide">Layer</span>
+              {(["walls", "floors", "ceiling"] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLayer(l)}
+                  disabled={tool !== "paint"}
+                  className={cn(
+                    "px-2 py-1 rounded border",
+                    tool !== "paint" && "opacity-50 cursor-not-allowed",
+                    layer === l
+                      ? "bg-amber-500 text-zinc-950 border-amber-500"
+                      : "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
+                  )}
+                  title={`Edit ${l} layer (${l[0]?.toUpperCase()})`}
+                >
+                  {l} ({l[0]?.toUpperCase()})
+                </button>
+              ))}
+              <div className="mx-2 h-4 w-px bg-zinc-800" />
+            </>
+          ) : null}
           <button
             onClick={handleBake}
             disabled={bakeStatus.kind === "running"}
@@ -1564,6 +1802,11 @@ export function GridEditor({
             {scenePath}
           </div>
         </div>
+        {/* #280 / #284 — MapToolbar (Tools row + Layers row) lives BELOW
+            the Bake / size / zoom row, INSIDE GridEditor's inner toolbar
+            so it anchors above the canvas (not above the left palette
+            aside). */}
+        {toolbarSlot ?? null}
 
         <div
           ref={wrapRef}
