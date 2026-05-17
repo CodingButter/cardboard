@@ -571,6 +571,18 @@ export function GridEditor({
   onSceneSavedExternally,
   showAnonymousPresets = false,
   onShowAnonymousPresetsChange,
+  toolbarSlot,
+  snapToGrid = true,
+  gridLayer,
+  onGridLayerChange,
+  gridTool,
+  onGridToolChange,
+  activePresetId,
+  onActivePresetChange,
+  onMapSelectionChange,
+  onCellContextMenu,
+  onEditPreset,
+  onPresetContextMenu,
 }: GridEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -590,12 +602,57 @@ export function GridEditor({
    *  in sync (cell coords of the entity / light) so the canvas
    *  highlight ring still shows the right square. */
   const [inspector, setInspector] = useState<InspectorSelection>(null);
-  const [layer, setLayer] = useState<LayerName>("walls");
-  const [activePreset, setActivePreset] = useState<string | null>(null);
+  // ── Controlled props (#246/#280): MapView owns layer / tool /
+  // activePreset state and threads them through. We keep internal
+  // fallback state so legacy callers (no MapToolbar plumbed in) still
+  // work — the internal value is only used when the prop is undefined.
+  const [internalLayer, setInternalLayer] = useState<LayerName>("walls");
+  const [internalActivePreset, setInternalActivePreset] = useState<
+    string | null
+  >(null);
   const [presetFilter, setPresetFilter] = useState("");
   /** Active tool — paint / entity / light.  Driven by keyboard
    *  shortcuts (P / E / L) and the toolbar buttons. */
-  const [tool, setTool] = useState<EditorTool>("paint");
+  const [internalTool, setInternalTool] = useState<EditorTool>("paint");
+
+  // Resolved values: prop wins when present; falls back to internal
+  // state otherwise. The MapLayer union includes "lighting"/"entities"
+  // (paint-layer-less); we clamp those down to "walls" for the
+  // paint-grid resolver since GridEditor's grid mutation only knows
+  // walls/floors/ceiling. The active tool's pointer-down router stays
+  // the source of truth for what *happens* on those layers (e.g.
+  // light-tool click on the lighting layer drops a light).
+  const layer: LayerName = React.useMemo(() => {
+    if (gridLayer === "walls" || gridLayer === "floors" || gridLayer === "ceiling") {
+      return gridLayer;
+    }
+    return internalLayer;
+  }, [gridLayer, internalLayer]);
+  const tool: EditorTool = gridTool ?? internalTool;
+  const activePreset: string | null =
+    activePresetId !== undefined ? activePresetId : internalActivePreset;
+
+  const setLayer = React.useCallback(
+    (next: LayerName) => {
+      if (onGridLayerChange) onGridLayerChange(next);
+      else setInternalLayer(next);
+    },
+    [onGridLayerChange],
+  );
+  const setTool = React.useCallback(
+    (next: EditorTool) => {
+      if (onGridToolChange) onGridToolChange(next);
+      else setInternalTool(next);
+    },
+    [onGridToolChange],
+  );
+  const setActivePreset = React.useCallback(
+    (next: string | null) => {
+      if (onActivePresetChange) onActivePresetChange(next);
+      else setInternalActivePreset(next);
+    },
+    [onActivePresetChange],
+  );
   /** Prefab-picker popover state — opens on entity-tool click. */
   const [prefabPopover, setPrefabPopover] = useState<{
     x: number;
@@ -756,7 +813,7 @@ export function GridEditor({
     if (!activePreset && presetList.length > 0) {
       setActivePreset(presetList[0]!.presetId);
     }
-  }, [presetList, activePreset]);
+  }, [presetList, activePreset, setActivePreset]);
 
   // ── Painting -------------------------------------------------------
   const paintCell = useCallback(
