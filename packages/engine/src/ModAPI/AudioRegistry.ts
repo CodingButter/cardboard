@@ -65,17 +65,6 @@ export class AudioRegistry implements AudioAPI {
   private recipeStore: RecipeStore | null = null;
 
   /**
-   * Optional procedural-audio recipe store — SL2 of `docs/plans/SOUND_LAB.md`.
-   * When present, `startPlay` checks for a matching recipe id BEFORE
-   * the manifest sound lookup (per §6.6 + §12 Q11 RESOLVED: shared
-   * namespace, recipes first). Static + loop recipes resolve to an
-   * `AudioBuffer` and flow through the same per-handle machinery as
-   * manifest sounds; instrument-mode recipes are NOT plumbed through
-   * `play()` — callers use `api.proceduralAudio.playInstrument(...)`.
-   */
-  private recipeStore: RecipeStore | null = null;
-
-  /**
    * One-shot user-gesture listener wiring. Browsers block
    * `AudioContext.resume()` until the user has clicked / pressed a
    * key. We attach `pointerdown` + `keydown` listeners on first
@@ -137,44 +126,6 @@ export class AudioRegistry implements AudioAPI {
    * Bootstrap the AudioContext eagerly. Used by the procedural-audio
    * surface when a pack-script call needs a context up front (e.g.
    * `proceduralAudio.load(id)` so the bake's sampleRate is known).
-   */
-  bootstrapContext(): AudioContext {
-    return this.ensureContext();
-  }
-
-  /**
-   * Attach (or detach) the procedural-audio recipe store. The engine
-   * wires this on boot AFTER `RecipeStore.loadFromPack(pack)` has
-   * populated the recipe map — at that point `startPlay` can resolve
-   * recipe ids first. Pass `null` to clear (used by pack-swap paths).
-   */
-  setRecipeStore(store: RecipeStore | null): void {
-    this.recipeStore = store;
-  }
-
-  /**
-   * Expose the live AudioContext + group gain node to the procedural-
-   * audio surface (for instrument-mode voices, per SL2). Returns
-   * `null` until the context has been bootstrapped (i.e. after a
-   * user-gesture-driven `ensureContext()` call). Pack scripts that
-   * need to trigger an instrument before any gesture will see this
-   * as `null` and get a silent fallback.
-   *
-   * The returned group gain defaults to `"sfx"`; callers can request
-   * a different one via the group arg.
-   */
-  liveBus(group: SoundGroup = "sfx"): { ctx: AudioContext; group: AudioNode } | null {
-    if (!this.ctx) return null;
-    const node = this.groupGains?.get(group) ?? this.masterGain;
-    if (!node) return null;
-    return { ctx: this.ctx, group: node };
-  }
-
-  /**
-   * Bootstrap the AudioContext eagerly. Pack scripts calling
-   * `playInstrument(...)` from inside a user-gesture handler want the
-   * context up-front; callers outside a gesture get the same lazy
-   * resume listener the regular `play()` path uses.
    */
   bootstrapContext(): AudioContext {
     return this.ensureContext();

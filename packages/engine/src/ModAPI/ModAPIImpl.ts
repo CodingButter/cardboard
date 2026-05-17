@@ -45,6 +45,7 @@ import type {
   SettingsAPI,
   UIAPI,
 } from "./types";
+import { ProceduralAPIImpl, type ProceduralAPI } from "Procedural";
 import { ComponentRegistry } from "./ComponentRegistry";
 import { SystemRegistry } from "./SystemRegistry";
 import { PrefabRegistry } from "./PrefabRegistry";
@@ -144,6 +145,21 @@ export class ModAPIImpl implements ModAPI {
     syncFromConfig(): void;
   };
   /**
+   * Procedural-image surface — IL2 of `docs/plans/IMAGE_LAB.md`.
+   * Recipes (`recipes/*.image.json`) compile + bake to a WebGL
+   * texture on first `load(id)`; static texture + spritesheet bakes
+   * are cached in IDB keyed by recipe content hash so cold loads on
+   * subsequent sessions skip the bake.
+   *
+   * Held as the concrete shape (with `dispose()`) so the engine can
+   * tear down the offscreen renderer on pack swap / shutdown without
+   * casting; pack scripts see only the `ProceduralAPI` slice via the
+   * public `ModAPI` interface.
+   */
+  readonly procedural: ProceduralAPI & {
+    dispose(): void;
+  };
+  /**
    * Procedural-audio surface — SL2 of `docs/plans/SOUND_LAB.md`. The
    * concrete `RecipeStore` is held privately; pack scripts see only
    * the `ProceduralAudioAPI` slice exposed via the public `ModAPI`
@@ -218,6 +234,7 @@ export class ModAPIImpl implements ModAPI {
     this.anim = new AnimRegistry(this.world);
     const audioRegistry = new AudioRegistry(deps.pack);
     this.audio = audioRegistry;
+    this.procedural = new ProceduralAPIImpl(deps.pack);
     this.recipeStore = new RecipeStore();
     this.proceduralAudio = this.buildProceduralAudio(audioRegistry, deps.pack);
     // Wire the recipe store into the audio registry so `api.audio.play`

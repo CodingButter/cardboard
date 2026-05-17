@@ -26,6 +26,8 @@
       "ModAPI": ["./src/ModAPI/index.ts"],
       "ModAPI/*": ["./src/ModAPI/*"],
       "PreactRuntime": ["./src/PreactRuntime.ts"],
+      "Procedural": ["./src/Procedural/index.ts"],
+      "Procedural/*": ["./src/Procedural/*"],
       "ProceduralAudio": ["./src/ProceduralAudio/index.ts"],
       "ProceduralAudio/*": ["./src/ProceduralAudio/*"],
       "Renderers": ["./src/Renderers/index.ts"],
