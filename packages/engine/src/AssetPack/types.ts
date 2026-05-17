@@ -586,6 +586,17 @@ export interface PackManifest {
    */
   prefabs?: Record<string, DeclarativePrefab>;
   /**
+   * Manifest-declared components (WORLD_STATE.md §4). Each entry
+   * gives the engine a `name`, optional `schema`, and optional `tags`
+   * (`"entity"` / `"scene"` / `"world"` / …). The engine registers
+   * every entry against the shared `ComponentRegistry` BEFORE pack
+   * scripts run, so script-side spawns and scene-controller spawns
+   * can resolve pack-declared component names. Built-in conflicts
+   * are tolerated — the built-in instance keeps the live storage and
+   * the manifest entry augments tags/schema for editor pickers.
+   */
+  components?: ComponentDef[];
+  /**
    * Procedural image recipes — IL2 of `docs/plans/IMAGE_LAB.md`.
    * Keys are recipe ids referenced by `api.procedural.load(id)`;
    * values point at the `.recipe.json` file inside the pack. A pack

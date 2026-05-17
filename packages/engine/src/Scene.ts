@@ -413,6 +413,17 @@ export class Scene {
   readonly size: Vec2;
   /** Player spawn point. Falls back to `(1.5, 1.5, 0)` if none specified. */
   readonly spawn: SceneSpawn;
+  /**
+   * Scene-controller declaration parsed from the scene JSON's
+   * `controller` block (WORLD_STATE.md §5.2 + §6.2). The engine
+   * spawns a synthetic controller entity at scene-load and attaches
+   * `controller.components` to it; pack scripts read the live values
+   * via `api.sceneController.components`. Always present — legacy
+   * scenes without a `controller` block get a synthesised one with
+   * a one-point `SpawnerList` derived from the legacy top-level
+   * `spawn` field.
+   */
+  readonly controller: { components: Readonly<Record<string, unknown>> };
   /** Authored static light sources (post-default-normalised). */
   readonly lights: ReadonlyArray<Required<LightDef>>;
   /**
@@ -448,9 +459,19 @@ export class Scene {
      * WebGL renderer can map cells to world-shader variants (M2).
      */
     cellPresets: ReadonlyArray<ReadonlyArray<CellPresetIds | undefined>> | undefined = undefined,
+    /**
+     * Pre-resolved scene-controller components (WORLD_STATE.md §5.2).
+     * When omitted, the constructor synthesises a one-point
+     * `SpawnerList` from `spawn` so the controller view is never
+     * empty for legacy scenes.
+     */
+    controllerComponents: Readonly<Record<string, unknown>> | undefined = undefined,
   ) {
     this.spawn = spawn;
     this.shaders = shaders;
+    this.controller = {
+      components: controllerComponents ?? synthesiseControllerFromSpawn(spawn),
+    };
     const defaultFloor = options.defaultFloor ?? DEFAULT_FLOOR;
     const defaultCeiling = options.defaultCeiling ?? DEFAULT_CEILING;
 
@@ -760,6 +781,15 @@ export class Scene {
       });
     }
 
+    // WORLD_STATE.md §5.2 + §11.2 — read the scene-controller block
+    // verbatim from JSON. When absent the constructor falls back to a
+    // synthesised one-point SpawnerList derived from the legacy
+    // top-level `spawn` field.
+    const controllerComponents =
+      data.controller?.components !== undefined
+        ? Object.freeze({ ...data.controller.components })
+        : undefined;
+
     return new Scene(
       walls,
       floors,
@@ -770,6 +800,7 @@ export class Scene {
       lightmap,
       data.shaders,
       cellPresets,
+      controllerComponents,
     );
   }
 }
@@ -912,6 +943,28 @@ function facePresetToShort(face: "north" | "south" | "east" | "west"): WallFace 
 }
 
 /** Fill in light defaults so renderers can read fields directly. */
+/**
+ * Build a fallback scene-controller components map from the legacy
+ * top-level `spawn` field. Produces a one-point `SpawnerList` so
+ * `api.sceneController.components.SpawnerList.points[0]` resolves
+ * identically to `api.scene.spawn` for legacy scenes. WORLD_STATE.md
+ * §11.2 back-compat path.
+ */
+function synthesiseControllerFromSpawn(spawn: SceneSpawn): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    SpawnerList: Object.freeze({
+      points: [
+        Object.freeze({
+          id: "main",
+          x: spawn.x,
+          y: spawn.y,
+          facing: spawn.facing,
+        }),
+      ],
+    }),
+  });
+}
+
 function normaliseLight(l: LightDef): Required<LightDef> {
   return {
     x: l.x,
@@ -1043,6 +1096,14 @@ export interface SceneJSON {
   ceilings?: CeilingCellInput[][] | number[][];
   /** Optional player spawn override. Falls back to `(1.5, 1.5)` facing east. */
   spawn?: { x: number; y: number; facing?: number };
+  /**
+   * Scene-controller block — WORLD_STATE.md §5.2 + §6.2. Carries the
+   * per-scene component bundle attached to the synthetic controller
+   * entity at scene-load. Optional — when missing the loader
+   * synthesises a one-point `SpawnerList` from the legacy top-level
+   * `spawn` field.
+   */
+  controller?: SceneControllerJSON;
   /**
    * Static light sources to bake into the scene's lightmap at
    * `bun run build-packs` time. Each one contributes

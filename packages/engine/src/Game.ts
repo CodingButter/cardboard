@@ -289,6 +289,16 @@ export class Game {
    * script shouldn't take the whole pack down.
    */
   async runPackScripts(): Promise<void> {
+    // WORLD_STATE.md §4 — register every entry in
+    // `manifest.components[]` BEFORE pack scripts run so script-side
+    // entity-spawn paths and the scene-controller spawn can resolve
+    // pack-declared component names. Built-in conflicts are tolerated
+    // (the built-in component class wins; manifest entry just
+    // augments tags/schema for editor pickers).
+    this.api.registerComponentsFromManifest(
+      this.pack.manifest.components,
+      this.pack.manifest.name ?? "pack",
+    );
     const scripts = await this.pack.scripts();
     for (const { path, source } of scripts) {
       try {
@@ -374,6 +384,54 @@ export class Game {
   }
 
   /**
+   * Currently-active synthetic scene-controller entity id (WORLD_STATE.md
+   * §5.2 + §6.2). Tracked so the engine can despawn it on the next
+   * scene-load before spawning a fresh one. `undefined` until the
+   * first `spawnSceneController` call.
+   */
+  private sceneControllerEntity: number | undefined = undefined;
+
+  /**
+   * Spawn the synthetic scene-controller entity from the active
+   * scene's `controller.components` block. Tears down the previous
+   * controller (if any) first. WORLD_STATE.md §5.2 + §6.2.
+   *
+   * The engine resolves component names through the shared
+   * `ComponentRegistry` — unknown component names log a warning and
+   * are skipped. Pack scripts read the live controller state via
+   * `api.sceneController.components`.
+   */
+  spawnSceneController(): void {
+    // Tear down the previous controller — its components are scoped
+    // to the scene lifetime per §6.3 (only world singletons + entities
+    // tagged `_persistent: true` survive scene swaps).
+    if (
+      this.sceneControllerEntity !== undefined &&
+      this.world.has(this.sceneControllerEntity)
+    ) {
+      this.world.despawn(this.sceneControllerEntity);
+    }
+    const entity = this.world.spawn();
+    this.sceneControllerEntity = entity;
+    const components = this.scene.controller.components;
+    for (const [name, value] of Object.entries(components)) {
+      if (name.startsWith("_")) continue; // editor-only metadata
+      const c = this.api.getComponent(name);
+      if (c === undefined) {
+        console.warn(
+          `[scene-controller] unknown component "${name}" — skipping ` +
+            "(declare it in manifest.components[] or via api.defineComponent)",
+        );
+        continue;
+      }
+      this.world.add(entity, c, value as unknown);
+    }
+    // Publish the live view through ModAPI so pack scripts can read
+    // `api.sceneController.components.SpawnerList` etc.
+    this.api.setSceneController(entity);
+  }
+
+  /**
    * Spawn the entities the scene + engine expect to exist before the
    * first frame renders. Today that's just the player — assembled by
    * the default pack's `"player"` prefab against `scene.spawn`.
@@ -395,6 +453,15 @@ export class Game {
     if (this.currentScenePath === "") {
       this.currentScenePath = this.pack.manifest.startScene;
     }
+    // WORLD_STATE.md §6.1 — fire `world:ready` ONCE per Game lifetime,
+    // AFTER `runPackScripts()` and BEFORE the first scene-controller
+    // spawn. Pack scripts use it for one-time setup that doesn't
+    // depend on a live scene controller or its components.
+    this.api.events.emit("world:ready", {});
+    // WORLD_STATE.md §5.2 + §6.2 — spawn the synthetic scene-controller
+    // entity so `api.sceneController.components` is populated by the
+    // time `onWorldReady` callbacks fire.
+    this.spawnSceneController();
     this.api.spawnPrefab("player", { x, y, facing });
     // Fire any pack-registered `onWorldReady` callbacks now that the
     // player + scene entities exist. Scripts use this to locate named
@@ -440,16 +507,24 @@ export class Game {
   async loadScene(path: string): Promise<void> {
     // Ev1 of EVENTS.md §4.1 — emit `scene:beforeLoad` BEFORE the swap
     // begins so subscribers can capture the outgoing scene's id, and
-    // `scene:beforeUnload` so they can read entity state one last
-    // time before the player's Position resets to the new spawn.
+    // `scene:beforeUnload` / `scene:willUnload` (WORLD_STATE.md §6.2
+    // alias) so they can read entity state one last time before the
+    // controller swap.
     const from = this.currentScenePath || undefined;
     this.api.events.emit("scene:beforeLoad", { from, to: path });
-    if (from) this.api.events.emit("scene:beforeUnload", { name: from });
+    if (from) {
+      this.api.events.emit("scene:beforeUnload", { name: from });
+      this.api.events.emit("scene:willUnload", { name: from });
+    }
 
     const fresh = await this.pack.scene(path);
     this.scene = fresh;
     this.api.scene = fresh;
     this.currentScenePath = path;
+    // WORLD_STATE.md §6.2 — rebuild the synthetic controller entity
+    // from the new scene's `controller.components` block. Previous
+    // controller is despawned inside `spawnSceneController`.
+    this.spawnSceneController();
     // Reset the player to the new scene's spawn. Keeping the world
     // intact across scene swaps is a deliberate I1 choice — full
     // entity teardown on each load is I2 territory.
