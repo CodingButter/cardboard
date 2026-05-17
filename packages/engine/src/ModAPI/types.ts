@@ -555,6 +555,38 @@ export interface DebugAPI {
   stats(): DebugStatsSnapshot;
 }
 
+/**
+ * Output of `api.serialize(entityId)` — WORLD_STATE.md §9. The shape
+ * matches `scene.entities[]` records so a serialised entity round-trips
+ * through `api.deserialize` byte-for-byte (modulo `_*` opaque metadata
+ * which carries forward verbatim).
+ */
+export interface SerializedEntity {
+  /** Optional name — round-trips with the entity. */
+  name?: string;
+  /** componentName → componentData (JSON-clean). */
+  components: Record<string, unknown>;
+  /** Editor-only metadata (`_prefabSource`, `_persistent`, …). Opaque round-trip. */
+  [editorOnly: `_${string}`]: unknown;
+}
+
+/**
+ * View onto the synthetic scene-controller entity — WORLD_STATE.md
+ * §5.2 + §6.2. Pack scripts read this to access per-scene state
+ * (`SpawnerList`, `Music`, `Victory`, …). The controller entity is
+ * spawned on every scene load and despawned on scene unload — the
+ * id is stable only within a single scene.
+ */
+export interface SceneControllerView {
+  /** Live entity id of the synthetic controller. */
+  readonly id: Entity;
+  /**
+   * Live read-through map of components attached to the controller
+   * entity, keyed by component name.
+   */
+  readonly components: Readonly<Record<string, unknown>>;
+}
+
 /** The api passed to every pack script. */
 export interface ModAPI {
   /** The active ECS world. Stable across the session. */
@@ -675,4 +707,45 @@ export interface ModAPI {
    * available slots. Order within a phase is registration order.
    */
   registerRendererSystem(fn: RendererSystemFn, phase: RenderPhase): () => void;
+
+  // ─── Data-first surface (WORLD_STATE.md §3 + §9) ─────────────────
+
+  /**
+   * View onto the synthetic scene-controller entity (WORLD_STATE.md
+   * §5.2). `undefined` while no scene is loaded; populated by the
+   * engine at every `scene:loaded` boundary. Pack scripts read it for
+   * per-scene state (`SpawnerList`, `Music`, …) attached via the
+   * scene's `controller.components` block.
+   */
+  readonly sceneController: SceneControllerView | undefined;
+
+  /**
+   * Get-or-create the world-singleton entity that carries
+   * `componentName`. The engine maintains exactly one entity per name
+   * across the whole session (survives scene swaps). Returns the live
+   * component-data reference — mutations persist. See WORLD_STATE.md
+   * §5.3.
+   *
+   * The component must be registered (built-in, manifest-declared, or
+   * `api.defineComponent`) before calling. Throws otherwise.
+   */
+  singleton<T>(componentName: string): T;
+
+  /**
+   * Snapshot one entity into a JSON-clean `SerializedEntity`. Walks
+   * every registered component and includes the ones the entity has.
+   * Round-trips through `deserialize`. WORLD_STATE.md §9.
+   */
+  serialize(entityId: Entity): SerializedEntity;
+
+  /**
+   * Reconstruct an entity from a `SerializedEntity` snapshot. Default
+   * spawns a fresh entity; pass `opts.targetId` to write the snapshot
+   * onto an existing entity (used by multiplayer delta replication —
+   * MULTIPLAYER.md M1). Returns the resulting entity id.
+   */
+  deserialize(
+    json: SerializedEntity,
+    opts?: { targetId?: Entity },
+  ): Entity;
 }

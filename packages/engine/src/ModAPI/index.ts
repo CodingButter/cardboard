@@ -21,7 +21,11 @@ export type {
   BindingsAPI,
   EventsAPI,
   EventSubscription,
+  SceneControllerView,
+  SerializedEntity,
 } from "./types";
+export { SystemScheduler, type SystemFn, type SystemPhase } from "./SystemScheduler";
+export { ScriptLoader } from "./ScriptLoader";
 export { EventsRegistry } from "./EventsRegistry";
 export { AudioRegistry } from "./AudioRegistry";
 export type { CanonicalEvents } from "./canonical-events";

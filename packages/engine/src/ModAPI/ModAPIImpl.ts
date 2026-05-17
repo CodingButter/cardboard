@@ -44,6 +44,8 @@ import type {
   RaycastAPI,
   RendererSystemFn,
   RenderPhase,
+  SceneControllerView,
+  SerializedEntity,
   SettingsAPI,
   UIAPI,
 } from "./types";
@@ -219,6 +221,29 @@ export class ModAPIImpl implements ModAPI {
   private worldReadyCallbacks: Array<(api: ModAPI) => void> = [];
   private worldReady = false;
 
+  /**
+   * World-singleton tracker — `componentName → entityId`. Persists
+   * across scene swaps (the engine's scene-teardown loop skips these
+   * ids). Created lazily on the first `api.singleton(name)` call per
+   * name. WORLD_STATE.md §5.3.
+   */
+  private readonly singletonEntities = new Map<string, Entity>();
+
+  /**
+   * Currently-active scene controller view (WORLD_STATE.md §5.2).
+   * Updated by `Game` on every `scene:loaded` boundary via
+   * `setSceneController`. `undefined` between scenes (scene unloaded,
+   * next not yet ready).
+   */
+  private sceneControllerState: SceneControllerView | undefined = undefined;
+
+  /**
+   * One-shot warn-set so non-serialisable components don't spam the
+   * console on every save / replication tick. Cleared per `Game`
+   * lifetime — re-flagging a problem after a hot-reload is fine.
+   */
+  private readonly serialiseWarned = new Set<string>();
+
   constructor(deps: ModAPIDeps) {
     this.world = deps.world;
     this.scene = deps.scene;
@@ -259,6 +284,11 @@ export class ModAPIImpl implements ModAPI {
     this.world.onDespawn = (entity) => {
       this.events.emit("entity:despawned", { entity });
     };
+    // Wire the World's name-resolver so the string-based query path
+    // (api.world.query("Position", "Health")) resolves through the
+    // shared ComponentRegistry. WORLD_STATE.md §9.
+    this.world.resolveComponentName = (name) =>
+      this.componentRegistry.getComponent(name);
     // Minimal debug surface — see the field's doc comment for why the
     // renderer / timing fields are stubbed. The closure captures
     // `this.world` so a later `world` reassignment (currently never
@@ -354,6 +384,164 @@ export class ModAPIImpl implements ModAPI {
     return this.rendererSystemRegistry.register(fn, phase);
   }
 
+  // ─── Data-first surface (WORLD_STATE.md §3 + §9) ─────────────────
+
+  /** Active scene-controller view; updated by `Game.spawnSceneController`. */
+  get sceneController(): SceneControllerView | undefined {
+    return this.sceneControllerState;
+  }
+
+  /**
+   * Called by `Game` after spawning the synthetic controller entity.
+   * Passing `undefined` clears the view (scene-unload boundary). The
+   * view's `components` proxy reads through live `Component.get`
+   * lookups so writes via `world.add(controller.id, …)` are visible.
+   * WORLD_STATE.md §5.2 + §6.2.
+   */
+  setSceneController(entity: Entity | undefined): void {
+    if (entity === undefined) {
+      this.sceneControllerState = undefined;
+      return;
+    }
+    const componentRegistry = this.componentRegistry;
+    // Build a Proxy whose get() walks the registry every read so
+    // component attaches AFTER setSceneController are visible without
+    // re-building the view.
+    const componentsProxy = new Proxy(
+      {} as Record<string, unknown>,
+      {
+        get(_target, prop) {
+          if (typeof prop !== "string") return undefined;
+          const c = componentRegistry.getComponent(prop);
+          if (c === undefined) return undefined;
+          return c.get(entity);
+        },
+        has(_target, prop) {
+          if (typeof prop !== "string") return false;
+          const c = componentRegistry.getComponent(prop);
+          if (c === undefined) return false;
+          return c.has(entity);
+        },
+        ownKeys() {
+          const keys: string[] = [];
+          for (const c of componentRegistry.allComponents()) {
+            if (c.has(entity)) keys.push(c.name);
+          }
+          return keys;
+        },
+        getOwnPropertyDescriptor(_target, prop) {
+          if (typeof prop !== "string") return undefined;
+          const c = componentRegistry.getComponent(prop);
+          if (c === undefined || !c.has(entity)) return undefined;
+          return {
+            enumerable: true,
+            configurable: true,
+            writable: false,
+            value: c.get(entity),
+          };
+        },
+      },
+    ) as Readonly<Record<string, unknown>>;
+    this.sceneControllerState = {
+      id: entity,
+      components: componentsProxy,
+    };
+  }
+
+  /**
+   * Snapshot every singleton entity id the engine tracks — used by
+   * `Game.spawnSceneController` to skip these during scene-unload
+   * despawn so per-world state survives swaps. WORLD_STATE.md §5.3.
+   */
+  getSingletonEntityIds(): ReadonlyArray<Entity> {
+    return Array.from(this.singletonEntities.values());
+  }
+
+  /**
+   * Register manifest-declared components against the shared
+   * `ComponentRegistry`. Called by `Game.runPackScripts` before any
+   * pack-script setup so component names referenced from scripts /
+   * scene controllers / scene entities resolve at boot.
+   * WORLD_STATE.md §4 + §10.3.
+   */
+  registerComponentsFromManifest(
+    defs: ReadonlyArray<import("AssetPack").ComponentDef> | undefined,
+    packLabel: string,
+  ): void {
+    const summary = this.componentRegistry.registerFromManifest(defs, packLabel);
+    if (summary.created + summary.augmented + summary.conflicted > 0) {
+      console.log(
+        `[components] ${packLabel}: ${summary.created} new, ` +
+          `${summary.augmented} augmented, ${summary.conflicted} conflicted`,
+      );
+    }
+  }
+
+  singleton<T>(componentName: string): T {
+    const c = this.componentRegistry.getComponent(componentName);
+    if (c === undefined) {
+      throw new Error(
+        `api.singleton: component "${componentName}" is not registered ` +
+          "(declare it in manifest.components[] or call api.defineComponent first).",
+      );
+    }
+    let entity = this.singletonEntities.get(componentName);
+    if (entity === undefined || !this.world.has(entity)) {
+      entity = this.world.spawn();
+      this.singletonEntities.set(componentName, entity);
+    }
+    if (!c.has(entity)) {
+      // Fresh singleton — attach an empty object as the seed value.
+      // Pack authors mutate the returned reference; if a pack ships
+      // a `world.json` initial value the engine attaches it before
+      // any singleton(name) call (WORLD_STATE.md §10.2).
+      this.world.add(entity, c as Component<unknown>, {} as unknown);
+    }
+    return c.get(entity) as T;
+  }
+
+  serialize(entityId: Entity): SerializedEntity {
+    const out: SerializedEntity = { components: {} };
+    if (!this.world.has(entityId)) return out;
+    for (const c of this.componentRegistry.allComponents()) {
+      if (!c.has(entityId)) continue;
+      const raw = c.get(entityId);
+      const clean = jsonClone(raw);
+      if (clean === SERIALIZE_DROP) {
+        if (!this.serialiseWarned.has(c.name)) {
+          this.serialiseWarned.add(c.name);
+          console.warn(
+            `[serialize] component "${c.name}" carries non-JSON data — omitted from serialise output`,
+          );
+        }
+        continue;
+      }
+      out.components[c.name] = clean;
+    }
+    return out;
+  }
+
+  deserialize(
+    json: SerializedEntity,
+    opts?: { targetId?: Entity },
+  ): Entity {
+    const target =
+      opts?.targetId !== undefined && this.world.has(opts.targetId)
+        ? opts.targetId
+        : this.world.spawn();
+    for (const [name, value] of Object.entries(json.components ?? {})) {
+      const c = this.componentRegistry.getComponent(name);
+      if (c === undefined) {
+        console.warn(
+          `[deserialize] unknown component "${name}" — skipping (entity ${target})`,
+        );
+        continue;
+      }
+      this.world.add(target, c as Component<unknown>, value as unknown);
+    }
+    return target;
+  }
+
   /** Called by `Game.update`. Runs every mod-registered system in order. */
   runFrame(deltaTime: number): void {
     this.systemRegistry.runFrame(this.world, deltaTime);
@@ -418,4 +606,59 @@ export class ModAPIImpl implements ModAPI {
       dispose: () => store.dispose(),
     };
   }
+}
+
+/**
+ * Sentinel returned by `jsonClone` when a value carries non-JSON-clean
+ * data (function, Symbol, circular reference). The caller treats it as
+ * "drop this component from the serialise output, warn once".
+ */
+const SERIALIZE_DROP = Symbol("two_5_d/serialize-drop");
+
+/**
+ * JSON-clean an arbitrary component value. Vec2 instances render as
+ * `{ x, y, z? }`; primitive + array + plain-object values pass through;
+ * functions / Symbols / circular references trigger the drop sentinel.
+ *
+ * WORLD_STATE.md §9 — non-serialisable components emit a one-shot
+ * warning + are omitted from the snapshot. Pack authors keeping
+ * non-clean state on a component see the warning and can act on it.
+ */
+function jsonClone(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === "number" || t === "string" || t === "boolean") return value;
+  if (t === "function" || t === "symbol") return SERIALIZE_DROP;
+  if (t !== "object") return SERIALIZE_DROP;
+  const obj = value as object;
+  if (seen.has(obj)) return SERIALIZE_DROP;
+  seen.add(obj);
+  // Vec2 — duck-typed on { x: number, y: number } so this stays
+  // independent of the Libs/Vector module's class identity.
+  const vec = obj as { x?: unknown; y?: unknown; z?: unknown };
+  if (
+    typeof vec.x === "number" &&
+    typeof vec.y === "number" &&
+    Object.keys(obj).length <= 3
+  ) {
+    return typeof vec.z === "number"
+      ? { x: vec.x, y: vec.y, z: vec.z }
+      : { x: vec.x, y: vec.y };
+  }
+  if (Array.isArray(obj)) {
+    const out: unknown[] = [];
+    for (const item of obj) {
+      const cleaned = jsonClone(item, seen);
+      if (cleaned === SERIALIZE_DROP) return SERIALIZE_DROP;
+      out.push(cleaned);
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const cleaned = jsonClone(v, seen);
+    if (cleaned === SERIALIZE_DROP) return SERIALIZE_DROP;
+    out[k] = cleaned;
+  }
+  return out;
 }

@@ -43,6 +43,17 @@ export class World {
    */
   onDespawn: ((entity: Entity) => void) | null = null;
 
+  /**
+   * Optional name → Component resolver, installed by `ModAPIImpl` so
+   * the string-based `query` / `getComponentByName` paths can look
+   * names up through `ComponentRegistry`. Bare-`World` callers
+   * (engine internals, tests) leave it unset; in that mode the
+   * string-named helpers no-op (empty iterator / undefined).
+   * WORLD_STATE.md §9.
+   */
+  resolveComponentName: ((name: string) => Component<unknown> | undefined) | null =
+    null;
+
   /** Allocate a new entity id. Reuses ids freed by `despawn` when possible. */
   spawn(): Entity {
     const id = this.freeIds.pop() ?? this.nextId++;
@@ -187,5 +198,40 @@ export class World {
     fn: (entity: Entity) => void,
   ): void {
     for (const entity of this.queryComponents(...components)) fn(entity);
+  }
+
+  /**
+   * String-named query — generator yielding every entity carrying all
+   * `names`. Resolves names through `resolveComponentName` (wired by
+   * `ModAPIImpl`). Unknown names yield no entities. The component-
+   * instance variant `queryComponents` is preferred inside engine
+   * internals where the `Component` reference is already in hand;
+   * pack scripts use this through `api.world.query(...names)`.
+   * WORLD_STATE.md §9.
+   */
+  *query(...names: string[]): IterableIterator<Entity> {
+    if (names.length === 0) return;
+    const resolver = this.resolveComponentName;
+    if (resolver === null) return;
+    const components: Component<unknown>[] = [];
+    for (const name of names) {
+      const c = resolver(name);
+      if (c === undefined) return; // unknown name → no matches
+      components.push(c);
+    }
+    yield* this.queryComponents(...components);
+  }
+
+  /**
+   * By-name component lookup. Returns the raw component value or
+   * `undefined` if the name is unknown or the entity lacks the
+   * component. WORLD_STATE.md §9.
+   */
+  getComponentByName(entity: Entity, name: string): unknown | undefined {
+    const resolver = this.resolveComponentName;
+    if (resolver === null) return undefined;
+    const c = resolver(name);
+    if (c === undefined) return undefined;
+    return c.get(entity);
   }
 }
