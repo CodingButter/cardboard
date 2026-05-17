@@ -420,11 +420,6 @@ function classifyRegistration(
   // in default-pack's player.js). Hoisted into the residual init
   // script when the factory body references the binding identifier.
   const closureHoists: string[] = [];
-  // Closure-binding source text from the surrounding `export default
-  // (api) => { ... }` body (e.g. top-level `const defaultCamera = …`
-  // in default-pack's player.js). Hoisted into the residual init
-  // script when the factory body references the binding identifier.
-  const closureHoists: string[] = [];
 
   for (const stmt of body.body) {
     if (stmt.type === "ReturnStatement") {
@@ -526,34 +521,6 @@ function classifyRegistration(
     totalCalls: calls.length,
     extractedCount: Object.keys(staticComponents).length,
   };
-}
-
-/**
- * `true` when a `VariableDeclarator` re-declares an alias the
- * init-script wrapper already provides — `const world = api.world` or
- * `const C = api.components`. Stripping these from the residual avoids
- * the duplicate-binding SyntaxError that crashes module load.
- */
-function isRedundantWrapperAlias(
-  d: { id: Node; init?: Expression | null },
-): boolean {
-  if (!d.init) return false;
-  if (d.id.type !== "Identifier") return false;
-  const name = d.id.name;
-  if (name !== "world" && name !== "C") return false;
-  const init = d.init;
-  if (init.type !== "MemberExpression" || init.computed) return false;
-  if (init.object.type !== "Identifier" || init.object.name !== "api") {
-    return false;
-  }
-  if (init.property.type !== "Identifier") return false;
-  if (name === "world") return init.property.name === "world";
-  if (name === "C") return init.property.name === "components";
-  return false;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
