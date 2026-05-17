@@ -6,6 +6,7 @@ import { Button, Input } from "../components/ui";
 import {
   Badge,
   ColorChip,
+  CollapsibleSection,
   FilePicker,
   PanelHeader,
   PropertyRow,
@@ -19,7 +20,7 @@ import { EditorProjectStore } from "../lib/EditorProjectStore";
 import { clonePreset } from "../lib/presetCrud";
 
 /**
- * PresetEditView — full-screen Preset Edit Mode (Scene tab → MapView).
+ * PresetEditView — full-screen Preset Edit Mode (Map tab → MapView).
  *
  * When MapView's `editingPresetId` is set, this view REPLACES the
  * normal grid + right-rail layout. The user gets:
@@ -373,6 +374,35 @@ export function PresetEditView({
     onExit();
   }, [dirty, onCancel, onExit]);
 
+  // ── Synthesise the floor / ceiling override data for the preview
+  //    so the engine sees the picked preset's full ResolvedPresetData.
+  //    We don't have direct access to the resolver here — the parent
+  //    feeds `presetOptions` (id + label + sourcePath) but the engine
+  //    needs the resolved data. The CellPreview prop surface accepts
+  //    only the id-based override (the engine re-resolves internally
+  //    via its IdbAssetPack), so we forward `floorOverride` /
+  //    `ceilingOverride` ids through CellPreview's existing override
+  //    props. Job done — no extra plumbing.
+
+  // Split preset options into floor / ceiling / wall buckets by
+  // sourcePath substring (the convention `floors` / `ceilings` /
+  // `walls` matches what default-pack uses).
+  const floorOptions = useMemo(() => {
+    return presetOptions.filter((p) =>
+      p.sourcePath.toLowerCase().includes("floor"),
+    );
+  }, [presetOptions]);
+  const ceilingOptions = useMemo(() => {
+    return presetOptions.filter((p) =>
+      p.sourcePath.toLowerCase().includes("ceil"),
+    );
+  }, [presetOptions]);
+  const wallOptions = useMemo(() => {
+    return presetOptions.filter((p) =>
+      p.sourcePath.toLowerCase().includes("wall"),
+    );
+  }, [presetOptions]);
+
   // ── Render ───────────────────────────────────────────────────────
   return (
     <div className="grid h-full grid-rows-[auto_1fr] grid-cols-1 min-h-0 bg-zinc-950 text-zinc-100">
@@ -698,6 +728,66 @@ export function PresetEditView({
                   ) : null}
                 </div>
               </section>
+
+              {/* ── Preview overrides ─────────────────────────────── */}
+              <CollapsibleSection title="Preview context" defaultOpen>
+                <PropertyRow label="Floor preset">
+                  <Select
+                    size="sm"
+                    value={floorOverride ?? ""}
+                    options={[
+                      { value: "", label: "(default)" },
+                      ...floorOptions.map((o) => ({
+                        value: o.id,
+                        label: o.label,
+                      })),
+                    ]}
+                    onChange={(e) =>
+                      setFloorOverride(
+                        e.target.value === "" ? null : e.target.value,
+                      )
+                    }
+                  />
+                </PropertyRow>
+                <PropertyRow label="Ceiling preset">
+                  <Select
+                    size="sm"
+                    value={ceilingOverride ?? ""}
+                    options={[
+                      { value: "", label: "(default)" },
+                      ...ceilingOptions.map((o) => ({
+                        value: o.id,
+                        label: o.label,
+                      })),
+                    ]}
+                    onChange={(e) =>
+                      setCeilingOverride(
+                        e.target.value === "" ? null : e.target.value,
+                      )
+                    }
+                  />
+                </PropertyRow>
+                {layerHint === "walls" ? (
+                  <PropertyRow label="Surround wall">
+                    <Select
+                      size="sm"
+                      value={wallOverride ?? ""}
+                      options={[
+                        { value: "", label: "(same as focus)" },
+                        ...wallOptions.map((o) => ({
+                          value: o.id,
+                          label: o.label,
+                        })),
+                      ]}
+                      onChange={(e) =>
+                        setWallOverride(
+                          e.target.value === "" ? null : e.target.value,
+                        )
+                      }
+                    />
+                  </PropertyRow>
+                ) : null}
+              </CollapsibleSection>
 
               {/* WIRING — advanced ResolvedPresetData fields skipped in
                   MVP. Wire these up in a follow-up:
