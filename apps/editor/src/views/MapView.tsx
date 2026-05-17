@@ -28,6 +28,12 @@ import {
   defaultCellPreviewOrbit,
   type CellPreviewOrbitState,
 } from "./CellPreview";
+import { decodeLightmap } from "@two_5_d/engine";
+import type {
+  CellPreviewLightmapSource,
+  SceneLightmap,
+  SceneLightmapJSON,
+} from "@two_5_d/engine";
 import { PresetEditView } from "./PresetEditView";
 import { useStatusBar } from "../shell/StatusBarContext";
 import { useEditorActions } from "../shell/EditorActionsContext";
@@ -353,6 +359,35 @@ export function MapView({
   React.useEffect(() => {
     if (editingPresetId !== null) setCellPreviewExpanded(false);
   }, [editingPresetId]);
+
+  // ── #260 — Baked-lightmap source for CellPreview ─────────────────
+  // Decode the active scene's `lightmap` blob once (memoised on the
+  // raw JSON identity) so the preview reads the same bake the engine
+  // does. Selection-cell coords flow through `lightmapSource` so the
+  // engine's slice origin tracks the user's clicks without re-decoding.
+  const decodedSceneLightmap = React.useMemo<SceneLightmap | null>(() => {
+    const raw = editScene?.lightmap;
+    if (!raw || typeof raw !== "object") return null;
+    try {
+      return decodeLightmap(raw as SceneLightmapJSON);
+    } catch (err) {
+      // Bake corruption shouldn't break the preview — log + fall
+      // back to dynamic-only lighting.
+      console.warn("[MapView] decodeLightmap failed:", err);
+      return null;
+    }
+  }, [editScene?.lightmap]);
+  const cellPreviewLightmapSource =
+    React.useMemo<CellPreviewLightmapSource | null>(() => {
+      if (!decodedSceneLightmap) return null;
+      const sel = selection?.selected;
+      if (!sel) return null;
+      return {
+        lightmap: decodedSceneLightmap,
+        selectedX: sel.x,
+        selectedY: sel.y,
+      };
+    }, [decodedSceneLightmap, selection?.selected]);
 
   // ── StatusBar wiring — push cell coords / entity count / preset name
   //    whenever selection changes. The cleanup clears the bar on
@@ -1051,6 +1086,7 @@ export function MapView({
                 autoRotateSpeed={cellPreviewRotateSpeed}
                 setAutoRotateSpeed={setCellPreviewRotateSpeed}
                 presetOptions={selection?.presetOptions ?? []}
+                lightmapSource={cellPreviewLightmapSource}
               />
             </div>
           </div>
@@ -1121,6 +1157,7 @@ export function MapView({
                   autoRotateSpeed={cellPreviewRotateSpeed}
                   setAutoRotateSpeed={setCellPreviewRotateSpeed}
                   presetOptions={selection?.presetOptions ?? []}
+                  lightmapSource={cellPreviewLightmapSource}
                 />
               </div>
             </section>

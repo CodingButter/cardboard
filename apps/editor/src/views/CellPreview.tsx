@@ -1,6 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ResolvedPresetData, SceneLightmap } from "@two_5_d/engine";
+import type {
+  CellPreviewLightmapSource,
+  ResolvedPresetData,
+} from "@two_5_d/engine";
 import {
   Maximize2,
   Minimize2,
@@ -150,6 +153,17 @@ export interface CellPreviewProps {
     label: string;
     sourcePath: string;
   }>;
+  /**
+   * Baked-lightmap source from the active editor scene (#260). When
+   * supplied, the engine slices the source scene's lightmap centred on
+   * the selected cell and stamps it onto the mini-scene so the preview
+   * reads pixel-identical to the real bake. When omitted / `null`, the
+   * preview renders with dynamic lighting only (uniform 1.0 lightmap)
+   * — the legacy R4b behaviour. MapView passes the decoded `SceneLightmap`
+   * + the currently-selected `(x, y)` so the slice origin tracks
+   * selection changes.
+   */
+  lightmapSource?: CellPreviewLightmapSource | null;
   className?: string;
 }
 
@@ -366,6 +380,7 @@ export function CellPreview({
   autoRotateSpeed: autoRotateSpeedProp,
   setAutoRotateSpeed: setAutoRotateSpeedProp,
   presetOptions,
+  lightmapSource = null,
   className,
 }: CellPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -389,6 +404,7 @@ export function CellPreview({
     }) => void;
     setCamera: (c: { yaw?: number; pitch?: number; radius?: number; height?: number }) => void;
     setLayerVisibility: (w: boolean, f: boolean, c: boolean) => void;
+    setLightmap: (source: CellPreviewLightmapSource | null) => void;
     projectWorldToScreen: (
       wx: number,
       wy: number,
@@ -526,6 +542,7 @@ export function CellPreview({
     showFloor,
     showCeiling,
     orbitRef,
+    lightmapSource,
   });
   // Keep the ref in sync on every render so the next adapter
   // rebuild (when projectId changes) sees the latest inputs.
@@ -540,6 +557,7 @@ export function CellPreview({
     showFloor,
     showCeiling,
     orbitRef,
+    lightmapSource,
   };
 
   // Track ready state so PreviewHost can hide its loading overlay
@@ -586,6 +604,7 @@ export function CellPreview({
           showWalls: props.showWalls,
           showFloors: props.showFloor,
           showCeilings: props.showCeiling,
+          lightmap: props.lightmapSource ?? null,
         });
         engineRef.current = engine as unknown as typeof engineRef.current;
         readyPromise = (engine as unknown as {
@@ -672,6 +691,20 @@ export function CellPreview({
     if (!engine) return;
     engine.setLayerVisibility(showWalls, showFloor, showCeiling);
   }, [showWalls, showFloor, showCeiling]);
+
+  // ── Baked-lightmap push (#260) ───────────────────────────────────
+  // Whenever the scene's lightmap changes (new bake just landed, or
+  // selection moved so the slice origin shifted), push the new
+  // source to the engine. Pushing `null` drops back to the renderer's
+  // uniform-1.0 default — useful when the scene has no bake yet.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.setLightmap(lightmapSource ?? null);
+    // `ready` is in the dep list so the first push happens once
+    // engine bootstrap finishes — the initial mount path captures the
+    // source eagerly, but a late-arriving bake should also flow.
+  }, [lightmapSource, ready]);
 
   // Resize on container size change is now handled by PreviewHost
   // via its ResizeObserver — PreviewEngine.resize forwards to the

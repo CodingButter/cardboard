@@ -936,8 +936,13 @@ function makeUniformLightmap(width: number, height: number): SceneLightmap {
   return { width, height, resolution: 1, floorRGB, ceilingRGB };
 }
 
-/** Decode a base64 lightmap blob from the scene JSON. */
-function decodeLightmap(json: SceneLightmapJSON): SceneLightmap {
+/**
+ * Decode a base64 lightmap blob from the scene JSON. Exposed so the
+ * editor can decode `scene.lightmap` directly (e.g. to feed the
+ * CellPreview's baked-lighting source) without round-tripping a full
+ * `Scene.fromJSON` build.
+ */
+export function decodeLightmap(json: SceneLightmapJSON): SceneLightmap {
   // Back-compat: bakes from before the super-sampling change have no
   // `resolution` field. Treat them as the legacy 1-sample-per-corner
   // grid (K=1) so old packs keep rendering without re-baking.

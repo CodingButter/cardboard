@@ -21,7 +21,7 @@ export type { GameState } from "./Game";
 
 // Scene module — the bake script (`apps/pack-builder`) parses, mutates,
 // and re-emits SceneJSON, and uses the `Scene` class for LOS queries.
-export { Scene } from "./Scene";
+export { Scene, decodeLightmap } from "./Scene";
 export type {
   SceneJSON,
   SceneGrid,
@@ -172,4 +172,5 @@ export {
   type CellPreviewEngineOptions,
   type PreviewScene,
   type OrbitCamera,
+  type CellPreviewLightmapSource,
 } from "./Preview";
