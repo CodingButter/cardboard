@@ -17,7 +17,7 @@ in `docs/plans/*` per topic. Latest session-state snapshot lives at
 | File | Topic | State |
 |---|---|---|
 | `docs/plans/MONOREPO_PLAN.md` | Workspace restructure — `packages/*` + `apps/*`. Prerequisite for the engine/pack split. | ✅ Landed. |
-| `docs/plans/ENGINE_PACK_SPLIT.md` | Long-term: `src/` becomes pure engine; all game content lives in packs. | R0–R3 + R3-followup landed; R5 pending. R4 split off into ENGINE_PACK_SHADERS.md. |
+| `docs/plans/ENGINE_PACK_SPLIT.md` | Long-term: `src/` becomes pure engine; all game content lives in packs. | R0–R3 + R3-followup landed. R4 split off into ENGINE_PACK_SHADERS.md. R5 subsumed by PACK_CHAIN.md. |
 | `docs/plans/WALL_OVERHAUL.md` | Variable wall heights, partial walls, top/bottom caps. | Phase 1 + caps shipped; Phase 2 (per-cell floor/ceiling heights) + Phase 3 (partial-width walls) pending. |
 | `docs/plans/LIGHTING_OVERHAUL.md` | Bake-heavy emissive lighting model with dynamic-light overlay. | Phases 1, 2, 4, 5 shipped + split-lightmap polish + jittered LOS. Phase 3 (per-wall samples) pending. |
 | `docs/plans/LIGHTING_ENTITIES_REFACTOR.md` | Audit + plan for making static lights first-class entities, not scene-data records. | Designed, not yet started; folds into ENGINE_PACK_SPLIT R1. |
@@ -33,6 +33,15 @@ in `docs/plans/*` per topic. Latest session-state snapshot lives at
 | `docs/plans/AUDIO.md` | Web Audio gain graph + `api.audio.{play,playLoop,playReplace,stop,stopAll}` + 5-group mixer + spatial audio. Sounds declared in `manifest.sounds`. | Au1 shipped (commit `52d8e27`); Au2 (spatial + music + ducking), Au3 (editor authoring), Au4 (reverb) pending. |
 | `docs/plans/EVENTS.md` | Synchronous pub/sub pack interop bus. `api.events.{on,once,off,emit}` + 25 canonical engine topics + auto-cleanup on pack reload. | Ev1 shipped (commit `52d8e27`). Ev2 (wildcards + manifest declarations), Ev3 (editor event log) pending. |
 | `docs/plans/EDITOR_IFRAME.md` | Editor runs the engine via iframe (`?source=editor`) instead of in-process. Same-origin IDB sharing + postMessage protocol for live invalidation. | I1 shipped (commit `ab9dbee`). I2 (player-state telemetry + edit-camera), I3 (script + manifest hot-reload) pending. |
+| `docs/plans/EDITOR_REDESIGN.md` | Full editor visual overhaul. R1 shell + sidebar + tab strip; R2 theme; R3 view switcher; R4 per-view migrations (Map / Entities / Animation / Image Lab / Sound Lab / Project / Viewport / UI Builder); R5 polish. | R1–R3 + R4a–R4h shipped (most R4 views recovered via transcript replay after the 2026-05-17 reset incident). R4i (UI Builder view stub, #223) + R5 pending. |
+| `docs/plans/IMAGE_LAB.md` | In-editor procedural image authoring + texture pipeline. | IL1 plan + IL2 runtime shipped. IL3–IL7 pending (#229–#233). |
+| `docs/plans/SOUND_LAB.md` | In-editor sound authoring + envelope/effect graph. | SL1 plan shipped. SL2 runtime in progress (#236). SL3–SL7 pending (#237–#241). |
+| `docs/plans/WORLD_STATE.md` | Data-first engine overhaul — scene state as a single document, observable mutations, editor as the canonical authoring surface. | #294 landed (scaffolding + initial migration). Next phase tracked as #293. |
+| `docs/plans/PREFABS_EDITOR_ONLY.md` | Prefabs are pure component bundles authored in the editor — no `initScript`. Dynamic behavior belongs in systems. | PE1–PE3 landed. |
+| `docs/plans/UI_BUILDER.md` | Visual UI authoring inside the editor — drag-arrange Preact components, bind to `api.ui` modals. | Planned. R4i editor view stub pending (#223). |
+| `docs/plans/TUTORIALS.md` | In-editor guided tutorials — step-by-step overlays driven by pack-declared lessons. | Planned. |
+| `docs/plans/RESPONSIVE_DESIGN.md` | Editor + game layout adapt to viewport size (mobile, tablet, desktop, ultrawide). | Planned (#244). |
+| `docs/plans/CLOUD_SYNC.md` | Optional Supabase-backed pack sync — projects, assets, collaboration. | Planned (#251). |
 
 When the user names a phase ("R3", "Phase 4 lighting", "M1") look up
 the corresponding doc before acting. When they reference "the plan"
@@ -263,6 +272,7 @@ killer) to stop a stale dev server.
 | Engine/pack split — R3: game-specific systems move to pack | ✅ Done — all 11 systems (incl. modal screens via `api.ui`) in `packages/default-pack/scripts/systems/` |
 | Engine/pack split — R3 follow-up: `api.ui` + pack-script .tsx pipeline | ✅ Done — `Bun.build` compiles pack `.tsx`; Preact externalized via `installPreactRuntime` |
 | Engine/pack split — R4 (S1–S4): pack-shipped shaders w/ role replacement + 38 hooks + post-process passes | ✅ Done — S1 (`0a7fe16`), S2+S3 (`c02d280`), S4 (`dd2063c`); see `docs/plans/ENGINE_PACK_SHADERS.md`. S5 (validation), S6 (chain) pending |
+| Engine/pack split — R4: split into ENGINE_PACK_SHADERS.md | ✅ See ENGINE_PACK_SHADERS row |
 | Engine/pack split — R5: pack override semantics | ✅ Subsumed by PACK_CHAIN — see `docs/plans/PACK_CHAIN.md` |
 | Tile presets — T1+T2: PresetResolver + JSONC + idMap scenes + build-merge dedupe | ✅ Done — default-pack migrated; legacy bare-int scenes still parse via shim |
 | Tile presets — T3+: validation, editor authoring, preset-library packs | ⏳ See `docs/plans/TILE_PRESETS.md` |
@@ -276,7 +286,13 @@ killer) to stop a stale dev server.
 | PACK_CHAIN P1: schema additions + ChainResolver + multi-pack `?pack=URL` chains + trust modal | ✅ Done (commit `2edb94a`) — see `docs/plans/PACK_CHAIN.md`; P2–P5 pending |
 | Multiplayer M1: net primitives (NetworkId, Replicate, api.network) | ⏳ Unblocked (R3 + Ev1 + Au1 + A1 all landed). See `docs/plans/MULTIPLAYER_PLAN.md` |
 | Editor app (apps/editor — React + Tailwind + shadcn) | ✅ E1–E4 + AE1 + Entities workflow tab + Project Settings modal + dependency manager shipped. See `docs/plans/EDITOR.md` + `docs/plans/EDITOR_IFRAME.md` |
+| Editor redesign — R1–R3 + R4a–R4h | ✅ Shipped. R4 views (Map / Entities / Animation / Image Lab / Sound Lab / Project / Viewport / FbxImporter) recovered via transcript replay 2026-05-17. R4i (UI Builder, #223) + R5 pending |
+| Image Lab IL1 + IL2 | ✅ Plan + runtime shipped. IL3–IL7 pending (#229–#233) |
+| Sound Lab SL1 | ✅ Plan shipped. SL2 runtime in progress (#236). SL3–SL7 pending (#237–#241) |
+| WORLD_STATE — data-first engine overhaul (#294) | ✅ Scaffolding + initial migration landed. Next phase #293 |
+| Prefabs editor-only (PE1–PE3) | ✅ Shipped — declarative-only prefabs; no `initScript` |
 | Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
+| Recovery 2026-05-17 | ✅ ~60 files reconstructed via transcript-replay engine across commits `4d3c1e9` → `93fb93d` (+ dedup) after sandbox reset incident wiped tracked-file modifications |
 
 ---
 
