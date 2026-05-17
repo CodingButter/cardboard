@@ -27,6 +27,10 @@ import {
   cascadeHooks,
   findMode1WinnerForRole,
 } from "./ShaderChainCascade";
+import {
+  cascadeHooks,
+  findMode1WinnerForRole,
+} from "./ShaderChainCascade";
 
 /**
  * Map a shader role to its corresponding `*Hooks` manifest key.
@@ -186,6 +190,97 @@ export async function assembleShaderSource(
   const fullSource = buildFragmentSource(role, engineBody);
   // Replace the unmodified prelude block with the assembled (with
   // overrides) version. The prelude appears verbatim in `fullSource`.
+  return fullSource.replace(prelude, assembledPrelude);
+}
+
+/**
+ * Chain-aware variant of `assembleShaderSource` — Phase M4 of
+ * `docs/plans/MATERIALS.md` §10. Resolves hook + Mode-1 cascade across
+ * an ordered pack chain (deps-first → root-last) before assembling.
+ *
+ * Behaviour matches the single-pack `assembleShaderSource` for:
+ *
+ *  - **Mode 1**: the latest pack in the chain that ships a Mode-1
+ *    body for `role` wins entirely; the chain's hook cascade is
+ *    dropped (Mode 1 owns its own main() and has no hook call sites
+ *    to splice into). Scene-level hooks are also dropped with a
+ *    console warning — same shape as the single-pack rule.
+ *
+ *  - **Mode 3**: every pack in the chain that ships
+ *    `shaders.{role}Hooks` contributes — last pack wins per hook name.
+ *    Scene overrides layer on top (last-wins). Result is spliced into
+ *    the identity-default prelude.
+ *
+ * Used by `WebGLRenderer.prefetchShaderSourcesFromChain` to build the
+ * pack-default world / sprite / sky programs from the resolved chain
+ * instead of just the root pack. Sprite / world per-cell variant
+ * dispatch (M1 / M2) continues to scope by their declaring pack —
+ * see `assembleSpriteSource` / `assembleWorldSource`, which call this
+ * for the variant-0 source.
+ */
+export async function assembleShaderSourceFromChain(
+  role: ShaderRole,
+  chain: ReadonlyArray<AssetPack>,
+  engineBody: string,
+  sceneOverrides?: ReadonlyMap<string, string>,
+): Promise<string> {
+  // Empty / length-1 chain → fall through to the single-pack path so
+  // existing diagnostics (pack name in warnings) stay sharp. Tests +
+  // single-pack flows hit this fast-path verbatim.
+  if (chain.length === 0) {
+    if (!sceneOverrides || sceneOverrides.size === 0) {
+      return buildFragmentSource(role, engineBody);
+    }
+    return substitutePreludeOverrides(role, engineBody, sceneOverrides, "scene");
+  }
+  if (chain.length === 1) {
+    return assembleShaderSource(role, chain[0]!, engineBody, sceneOverrides);
+  }
+
+  // Mode 1: the LAST pack in the chain that ships `shaders.{role}`
+  // wins entirely. All hook contributions (from any pack, plus scene)
+  // are dropped — Mode 1 owns main() and has no hook call sites.
+  const mode1Winner = findMode1WinnerForRole(chain, role);
+  if (mode1Winner) {
+    const fragPath = mode1Winner.manifest.shaders![role]!;
+    const body = await mode1Winner.textBody(fragPath);
+    if (sceneOverrides && sceneOverrides.size > 0) {
+      console.warn(
+        `[two_5_d] pack-chain ${role} resolved to Mode 1 from '${mode1Winner.manifest.name}' — scene.shaders.${hookKeyFor(role)} overrides are dropped for this scene (no hook call sites in pack main()).`,
+      );
+    }
+    return buildFragmentSource(role, body);
+  }
+
+  // Mode 3 cascade: walk every pack's hooks file, merge last-wins,
+  // layer scene on top, substitute into the prelude.
+  const overrides = await cascadeHooks(chain, hookKeyFor(role));
+  if (sceneOverrides) {
+    for (const [name, body] of sceneOverrides) overrides.set(name, body);
+  }
+
+  if (overrides.size === 0) return buildFragmentSource(role, engineBody);
+
+  // Validate against the role catalog — unknown names log + drop.
+  const valid = new Set(hookNamesFor(role));
+  for (const name of [...overrides.keys()]) {
+    if (!valid.has(name)) {
+      console.warn(
+        `[two_5_d] pack-chain ${hookKeyFor(role)} declares ${name}, which is not a known hook for role ${role}. Ignored.`,
+      );
+      overrides.delete(name);
+    }
+  }
+  if (overrides.size === 0) return buildFragmentSource(role, engineBody);
+
+  const prelude = hookPreludeFor(role);
+  const { source: assembledPrelude, unmatched } = substituteHooks(prelude, overrides);
+  for (const u of unmatched) {
+    console.warn(
+      `[two_5_d] pack-chain hook ${u} was parsed but its identity default could not be located in the role's prelude — possible signature drift?`,
+    );
+  }
+  const fullSource = buildFragmentSource(role, engineBody);
   return fullSource.replace(prelude, assembledPrelude);
 }
 

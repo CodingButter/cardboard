@@ -1,5 +1,6 @@
 import type { AssetPack, SoundDef, SoundGroup } from "AssetPack";
 import { CONFIG } from "GameConfig";
+import type { RecipeStore } from "ProceduralAudio";
 import type { AudioAPI, AudioHandle, PlayOpts } from "./types";
 
 /**
@@ -53,6 +54,28 @@ export class AudioRegistry implements AudioAPI {
   private readonly lastById = new Map<string, HandleImpl>();
 
   /**
+   * Optional procedural-audio recipe store — SL2 of `docs/plans/SOUND_LAB.md`.
+   * When present, `startPlay` checks for a matching recipe id BEFORE
+   * the manifest sound lookup (per §6.6 + §12 Q11 RESOLVED: shared
+   * namespace, recipes first). Static + loop recipes resolve to an
+   * `AudioBuffer` and flow through the same per-handle machinery as
+   * manifest sounds; instrument-mode recipes are NOT plumbed through
+   * `play()` — callers use `api.proceduralAudio.playInstrument(...)`.
+   */
+  private recipeStore: RecipeStore | null = null;
+
+  /**
+   * Optional procedural-audio recipe store — SL2 of `docs/plans/SOUND_LAB.md`.
+   * When present, `startPlay` checks for a matching recipe id BEFORE
+   * the manifest sound lookup (per §6.6 + §12 Q11 RESOLVED: shared
+   * namespace, recipes first). Static + loop recipes resolve to an
+   * `AudioBuffer` and flow through the same per-handle machinery as
+   * manifest sounds; instrument-mode recipes are NOT plumbed through
+   * `play()` — callers use `api.proceduralAudio.playInstrument(...)`.
+   */
+  private recipeStore: RecipeStore | null = null;
+
+  /**
    * One-shot user-gesture listener wiring. Browsers block
    * `AudioContext.resume()` until the user has clicked / pressed a
    * key. We attach `pointerdown` + `keydown` listeners on first
@@ -83,6 +106,78 @@ export class AudioRegistry implements AudioAPI {
 
   constructor(pack: AssetPack) {
     this.pack = pack;
+  }
+
+  /**
+   * Attach (or detach) the procedural-audio recipe store. The engine
+   * wires this on boot AFTER `RecipeStore.loadFromPack(pack)` has
+   * populated the recipe map — at that point `startPlay` can resolve
+   * recipe ids first. Pass `null` to clear (used by pack-swap paths).
+   */
+  setRecipeStore(store: RecipeStore | null): void {
+    this.recipeStore = store;
+  }
+
+  /**
+   * Expose the live AudioContext + group gain node to the procedural-
+   * audio surface (for instrument-mode voices, per SL2). Returns
+   * `null` until the context has been bootstrapped (i.e. after a
+   * user-gesture-driven `ensureContext()` call). Pack scripts that
+   * need to trigger an instrument before any gesture will see this
+   * as `null` and get a silent fallback.
+   */
+  liveBus(group: SoundGroup = "sfx"): { ctx: AudioContext; group: AudioNode } | null {
+    if (!this.ctx) return null;
+    const node = this.groupGains?.get(group) ?? this.masterGain;
+    if (!node) return null;
+    return { ctx: this.ctx, group: node };
+  }
+
+  /**
+   * Bootstrap the AudioContext eagerly. Used by the procedural-audio
+   * surface when a pack-script call needs a context up front (e.g.
+   * `proceduralAudio.load(id)` so the bake's sampleRate is known).
+   */
+  bootstrapContext(): AudioContext {
+    return this.ensureContext();
+  }
+
+  /**
+   * Attach (or detach) the procedural-audio recipe store. The engine
+   * wires this on boot AFTER `RecipeStore.loadFromPack(pack)` has
+   * populated the recipe map — at that point `startPlay` can resolve
+   * recipe ids first. Pass `null` to clear (used by pack-swap paths).
+   */
+  setRecipeStore(store: RecipeStore | null): void {
+    this.recipeStore = store;
+  }
+
+  /**
+   * Expose the live AudioContext + group gain node to the procedural-
+   * audio surface (for instrument-mode voices, per SL2). Returns
+   * `null` until the context has been bootstrapped (i.e. after a
+   * user-gesture-driven `ensureContext()` call). Pack scripts that
+   * need to trigger an instrument before any gesture will see this
+   * as `null` and get a silent fallback.
+   *
+   * The returned group gain defaults to `"sfx"`; callers can request
+   * a different one via the group arg.
+   */
+  liveBus(group: SoundGroup = "sfx"): { ctx: AudioContext; group: AudioNode } | null {
+    if (!this.ctx) return null;
+    const node = this.groupGains?.get(group) ?? this.masterGain;
+    if (!node) return null;
+    return { ctx: this.ctx, group: node };
+  }
+
+  /**
+   * Bootstrap the AudioContext eagerly. Pack scripts calling
+   * `playInstrument(...)` from inside a user-gesture handler want the
+   * context up-front; callers outside a gesture get the same lazy
+   * resume listener the regular `play()` path uses.
+   */
+  bootstrapContext(): AudioContext {
+    return this.ensureContext();
   }
 
   /**
@@ -234,13 +329,34 @@ export class AudioRegistry implements AudioAPI {
     forceLoop: boolean,
     replace: boolean,
   ): AudioHandle {
+    // Procedural recipe lookup first (SOUND_LAB.md §6.6 + §12 Q11).
+    // Recipes share the namespace with `manifest.sounds`; recipes win.
+    const recipe = this.recipeStore?.get(id);
     const sounds = this.pack.manifest.sounds;
     const def = sounds?.[id];
-    if (!def) {
-      console.warn(`[audio] play("${id}"): no sound with that id in manifest.sounds`);
+
+    if (!recipe && !def) {
+      console.warn(
+        `[audio] play("${id}"): no sound or recipe with that id`,
+      );
       return makeInertHandle(id, (opts?.group ?? "sfx") as SoundGroup);
     }
-    const group: SoundGroup = opts?.group ?? def.group ?? "sfx";
+
+    if (recipe && def) {
+      // Collision warning — same shape as `manifest.sounds` last-wins.
+      // The recipe takes precedence; the manifest sound is shadowed.
+      console.warn(
+        `[audio] id "${id}" matches both a recipe and a manifest sound; using recipe`,
+      );
+    }
+
+    // Recipes resolve their `group` from the recipe JSON; manifest
+    // sounds from `def.group`. PlayOpts overrides either.
+    const baseGroup: SoundGroup = recipe
+      ? (recipe.group ?? "sfx")
+      : (def!.group ?? "sfx");
+    const group: SoundGroup = opts?.group ?? baseGroup;
+
     if (replace) {
       const prev = this.lastById.get(id);
       if (prev && prev.isPlaying()) prev.stop(0);
@@ -250,17 +366,85 @@ export class AudioRegistry implements AudioAPI {
     this.liveHandles.add(handle);
     this.lastById.set(id, handle);
 
-    const bufOrPromise = this.decoded.get(id) ?? this.loadBuffer(id, def);
+    // Synthesise a SoundDef for procedural recipes so the per-play
+    // wiring (gain, loop, etc.) flows through the existing code path
+    // unchanged. Instrument-mode recipes have no bake — log + drop
+    // through (caller should use `api.proceduralAudio.playInstrument`).
+    if (recipe) {
+      if (recipe.mode === "instrument") {
+        console.warn(
+          `[audio] play("${id}") on an instrument-mode recipe; use api.proceduralAudio.playInstrument(...)`,
+        );
+        handle.markEnded();
+        return handle;
+      }
+      const synthDef: SoundDef = {
+        file: `recipe:${id}`,
+        volume: 1,
+        group: recipe.group ?? "sfx",
+        loop: recipe.mode === "loop",
+      };
+      const cached = this.decoded.get(id);
+      const promise = cached
+        ? Promise.resolve(cached)
+        : this.loadRecipeBuffer(id, ctx);
+      Promise.resolve(promise)
+        .then((buf) => {
+          if (!buf) {
+            handle.markEnded();
+            return;
+          }
+          if (handle.cancelled) return;
+          this.startSourceForHandle(handle, ctx, buf, synthDef, opts, forceLoop);
+        })
+        .catch((err) => {
+          console.warn(`[audio] play("${id}") recipe render failed:`, err);
+          handle.markEnded();
+        });
+      return handle;
+    }
+
+    const bufOrPromise = this.decoded.get(id) ?? this.loadBuffer(id, def!);
     Promise.resolve(bufOrPromise)
       .then((buf) => {
         if (handle.cancelled) return;
-        this.startSourceForHandle(handle, ctx, buf, def, opts, forceLoop);
+        this.startSourceForHandle(handle, ctx, buf, def!, opts, forceLoop);
       })
       .catch((err) => {
         console.warn(`[audio] play("${id}") decode failed:`, err);
         handle.markEnded();
       });
     return handle;
+  }
+
+  /**
+   * Render-or-cache-hit a procedural recipe's buffer. Stashes the
+   * promise in the existing decode cache so concurrent `play()` calls
+   * for the same recipe share one render. Returns `null` on failure
+   * (logged inside) so the caller can mark the handle ended.
+   */
+  private async loadRecipeBuffer(
+    id: string,
+    ctx: AudioContext,
+  ): Promise<AudioBuffer | null> {
+    const store = this.recipeStore;
+    if (!store) return null;
+    const existing = this.decoded.get(id);
+    if (existing) return Promise.resolve(existing);
+    const promise = store.loadBuffer(id, ctx).then((buf) => {
+      if (buf) this.decoded.set(id, buf);
+      return buf;
+    });
+    // Cast: the decode cache type covers AudioBuffer | Promise<AudioBuffer>.
+    // A null resolution from the recipe store leaves the cache empty.
+    this.decoded.set(id, promise as Promise<AudioBuffer>);
+    const result = await promise;
+    if (!result) {
+      // Don't leave the failed promise in the cache — a retry should
+      // reattempt the render.
+      this.decoded.delete(id);
+    }
+    return result;
   }
 
   /**

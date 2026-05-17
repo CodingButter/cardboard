@@ -501,6 +501,90 @@ function AudioTab({
   );
 }
 
+function AudioTab({
+  live,
+  onChange,
+  bump,
+}: {
+  live: GameConfig;
+  onChange: (mut: (s: PartialGameConfig) => void) => void;
+  bump: () => void;
+}) {
+  // Au1 of AUDIO.md §6.2 — five live sliders, one per group. Each
+  // writes through to `CONFIG.audio.<group>Volume` via `onChange`;
+  // the engine's per-frame `audio.syncFromConfig()` pushes the new
+  // gain into the active `GainNode` so the change is audible
+  // immediately. No reload, no audio dropout.
+  return (
+    <div class="flex flex-col gap-3">
+      <Slider
+        label="Master volume"
+        min={0}
+        max={1}
+        step={0.01}
+        value={live.audio.masterVolume}
+        onChange={(v) => {
+          onChange((s) => ((s.audio ??= {}).masterVolume = v));
+          bump();
+        }}
+        live
+      />
+      <Slider
+        label="SFX volume"
+        min={0}
+        max={1}
+        step={0.01}
+        value={live.audio.sfxVolume}
+        onChange={(v) => {
+          onChange((s) => ((s.audio ??= {}).sfxVolume = v));
+          bump();
+        }}
+        live
+      />
+      <Slider
+        label="Music volume"
+        min={0}
+        max={1}
+        step={0.01}
+        value={live.audio.musicVolume}
+        onChange={(v) => {
+          onChange((s) => ((s.audio ??= {}).musicVolume = v));
+          bump();
+        }}
+        live
+      />
+      <Slider
+        label="Ambient volume"
+        min={0}
+        max={1}
+        step={0.01}
+        value={live.audio.ambientVolume}
+        onChange={(v) => {
+          onChange((s) => ((s.audio ??= {}).ambientVolume = v));
+          bump();
+        }}
+        live
+      />
+      <Slider
+        label="Voice volume"
+        min={0}
+        max={1}
+        step={0.01}
+        value={live.audio.voiceVolume}
+        onChange={(v) => {
+          onChange((s) => ((s.audio ??= {}).voiceVolume = v));
+          bump();
+        }}
+        live
+      />
+      <p class="text-xs text-zinc-500">
+        Sliders apply immediately to the active mix. Audio bootstraps
+        on the first sound playback (browser autoplay-policy).
+      </p>
+    </div>
+  );
+}
+
 function IoTab({
   overlay,
   onChange,

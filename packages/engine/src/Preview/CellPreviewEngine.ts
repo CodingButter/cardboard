@@ -181,6 +181,14 @@ export class CellPreviewEngine {
    * `Scene` instance.
    */
   private lightmapSource: CellPreviewLightmapSource | null;
+  /**
+   * Last lightmap source the caller provided. Null = render with the
+   * renderer's default uniform-1.0 lightmap (dynamic lighting only).
+   * When non-null, `rebuildScene()` builds a sliced `SceneLightmap` for
+   * the mini-scene grid from this data and stamps it onto the resulting
+   * `Scene` instance.
+   */
+  private lightmapSource: CellPreviewLightmapSource | null;
   /** rAF handle for the render loop. */
   private raf: number = 0;
   /** When `true`, `tick()` has been scheduled at least once. */
@@ -559,6 +567,24 @@ export class CellPreviewEngine {
   }
 
   /**
+   * Replace the baked-lightmap source. Pass `null` to drop back to
+   * the renderer's default uniform-1.0 lightmap (dynamic lighting
+   * only). Triggers a scene rebuild so the next frame paints with
+   * the new bake slice.
+   *
+   * Callers typically push this when:
+   *   - The active editor scene's bake just finished (new lightmap
+   *     data arrived).
+   *   - The user toggled "Show baked lighting" in the settings panel
+   *     (caller sets `null` to opt out).
+   *   - The selected cell moved (slice origin shifted).
+   */
+  setLightmap(source: CellPreviewLightmapSource | null): void {
+    this.lightmapSource = source;
+    void this.rebuildScene();
+  }
+
+  /**
    * Toggle layer visibility. Re-builds the scene so the engine
    * renderer naturally treats hidden surfaces as "empty cells" /
    * "no wall" — meaning shadows, AO, and reflections honour the
@@ -609,6 +635,96 @@ export class CellPreviewEngine {
     }
     this.scene = null;
   }
+}
+
+/**
+ * Build a `SceneLightmap` for the mini-scene's N×N grid by slicing the
+ * source scene's lightmap centred on the selected cell. The mini-scene
+ * places the focus cell at index `floor(N/2)`; for every mini-cell
+ * `(mx, my)` we copy the `K×K` corner samples (plus the trailing
+ * boundary corner row/column) from the source cell at:
+ *
+ *     sx = selectedX - focusIdx + mx
+ *     sy = selectedY - focusIdx + my
+ *
+ * Source cells outside the bake's `[0, width) × [0, height)` bounds
+ * get neutral 1.0 samples — equivalent to "no bake data, fall back to
+ * ambient", which is the cardboard-engine convention for unbaked
+ * areas. The K-factor is preserved so the renderer's shader UV math
+ * (which divides world coords by K) keeps working without changes.
+ *
+ * Corner-grid layout: the source grid is `(W*K+1) × (H*K+1)` corners
+ * row-major flat, three floats per corner. Each cell `(cx, cy)` owns
+ * the `K×K` block of corners starting at `(cx*K, cy*K)` and ending
+ * AT (not BEFORE) `((cx+1)*K, (cy+1)*K)` — neighbouring cells share
+ * their boundary corners. Writing destination corners works the same
+ * way; the +1 trailing row/col is shared with the neighbouring
+ * destination cell, so we write each corner exactly once.
+ */
+function sliceLightmap(
+  src: CellPreviewLightmapSource,
+  miniSize: number,
+): SceneLightmap {
+  const K = src.lightmap.resolution;
+  const sW = src.lightmap.width;
+  const sH = src.lightmap.height;
+  const sStride = (sW * K + 1) * 3;
+
+  const dW = miniSize;
+  const dH = miniSize;
+  const dStride = (dW * K + 1) * 3;
+  const floorOut = new Float32Array((dW * K + 1) * (dH * K + 1) * 3);
+  const ceilingOut = new Float32Array((dW * K + 1) * (dH * K + 1) * 3);
+  // Default to neutral 1.0 — out-of-bounds and "no source data" cells
+  // fall back to ambient instead of black.
+  floorOut.fill(1);
+  ceilingOut.fill(1);
+
+  const focusIdx = Math.floor(miniSize / 2);
+  const offsetX = src.selectedX - focusIdx;
+  const offsetY = src.selectedY - focusIdx;
+
+  /**
+   * Copy one source corner at scaled-grid coord (scx, scy) into
+   * destination corner (dcx, dcy). Bounds-check on the source side —
+   * out-of-bounds reads leave the destination at its neutral 1.0
+   * default, which is exactly the "no bake" fallback we want for
+   * cells outside the source scene.
+   */
+  const copyCorner = (
+    scx: number,
+    scy: number,
+    dcx: number,
+    dcy: number,
+  ): void => {
+    if (scx < 0 || scy < 0 || scx > sW * K || scy > sH * K) return;
+    const si = scy * sStride + scx * 3;
+    const di = dcy * dStride + dcx * 3;
+    floorOut[di] = src.lightmap.floorRGB[si]!;
+    floorOut[di + 1] = src.lightmap.floorRGB[si + 1]!;
+    floorOut[di + 2] = src.lightmap.floorRGB[si + 2]!;
+    ceilingOut[di] = src.lightmap.ceilingRGB[si]!;
+    ceilingOut[di + 1] = src.lightmap.ceilingRGB[si + 1]!;
+    ceilingOut[di + 2] = src.lightmap.ceilingRGB[si + 2]!;
+  };
+
+  // Walk every destination corner exactly once. For destination
+  // corner (dcx, dcy), the source corner is at scaled-grid coords
+  // (dcx + offsetX*K, dcy + offsetY*K). Neighbouring cells naturally
+  // share boundary corners — no special-case logic needed.
+  for (let dcy = 0; dcy <= dH * K; dcy++) {
+    for (let dcx = 0; dcx <= dW * K; dcx++) {
+      copyCorner(dcx + offsetX * K, dcy + offsetY * K, dcx, dcy);
+    }
+  }
+
+  return {
+    width: dW,
+    height: dH,
+    resolution: K,
+    floorRGB: floorOut,
+    ceilingRGB: ceilingOut,
+  };
 }
 
 /**

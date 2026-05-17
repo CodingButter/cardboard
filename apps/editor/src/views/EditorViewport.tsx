@@ -65,13 +65,31 @@ export interface EditorViewportProps {
    *  lightmap to IDB. The parent re-loads the scene + we tell the
    *  iframe to reloadScene so the engine picks up the bake. */
   onSceneRewrittenExternally?: (path: string) => void;
+  /**
+   * R4h — Playtest engine telemetry channel. Fires at ~10 Hz with
+   * the latest `EngineStats` snapshot pushed by the iframe via the
+   * `engine-stats` postMessage (EDITOR_IFRAME.md I2). Optional so
+   * surfaces that don't care about telemetry (the Scene-tab edit
+   * mode, the Settings modal's reload button) don't have to opt in.
+   * The bridge-side push is wired in #226 — until that lands this
+   * callback is silent.
+   */
+  onEngineStats?: (stats: import("./PlaytestOverlay").EngineStats) => void;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
 type IframeToEditor =
   | { type: "ready"; projectId: string; scene: string }
   | { type: "scene-loaded"; path: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "engine-stats";
+      /** Latest snapshot of the engine's `EngineStats` struct. The
+       *  bridge marshals the typed object through `postMessage` —
+       *  fields can be a partial subset of EngineStats during the
+       *  initial bridge rollout. */
+      data: import("./PlaytestOverlay").EngineStats;
+    };
 
 export function EditorViewport({
   projectId,
@@ -87,6 +105,7 @@ export function EditorViewport({
   prefabNames,
   spriteIds,
   onSceneRewrittenExternally,
+  onEngineStats,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror the iframe element through the parent-supplied ref so the
@@ -153,11 +172,17 @@ export function EditorViewport({
       } else if (m.type === "scene-loaded") {
         lastSentSceneRef.current = m.path;
         onSceneResolved?.(m.path);
+      } else if (m.type === "engine-stats") {
+        // R4h — forward the snapshot to the optional subscriber.
+        // We deliberately don't stash a copy here so the 10Hz push
+        // doesn't trigger viewport re-renders; the subscriber owns
+        // its own render cadence.
+        onEngineStats?.(m.data);
       }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onSceneResolved]);
+  }, [onSceneResolved, onEngineStats]);
 
   // When the parent flips `sceneName` (user clicks a different
   // scene), tell the iframe to swap WITHOUT reloading. The engine

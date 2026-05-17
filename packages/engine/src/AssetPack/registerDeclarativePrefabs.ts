@@ -109,6 +109,47 @@ export async function registerDeclarativePrefabsAsync(
 }
 
 /**
+ * Async sibling of `registerDeclarativePrefabs` that PRE-LOADS every
+ * referenced `initScript` before registering the prefab factories. Use
+ * this when callers need init-script-attached components to be visible
+ * synchronously immediately after `api.spawn(...)` returns — typically
+ * the engine's boot path and the smoke test.
+ *
+ * The sync `registerDeclarativePrefabs` registers the factories
+ * immediately and fires-and-forgets init-script loads; that's fine for
+ * spawns that don't need to read the init-attached state inside the
+ * same call stack, but it doesn't give callers a way to await the
+ * pre-warm. This variant exists for the "I need the init script ready
+ * before any spawn happens" case.
+ *
+ * Phase #196.
+ */
+export async function registerDeclarativePrefabsAsync(
+  api: ModAPI,
+  manifest: PackManifest,
+  pack?: AssetPack,
+): Promise<void> {
+  const prefabs = manifest.prefabs;
+  if (!prefabs) return;
+  // Pre-warm every init script in parallel so we don't serialise the
+  // network / blob-URL spin-up across N prefabs. Capture the resolved
+  // PrefabInitScript per prefab in a sync map; registerOne passes the
+  // resolved value through so the spawn factory can call it
+  // synchronously without an extra microtask hop.
+  const resolved = new Map<string, PrefabInitScript | null>();
+  await Promise.all(
+    Object.entries(prefabs).map(async ([id, p]) => {
+      if (!p.initScript) return;
+      const fn = await loadInitScript(pack, p.initScript);
+      resolved.set(id, fn);
+    }),
+  );
+  for (const [id, prefab] of Object.entries(prefabs)) {
+    registerOne(api, id, prefab, pack, resolved.get(id) ?? undefined);
+  }
+}
+
+/**
  * Resolve a prefab init script's default export. We dynamic-import a
  * Blob URL constructed from the pack's text body for the script path.
  * The resulting module is cached so re-spawning the same prefab in a

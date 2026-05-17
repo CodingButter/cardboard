@@ -47,6 +47,19 @@ import {
 export type FbxRenderConfig = FbxRenderMeta;
 export const DEFAULT_FBX_RENDER_CONFIG: FbxRenderConfig =
   DEFAULT_FBX_RENDER_META;
+import {
+  DEFAULT_FBX_RENDER_META,
+  type FbxRenderMeta,
+} from "./EditorProjectStore";
+
+/**
+ * Re-export the meta render shape under the baker's own type alias —
+ * keeps the importer's call sites self-documenting while leaving the
+ * persisted contract owned by EditorProjectStore.
+ */
+export type FbxRenderConfig = FbxRenderMeta;
+export const DEFAULT_FBX_RENDER_CONFIG: FbxRenderConfig =
+  DEFAULT_FBX_RENDER_META;
 
 /**
  * One animation's bake configuration. The author picks frame count
@@ -671,6 +684,197 @@ export async function bakeFbxOffscreen(
   );
   if (!blob) throw new Error("bakeFbxOffscreen: toBlob produced null");
   return { png: blob, plan };
+}
+
+/**
+ * Shared scene-builder — used by both `bakeFbxOffscreen` and the live
+ * preview in `FbxImporter.tsx`. Centralises light placement,
+ * background, and tone (lit/flat) so the two render paths produce
+ * byte-identical output (given the same camera).
+ *
+ * Returns the constructed `Scene` plus refs to the light objects so
+ * the preview can mutate intensities on slider drag without
+ * rebuilding the scene.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildFbxScene(THREE: any, root: any, render: FbxRenderConfig) {
+  const scene = new THREE.Scene();
+  if (render.background.kind === "solid") {
+    scene.background = new THREE.Color(render.background.color);
+  } else {
+    // null background = canvas alpha shows through; the renderer's
+    // clear color is what actually wins for the offscreen target.
+    scene.background = null;
+  }
+  scene.add(root);
+
+  const ambient = new THREE.AmbientLight(0xffffff, render.ambient);
+  scene.add(ambient);
+
+  const key = new THREE.DirectionalLight(0xffffff, render.keyIntensity);
+  positionKeyLight(key, render.keyDirection);
+  if (render.shadow) {
+    key.castShadow = true;
+  }
+  scene.add(key);
+
+  // Fill from the opposite side of the key, cooler tone for subtle
+  // depth on the shaded side.
+  const fill = new THREE.DirectionalLight(0xc8d8ff, render.fillIntensity);
+  positionFillLight(fill, render.keyDirection);
+  scene.add(fill);
+
+  // Apply tone (lit vs flat). Tone toggles use the FBX's existing
+  // materials for "lit" and swap to MeshBasicMaterial for "flat" so
+  // the user gets a retro unlit look without losing the original
+  // material set on switch-back.
+  applyTone(THREE, root, render.tone);
+
+  if (render.shadow) {
+    enableShadows(root);
+  }
+
+  return { scene, ambient, key, fill };
+}
+
+/**
+ * Re-apply render config to an existing scene without rebuilding —
+ * the preview's slider changes call this so the viewport updates in
+ * real time without a full `buildFbxScene` rebuild.
+ */
+export function applyFbxRenderConfig(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  THREE: any,
+  scene: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scene: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ambient: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    key: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fill: any;
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root: any,
+  render: FbxRenderConfig,
+) {
+  scene.ambient.intensity = render.ambient;
+  scene.key.intensity = render.keyIntensity;
+  scene.fill.intensity = render.fillIntensity;
+  positionKeyLight(scene.key, render.keyDirection);
+  positionFillLight(scene.fill, render.keyDirection);
+  if (render.background.kind === "solid") {
+    scene.scene.background = new THREE.Color(render.background.color);
+  } else {
+    scene.scene.background = null;
+  }
+  applyTone(THREE, root, render.tone);
+  if (render.shadow) {
+    enableShadows(root);
+    scene.key.castShadow = true;
+  } else {
+    disableShadows(root);
+    scene.key.castShadow = false;
+  }
+}
+
+/** Place the key light at a canonical preset position. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function positionKeyLight(light: any, dir: FbxRenderConfig["keyDirection"]) {
+  switch (dir) {
+    case "front":
+      light.position.set(3, 5, 5);
+      break;
+    case "side":
+      light.position.set(6, 4, 0);
+      break;
+    case "back":
+      light.position.set(-3, 5, -5);
+      break;
+    case "overhead":
+      light.position.set(0, 8, 0.5);
+      break;
+  }
+}
+
+/** Place the fill light roughly opposite the key for soft balance. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function positionFillLight(light: any, dir: FbxRenderConfig["keyDirection"]) {
+  switch (dir) {
+    case "front":
+      light.position.set(-3, 2, -3);
+      break;
+    case "side":
+      light.position.set(-6, 2, 0);
+      break;
+    case "back":
+      light.position.set(3, 2, 3);
+      break;
+    case "overhead":
+      light.position.set(0, -2, -3);
+      break;
+  }
+}
+
+/**
+ * Apply tone (lit/flat) to the FBX root. "Flat" replaces materials
+ * with MeshBasicMaterial in-place so the unlit retro look ships;
+ * "lit" restores the original material set if it was saved.
+ *
+ * We stash the original material on a private `__litMaterial` slot
+ * on each Mesh so the swap is reversible without re-parsing the FBX.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyTone(THREE: any, root: any, tone: FbxRenderConfig["tone"]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root.traverse((obj: any) => {
+    if (!obj.isMesh) return;
+    if (tone === "flat") {
+      if (!obj.__litMaterial) obj.__litMaterial = obj.material;
+      // Pull the diffuse map (if any) off the original material so
+      // textures still show; just bypass shading.
+      const src = obj.__litMaterial;
+      const map =
+        Array.isArray(src) ? (src[0]?.map ?? null) : (src?.map ?? null);
+      const color =
+        Array.isArray(src)
+          ? (src[0]?.color ?? new THREE.Color(0xffffff))
+          : (src?.color ?? new THREE.Color(0xffffff));
+      obj.material = new THREE.MeshBasicMaterial({
+        map,
+        color,
+        transparent: !!(Array.isArray(src) ? src[0]?.transparent : src?.transparent),
+      });
+    } else {
+      if (obj.__litMaterial) {
+        obj.material = obj.__litMaterial;
+      }
+    }
+  });
+}
+
+/** Flip on shadow casting + receiving across every mesh in the tree. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function enableShadows(root: any) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root.traverse((obj: any) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function disableShadows(root: any) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root.traverse((obj: any) => {
+    if (obj.isMesh) {
+      obj.castShadow = false;
+      obj.receiveShadow = false;
+    }
+  });
 }
 
 /**

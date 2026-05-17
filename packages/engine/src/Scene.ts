@@ -171,6 +171,28 @@ export interface SceneSpawn {
   facing: number;
 }
 
+/**
+ * Scene-controller block — WORLD_STATE.md §5.2 + §6.2. Every scene
+ * has one synthetic controller entity spawned at scene-load. The
+ * `components` map is attached verbatim (same shape as
+ * `scene.entities[].components`). Pack authors declare per-scene
+ * state here: SpawnerList, Music, Victory, EnemyBudget, etc.
+ *
+ * Optional in the JSON shape — scenes without a controller block
+ * get an empty synthetic entity (no components attached) so the
+ * engine's controller-id stays valid for `api.scene.controller`.
+ *
+ * Back-compat note: legacy scenes with a top-level `spawn` field
+ * but no `controller.components.SpawnerList` get a synthesised
+ * `SpawnerList` with one `"main"` point — see `Scene.fromJSON`.
+ */
+export interface SceneControllerJSON {
+  /** componentName → componentData. Same shape as entity records. */
+  components?: Record<string, unknown>;
+  /** Editor-only metadata; engine ignores `_*` keys. */
+  [editorOnly: `_${string}`]: unknown;
+}
+
 const DEFAULT_SPAWN: SceneSpawn = { x: 1.5, y: 1.5, facing: 0 };
 
 /* --- Layer-array input format ------------------------------------------- */

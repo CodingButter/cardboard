@@ -756,6 +756,157 @@ console.log("\n[8] requires[].version is enforced against parent manifest.versio
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────
+ * 8. PACK_CHAIN P1 follow-up — requires[].version enforcement.
+ *    Tiny `satisfies()` unit tests + end-to-end chain assertions
+ *    covering the supported subset (exact / caret / tilde / empty)
+ *    and the new hard-fail path on version mismatch.
+ * ────────────────────────────────────────────────────────────────── */
+console.log("\n[8] requires[].version is enforced against parent manifest.version");
+{
+  // 8a. Tiny `satisfies()` unit tests — exercised directly so a regression
+  //     in the matcher surfaces here without needing a full chain build.
+  assert(satisfies("1.2.3", "1.2.3"), "satisfies exact match");
+  assert(!satisfies("1.2.4", "1.2.3"), "satisfies exact mismatch is false");
+  assert(satisfies("1.2.4", "^1.2.3"), "satisfies caret patch bump");
+  assert(satisfies("1.3.0", "^1.2.3"), "satisfies caret minor bump");
+  assert(!satisfies("2.0.0", "^1.2.3"), "satisfies caret major bump rejected");
+  assert(!satisfies("1.2.2", "^1.2.3"), "satisfies caret below floor rejected");
+  assert(satisfies("1.2.5", "~1.2.3"), "satisfies tilde patch bump");
+  assert(!satisfies("1.3.0", "~1.2.3"), "satisfies tilde minor bump rejected");
+  assert(!satisfies("1.2.2", "~1.2.3"), "satisfies tilde below floor rejected");
+  assert(satisfies("9.9.9", undefined), "satisfies no constraint accepts anything");
+  assert(satisfies("9.9.9", ""), "satisfies empty range accepts anything");
+
+  // 8b. End-to-end: build a parent fixture once, then point a series of
+  //     children at it with different `requires[].version` clauses.
+  clearChainCache();
+  const v8ParentManifest: PackManifest = {
+    id: "v8-parent",
+    name: "v8-parent",
+    version: "0.2.0",
+    tileTextures: {},
+    tileSheets: [],
+    startScene: "scenes/none.json",
+  };
+  const v8ParentBytes = await buildFakePack(v8ParentManifest);
+  const v8ParentPath = join(tmp, "v8-parent.apg");
+  await writeFile(v8ParentPath, v8ParentBytes);
+  const v8ParentUrl = pathToFileURL(v8ParentPath).toString();
+  const v8ParentSri = await sriOf(v8ParentBytes);
+
+  // Helper: write a child with a custom `requires[]` and resolve it,
+  // returning either the resolved chain or the thrown error message.
+  async function tryResolveChild(
+    label: string,
+    requires: PackManifest["requires"],
+  ): Promise<{ ok: boolean; chain?: Awaited<ReturnType<typeof resolveChain>>; err?: string }> {
+    clearChainCache();
+    const manifest: PackManifest = {
+      id: label,
+      name: label,
+      version: "1.0.0",
+      tileTextures: {},
+      tileSheets: [],
+      startScene: "scenes/none.json",
+      requires,
+    };
+    const bytes = await buildFakePack(manifest);
+    const path = join(tmp, `${label}.apg`);
+    await writeFile(path, bytes);
+    const url = pathToFileURL(path).toString();
+    try {
+      const chain = await resolveChain(url);
+      return { ok: true, chain };
+    } catch (e) {
+      return { ok: false, err: (e as Error).message };
+    }
+  }
+
+  // 8b-i. caret ^0.2.0 against parent 0.2.0 → resolves.
+  {
+    const r = await tryResolveChild("v8-child-caret-exact", [
+      { id: "v8-parent", url: v8ParentUrl, integrity: v8ParentSri, version: "^0.2.0" },
+    ]);
+    assert(r.ok, "caret ^0.2.0 vs parent 0.2.0 resolves");
+    if (r.ok) assert(r.chain!.length === 2, `caret-exact chain length is 2 (got ${r.chain!.length})`);
+  }
+
+  // 8b-ii. caret ^0.2.0 against parent 0.3.0 — same parent URL but rebuilt
+  //        with a new manifest.version. Note: integrity changes too.
+  {
+    const v8ParentBumpManifest: PackManifest = { ...v8ParentManifest, version: "0.3.0" };
+    const v8ParentBumpBytes = await buildFakePack(v8ParentBumpManifest);
+    const v8ParentBumpPath = join(tmp, "v8-parent-0.3.apg");
+    await writeFile(v8ParentBumpPath, v8ParentBumpBytes);
+    const v8ParentBumpUrl = pathToFileURL(v8ParentBumpPath).toString();
+    const v8ParentBumpSri = await sriOf(v8ParentBumpBytes);
+    const r = await tryResolveChild("v8-child-caret-minor", [
+      { id: "v8-parent", url: v8ParentBumpUrl, integrity: v8ParentBumpSri, version: "^0.2.0" },
+    ]);
+    assert(r.ok, "caret ^0.2.0 vs parent 0.3.0 resolves (compat minor bump)");
+  }
+
+  // 8b-iii. caret ^0.2.0 against parent 0.1.0 → hard-fail.
+  {
+    const v8ParentLowManifest: PackManifest = { ...v8ParentManifest, version: "0.1.0" };
+    const v8ParentLowBytes = await buildFakePack(v8ParentLowManifest);
+    const v8ParentLowPath = join(tmp, "v8-parent-0.1.apg");
+    await writeFile(v8ParentLowPath, v8ParentLowBytes);
+    const v8ParentLowUrl = pathToFileURL(v8ParentLowPath).toString();
+    const v8ParentLowSri = await sriOf(v8ParentLowBytes);
+    const r = await tryResolveChild("v8-child-caret-toolow", [
+      { id: "v8-parent", url: v8ParentLowUrl, integrity: v8ParentLowSri, version: "^0.2.0" },
+    ]);
+    assert(!r.ok, "caret ^0.2.0 vs parent 0.1.0 throws");
+    assert(
+      r.err !== undefined && /version mismatch/i.test(r.err),
+      `error mentions "version mismatch" (got: ${(r.err ?? "").slice(0, 120)}…)`,
+    );
+    assert(
+      r.err !== undefined && /Required: \^0\.2\.0/.test(r.err),
+      `error includes required range "Required: ^0.2.0"`,
+    );
+    assert(
+      r.err !== undefined && /Found: 0\.1\.0/.test(r.err),
+      `error includes found version "Found: 0.1.0"`,
+    );
+  }
+
+  // 8b-iv. exact "1.2.3" against parent 1.2.4 → hard-fail.
+  {
+    const exactParentManifest: PackManifest = {
+      id: "v8-parent-exact",
+      name: "v8-parent-exact",
+      version: "1.2.4",
+      tileTextures: {},
+      tileSheets: [],
+      startScene: "scenes/none.json",
+    };
+    const exactParentBytes = await buildFakePack(exactParentManifest);
+    const exactParentPath = join(tmp, "v8-parent-exact.apg");
+    await writeFile(exactParentPath, exactParentBytes);
+    const exactParentUrl = pathToFileURL(exactParentPath).toString();
+    const exactParentSri = await sriOf(exactParentBytes);
+    const r = await tryResolveChild("v8-child-exact", [
+      { id: "v8-parent-exact", url: exactParentUrl, integrity: exactParentSri, version: "1.2.3" },
+    ]);
+    assert(!r.ok, "exact 1.2.3 vs parent 1.2.4 throws");
+    assert(
+      r.err !== undefined && /version mismatch/i.test(r.err),
+      "exact-mismatch error mentions 'version mismatch'",
+    );
+  }
+
+  // 8b-v. no `version` field → resolves (no constraint, back-compat).
+  {
+    const r = await tryResolveChild("v8-child-noversion", [
+      { id: "v8-parent", url: v8ParentUrl, integrity: v8ParentSri },
+    ]);
+    assert(r.ok, "requires entry without version field resolves (no constraint)");
+  }
+}
+
 console.log("");
 if (failed > 0) {
   console.log(`✘ ${failed} assertion(s) failed`);

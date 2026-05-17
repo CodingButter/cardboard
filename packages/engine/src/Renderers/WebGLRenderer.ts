@@ -1009,16 +1009,25 @@ export class WebGLRenderer implements SceneRenderer {
     // renderer's HUD canvas before appending the new one. Without this,
     // every module reload stacks another canvas (with its last frame
     // frozen) on top of the live one.
+    //
+    // `embedHud: false` (CellPreviewEngine) skips body-attachment +
+    // the window resize listener — the HUD canvas is created as a
+    // detached offscreen surface so HUD-touching code (if any) doesn't
+    // segfault, but nothing renders there. Standalone preview surfaces
+    // don't host gun / minimap / reticle, so this is a clean trim.
+    this.embedHud = embedHud;
     const HUD_ATTR = "data-engine-hud";
-    document.querySelectorAll(`[${HUD_ATTR}]`).forEach((stale) => stale.remove());
     const hudCanvas = document.createElement("canvas");
-    hudCanvas.setAttribute(HUD_ATTR, "true");
     hudCanvas.width = width;
     hudCanvas.height = height;
-    hudCanvas.style.position = "fixed";
-    hudCanvas.style.pointerEvents = "none";
-    hudCanvas.style.zIndex = "10";
-    document.body.appendChild(hudCanvas);
+    if (embedHud) {
+      document.querySelectorAll(`[${HUD_ATTR}]`).forEach((stale) => stale.remove());
+      hudCanvas.setAttribute(HUD_ATTR, "true");
+      hudCanvas.style.position = "fixed";
+      hudCanvas.style.pointerEvents = "none";
+      hudCanvas.style.zIndex = "10";
+      document.body.appendChild(hudCanvas);
+    }
     this.hudCanvas = hudCanvas;
     const hudCtx = hudCanvas.getContext("2d");
     if (!hudCtx) throw new Error("Failed to acquire HUD canvas 2D context");
@@ -1242,14 +1251,73 @@ export class WebGLRenderer implements SceneRenderer {
     this.sceneLightmapCeilingTex = makeLightmapTex();
 
     gl.viewport(0, 0, width, height);
-    this.syncHud();
-    window.addEventListener("resize", this.syncHud);
+    if (this.embedHud) {
+      this.syncHud();
+      window.addEventListener("resize", this.syncHud);
+    }
+  }
+
+  /**
+   * Tear down GL state + detach the body-level HUD canvas (when
+   * `embedHud` was true at construction). The renderer is unusable
+   * after this call. Designed for the editor's `CellPreviewEngine`
+   * where a preview canvas can mount/unmount many times per session;
+   * the game's single-shot bootstrap doesn't need to call this.
+   *
+   * GL resources tracked through `gl.deleteTexture` /
+   * `gl.deleteBuffer` / `gl.deleteVertexArray` / `gl.deleteProgram`
+   * are released so the browser's WebGL context isn't pinned by
+   * orphaned handles. The actual `WebGL2RenderingContext` itself is
+   * released when the underlying `<canvas>` is GC'd.
+   */
+  dispose(): void {
+    const gl = this.gl;
+    // Programs.
+    try { gl.deleteProgram(this.skyProgram); } catch { /* ignore */ }
+    try { gl.deleteProgram(this.worldProgram); } catch { /* ignore */ }
+    try { gl.deleteProgram(this.spriteProgram); } catch { /* ignore */ }
+    // Textures.
+    for (const tex of [
+      this.tilesTex,
+      this.spritesTex,
+      this.columnsTex,
+      this.columnsSegTex,
+      this.columnsCapTex,
+      this.columnsCellTex,
+      this.columnsEmissiveTex,
+      this.sceneTilesTex,
+      this.sceneReflTex,
+      this.sceneShaderVariantsTex,
+      this.sceneEmissiveFloorTex,
+      this.sceneEmissiveCeilTex,
+      this.sceneLightmapFloorTex,
+      this.sceneLightmapCeilingTex,
+    ]) {
+      try { gl.deleteTexture(tex); } catch { /* ignore */ }
+    }
+    // VAOs / VBOs.
+    try { gl.deleteVertexArray(this.quadVAO); } catch { /* ignore */ }
+    try { gl.deleteVertexArray(this.spriteVAO); } catch { /* ignore */ }
+    try { gl.deleteBuffer(this.spriteVBO); } catch { /* ignore */ }
+    // Post-pass chain (may hold its own FBOs / programs).
+    // PostPassChain doesn't yet ship a dispose() — the comment in
+    // its source mentions one is planned. When that lands, hook it
+    // here. For now the underlying gl context is dropped together
+    // with the canvas, so leaking the FBOs only matters for long-
+    // lived sessions where many preview canvases mount/unmount; the
+    // browser will GC the WebGL context handle eventually.
+
+    // HUD canvas + resize listener.
+    if (this.embedHud) {
+      try { window.removeEventListener("resize", this.syncHud); } catch { /* ignore */ }
+      try { this.hudCanvas.remove(); } catch { /* already detached */ }
+    }
   }
 
   /* --- SceneRenderer interface ---------------------------------------- */
 
   beginFrame(): void {
-    this.syncHud();
+    if (this.embedHud) this.syncHud();
     this.ctx.clearRect(0, 0, this.hudCanvas.width, this.hudCanvas.height);
     // S4: if a post-pass chain is active, redirect the sky / world /
     // sprite passes to its source FBO. The chain's `apply()` in
@@ -2026,7 +2094,7 @@ export class WebGLRenderer implements SceneRenderer {
     // their `u_resolution` matches what the world + sprite passes
     // rendered into. Null-chain is a no-op.
     if (this.postPasses) this.postPasses.resize(width, height);
-    this.syncHud();
+    if (this.embedHud) this.syncHud();
   }
 
   /* --- Internal helpers ----------------------------------------------- */

@@ -411,6 +411,41 @@ export function FbxImporter({
     config,
   ]);
 
+  // Live-apply render config (lighting, tone, background, shadow) so
+  // dragging any slider in the Render panel updates the viewport on
+  // the next frame. The bake uses the same render config — output =
+  // what you see.
+  useEffect(() => {
+    const s = previewRef.current;
+    if (!s || !config) return;
+    applyFbxRenderConfig(
+      s.bundle.THREE,
+      { scene: s.scene, ambient: s.ambient, key: s.key, fill: s.fill },
+      s.root,
+      config.render,
+    );
+    // Preview keeps a dark zinc background when the bake is configured
+    // for transparent so the viewport isn't pure black; the offscreen
+    // bake honours the actual transparent setting via the renderer's
+    // clear color.
+    if (config.render.background.kind === "transparent") {
+      s.scene.background = new s.bundle.THREE.Color(0x18181b);
+    }
+    s.renderer.shadowMap.enabled = config.render.shadow;
+  }, [
+    config?.render.ambient,
+    config?.render.keyIntensity,
+    config?.render.keyDirection,
+    config?.render.fillIntensity,
+    config?.render.tone,
+    config?.render.shadow,
+    config?.render.background.kind,
+    config?.render.background.kind === "solid"
+      ? config.render.background.color
+      : null,
+    config,
+  ]);
+
   // ─────────────────────────────────────────────────────────────
   //  File picker (modal opened without a blob)
   // ─────────────────────────────────────────────────────────────
@@ -1052,6 +1087,187 @@ export function FbxImporter({
                     </div>
                   </section>
 
+                  {/* Render controls — drives both preview + bake. */}
+                  <section>
+                    <h3 className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
+                      Render
+                    </h3>
+                    <div className="space-y-3">
+                      {/* Ambient intensity */}
+                      <SliderField
+                        label="Ambient"
+                        value={config.render.ambient}
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        onChange={(v) =>
+                          updateRender(updateConfig, (r) => ({ ...r, ambient: v }))
+                        }
+                      />
+                      {/* Key intensity */}
+                      <SliderField
+                        label="Key intensity"
+                        value={config.render.keyIntensity}
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        onChange={(v) =>
+                          updateRender(updateConfig, (r) => ({
+                            ...r,
+                            keyIntensity: v,
+                          }))
+                        }
+                      />
+                      {/* Key direction preset */}
+                      <div>
+                        <span className="text-zinc-500 text-xs">
+                          Key direction
+                        </span>
+                        <div className="grid grid-cols-4 gap-1 mt-1">
+                          {(["front", "side", "back", "overhead"] as const).map(
+                            (dir) => (
+                              <Button
+                                key={dir}
+                                variant={
+                                  config.render.keyDirection === dir
+                                    ? "primary"
+                                    : "ghost"
+                                }
+                                size="sm"
+                                onClick={() =>
+                                  updateRender(updateConfig, (r) => ({
+                                    ...r,
+                                    keyDirection: dir,
+                                  }))
+                                }
+                              >
+                                {dir}
+                              </Button>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                      {/* Fill intensity */}
+                      <SliderField
+                        label="Fill"
+                        value={config.render.fillIntensity}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        onChange={(v) =>
+                          updateRender(updateConfig, (r) => ({
+                            ...r,
+                            fillIntensity: v,
+                          }))
+                        }
+                      />
+                      {/* Background */}
+                      <div>
+                        <span className="text-zinc-500 text-xs">
+                          Background
+                        </span>
+                        <div className="grid grid-cols-2 gap-1 mt-1">
+                          <Button
+                            variant={
+                              config.render.background.kind === "transparent"
+                                ? "primary"
+                                : "ghost"
+                            }
+                            size="sm"
+                            onClick={() =>
+                              updateRender(updateConfig, (r) => ({
+                                ...r,
+                                background: { kind: "transparent" },
+                              }))
+                            }
+                          >
+                            transparent
+                          </Button>
+                          <Button
+                            variant={
+                              config.render.background.kind === "solid"
+                                ? "primary"
+                                : "ghost"
+                            }
+                            size="sm"
+                            onClick={() =>
+                              updateRender(updateConfig, (r) => ({
+                                ...r,
+                                background: {
+                                  kind: "solid",
+                                  color:
+                                    r.background.kind === "solid"
+                                      ? r.background.color
+                                      : "#18181b",
+                                },
+                              }))
+                            }
+                          >
+                            solid
+                          </Button>
+                        </div>
+                        {config.render.background.kind === "solid" ? (
+                          <input
+                            type="color"
+                            value={config.render.background.color}
+                            onChange={(e) =>
+                              updateRender(updateConfig, (r) => ({
+                                ...r,
+                                background: {
+                                  kind: "solid",
+                                  color: e.target.value,
+                                },
+                              }))
+                            }
+                            className="mt-1 h-6 w-full bg-transparent border border-zinc-700 rounded"
+                          />
+                        ) : null}
+                      </div>
+                      {/* Tone */}
+                      <div>
+                        <span className="text-zinc-500 text-xs">Tone</span>
+                        <div className="grid grid-cols-2 gap-1 mt-1">
+                          {(["lit", "flat"] as const).map((t) => (
+                            <Button
+                              key={t}
+                              variant={
+                                config.render.tone === t ? "primary" : "ghost"
+                              }
+                              size="sm"
+                              onClick={() =>
+                                updateRender(updateConfig, (r) => ({
+                                  ...r,
+                                  tone: t,
+                                }))
+                              }
+                            >
+                              {t}
+                            </Button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-1">
+                          "Lit" uses the FBX materials with phong/standard
+                          shading. "Flat" swaps to MeshBasicMaterial for a
+                          retro unlit look.
+                        </p>
+                      </div>
+                      {/* Shadow */}
+                      <label className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={config.render.shadow}
+                          onChange={(e) =>
+                            updateRender(updateConfig, (r) => ({
+                              ...r,
+                              shadow: e.target.checked,
+                            }))
+                          }
+                        />
+                        <span className="text-zinc-300">Cast / receive shadows</span>
+                      </label>
+                    </div>
+                  </section>
+
                   {/* Per-clip config */}
                   <section>
                     <h3 className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
@@ -1216,6 +1432,56 @@ function Field({
       />
     </label>
   );
+}
+
+/**
+ * Slider + numeric readout — used by the Render panel. The numeric
+ * value lives next to the slider so the author can dial in precise
+ * values without dragging.
+ */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col text-xs">
+      <div className="flex justify-between">
+        <span className="text-zinc-500">{label}</span>
+        <span className="text-zinc-400 tabular-nums">{value.toFixed(2)}</span>
+      </div>
+      <input
+        type="range"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full"
+      />
+    </label>
+  );
+}
+
+/**
+ * Convenience mutator for the render sub-block — avoids spreading
+ * `c.render` through every onChange in the Render panel.
+ */
+function updateRender(
+  updateConfig: (mut: (c: FbxBakeConfig) => FbxBakeConfig) => void,
+  mut: (r: FbxRenderConfig) => FbxRenderConfig,
+) {
+  updateConfig((c) => ({ ...c, render: mut(c.render) }));
 }
 
 /**

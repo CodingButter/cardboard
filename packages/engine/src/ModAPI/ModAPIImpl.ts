@@ -37,6 +37,8 @@ import type {
   ModAPI,
   ModalsAPI,
   PrefabFn,
+  ProceduralAudioAPI,
+  ProceduralPlayInstrumentOpts,
   RaycastAPI,
   RendererSystemFn,
   RenderPhase,
@@ -54,6 +56,7 @@ import { SettingsRegistry } from "./SettingsRegistry";
 import { BindingsRegistry } from "./BindingsRegistry";
 import { AnimRegistry } from "./AnimRegistry";
 import { AudioRegistry } from "./AudioRegistry";
+import { RecipeStore } from "ProceduralAudio";
 import { EventsRegistry } from "./EventsRegistry";
 
 /**
@@ -141,6 +144,23 @@ export class ModAPIImpl implements ModAPI {
     syncFromConfig(): void;
   };
   /**
+   * Procedural-audio surface — SL2 of `docs/plans/SOUND_LAB.md`. The
+   * concrete `RecipeStore` is held privately; pack scripts see only
+   * the `ProceduralAudioAPI` slice exposed via the public `ModAPI`
+   * interface. Same engine-internal-vs-pack-public split as `audio`
+   * and `events` above.
+   */
+  readonly proceduralAudio: ProceduralAudioAPI & {
+    loadFromPack(): Promise<void>;
+    dispose(): void;
+  };
+  /**
+   * Concrete recipe store. Held privately so the engine can pass it
+   * to `AudioRegistry.setRecipeStore` after the boot scan completes.
+   * Pack scripts reach it via the `proceduralAudio` surface above.
+   */
+  private readonly recipeStore: RecipeStore;
+  /**
    * Event bus — Ev1 of `docs/plans/EVENTS.md`. Exposed as the concrete
    * `EventsRegistry` so the engine can reach `setActiveScript()` /
    * `disposeScript()` / `disposeAll()` for auto-cleanup; pack scripts
@@ -196,7 +216,13 @@ export class ModAPIImpl implements ModAPI {
     this.settings = new SettingsRegistry(deps.packConfig);
     this.bindings = new BindingsRegistry();
     this.anim = new AnimRegistry(this.world);
-    this.audio = new AudioRegistry(deps.pack);
+    const audioRegistry = new AudioRegistry(deps.pack);
+    this.audio = audioRegistry;
+    this.recipeStore = new RecipeStore();
+    this.proceduralAudio = this.buildProceduralAudio(audioRegistry, deps.pack);
+    // Wire the recipe store into the audio registry so `api.audio.play`
+    // can resolve recipe ids first (SOUND_LAB.md §6.6).
+    audioRegistry.setRecipeStore(this.recipeStore);
     // Wire World's despawn hook to the bus. Fires SYNCHRONOUSLY
     // before component removal so handlers can read the dying
     // entity's components one last time (EVENTS.md §4.2).
@@ -311,5 +337,43 @@ export class ModAPIImpl implements ModAPI {
     this.worldReadyCallbacks = [];
     this.worldReady = true;
     for (const fn of callbacks) fn(this);
+  }
+
+  /**
+   * Build the public `proceduralAudio` surface. Wraps the private
+   * `RecipeStore` so pack scripts see only the four-method surface
+   * declared on `ProceduralAudioAPI`; the engine reaches the
+   * `loadFromPack()` / `dispose()` extras via the concrete shape
+   * exposed on `this.proceduralAudio`.
+   */
+  private buildProceduralAudio(
+    audioRegistry: AudioRegistry,
+    pack: import("AssetPack").AssetPack,
+  ): ProceduralAudioAPI & { loadFromPack(): Promise<void>; dispose(): void } {
+    const store = this.recipeStore;
+    return {
+      load: (id: string) => {
+        // Lazy-bootstrap the AudioContext if it hasn't been built yet.
+        // OfflineAudioContext rendering uses its own context, but the
+        // caller wants the resulting buffer playable through the live
+        // context — so spin up the live ctx so its sampleRate is known.
+        const ctx = audioRegistry.bootstrapContext();
+        return store.loadBuffer(id, ctx);
+      },
+      playInstrument: (id: string, opts?: ProceduralPlayInstrumentOpts) => {
+        const bus = audioRegistry.liveBus(opts?.group ?? "sfx");
+        if (!bus) {
+          // No live context yet — most likely pre-user-gesture. Pack
+          // scripts that need this should call from inside a click /
+          // keypress handler.
+          return null;
+        }
+        return store.triggerInstrument(id, bus.ctx, bus.group, opts ?? {});
+      },
+      has: (id: string) => store.has(id),
+      ids: () => store.ids(),
+      loadFromPack: () => store.loadFromPack(pack),
+      dispose: () => store.dispose(),
+    };
   }
 }

@@ -1,5 +1,8 @@
 import { main, type GameState } from "@two_5_d/engine";
 import { bootForEditor } from "./src/boot-editor";
+import { applyPackIdentity } from "./src/pack-identity";
+import { applyPackIdentity } from "./src/pack-identity";
+import { applyPackIdentity } from "./src/pack-identity";
 
 /**
  * HMR-aware bootstrap.
@@ -44,6 +47,19 @@ if (params.get("source") === "editor") {
   // Standard zip-pack flow — `?pack=URL` (or empty → DEFAULT_PACK_URL).
   const packUrls = params.getAll("pack").filter((u) => u.length > 0);
   game = await main(previousState, packUrls);
+}
+
+// Pack-driven identity wiring: once the pack is loaded, push the
+// pack's display name, favicon, and PWA manifest onto the document
+// so the tab/installable app takes on the pack's identity. Reads
+// `manifest.name`, `manifest.shortName`, `manifest.themeColor`, and
+// `manifest.iconSizes` (the latter auto-populated by
+// `apps/pack-builder` when `manifest.icon` is declared). Fires
+// asynchronously — failures are logged and don't block the game.
+if (typeof document !== "undefined") {
+  void applyPackIdentity(game.pack).catch((err) => {
+    console.warn("[pack-identity] applyPackIdentity failed:", err);
+  });
 }
 
 if (import.meta.hot) {

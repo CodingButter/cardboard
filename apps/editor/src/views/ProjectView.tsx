@@ -17,11 +17,12 @@ import { ProjectSettingsModal } from "./ProjectSettingsModal";
  * Project view — workflow-mode tab strip + active surface.
  *
  * Per the iframe-pivot reorg (this PR):
- *   - **Map mode** is pure: viewport (Play) + GridEditor (Edit) + a
- *     scene-list right rail. Manifest editing has moved into the
- *     Project Settings modal opened via the ⚙ button in the header.
- *   - Other modes (Entities, Animation, Scripts/Assets placeholders)
- *     are unchanged.
+ *   - **Scene mode** (legacy "map") is pure: viewport (Play) +
+ *     GridEditor (Edit) + a scene-list right rail. Manifest editing
+ *     has moved into the Project Settings modal opened via the ⚙
+ *     button in the header.
+ *   - Other modes (Prefabs (legacy "entities"), Animation,
+ *     Scripts/Assets placeholders) are unchanged.
  *
  * The Project Settings modal is the home for occasional configuration
  * (manifest metadata, dependencies, export, advanced flags). It
@@ -36,17 +37,17 @@ interface ProjectViewProps {
   onBackHome: () => void;
 }
 
-type WorkflowMode = "map" | "entities" | "scripts" | "assets" | "animation";
+export type WorkflowMode = "scene" | "prefabs" | "scripts" | "assets" | "animation";
 
 const WORKFLOW_MODES: ReadonlyArray<{
   id: WorkflowMode;
   label: string;
   hint: string;
 }> = [
-  { id: "map", label: "Map", hint: "Top-down scene editor (grid + scene list)" },
+  { id: "scene", label: "Scene", hint: "Top-down scene editor (grid + scene list)" },
   {
-    id: "entities",
-    label: "Entities",
+    id: "prefabs",
+    label: "Prefabs",
     hint: "Declarative prefab authoring (EDITOR.md §6.3)",
   },
   {
@@ -96,14 +97,25 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   const [workflowMode, setWorkflowModeState] = useState<WorkflowMode>(() => {
     try {
       const saved = localStorage.getItem(workflowModeKey);
-      if (saved === "map" || saved === "entities" || saved === "scripts" ||
+      // Migrate legacy values (Map → Scene, Entities → Prefabs tab
+      // renames). Rewrite in place so the next read finds the new
+      // identifier directly.
+      if (saved === "map") {
+        try { localStorage.setItem(workflowModeKey, "scene"); } catch { /* ignore */ }
+        return "scene";
+      }
+      if (saved === "entities") {
+        try { localStorage.setItem(workflowModeKey, "prefabs"); } catch { /* ignore */ }
+        return "prefabs";
+      }
+      if (saved === "scene" || saved === "prefabs" || saved === "scripts" ||
           saved === "assets" || saved === "animation") {
         return saved;
       }
     } catch {
       // localStorage may throw in private-browsing / sandboxed contexts.
     }
-    return "map";
+    return "scene";
   });
   const setWorkflowMode = useCallback(
     (next: WorkflowMode) => {
@@ -296,14 +308,14 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {workflowMode === "map" && sceneDirty ? (
+          {workflowMode === "scene" && sceneDirty ? (
             <span className="text-xs text-amber-300">● Scene unsaved</span>
-          ) : workflowMode === "map" && sceneSavedAt ? (
+          ) : workflowMode === "scene" && sceneSavedAt ? (
             <span className="text-xs text-emerald-400">
               Scene saved {new Date(sceneSavedAt).toLocaleTimeString()}
             </span>
           ) : null}
-          {workflowMode === "map" && editScene && editScenePath ? (
+          {workflowMode === "scene" && editScene && editScenePath ? (
             <Button
               variant="secondary"
               size="sm"
@@ -369,7 +381,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
             />
           </div>
         </main>
-      ) : workflowMode === "entities" ? (
+      ) : workflowMode === "prefabs" ? (
         <main className="px-0 py-0">
           <div className="h-[calc(100vh-128px)] border-t border-zinc-800">
             <EntitiesEditor
@@ -391,7 +403,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
           </div>
         </main>
       ) : (
-        // ── Map mode: iframe + GridEditor + scene-list right rail.
+        // ── Scene mode (legacy "map"): iframe + GridEditor + scene-list right rail.
         //     Manifest editing has moved to the Settings modal.
         <main className="grid grid-cols-[1fr_280px] gap-0 h-[calc(100vh-128px)] border-t border-zinc-800">
           {/* Center pane — viewport (Play) / GridEditor (Edit). */}
@@ -434,7 +446,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
               // Surface every prefab the engine will register at boot —
               // declarative ones (manifest.prefabs[name]) AND sprite IDs
               // — so the GridEditor entity tool's prefab picker stays in
-              // sync with the Entities tab. JS-detected prefabs ride on
+              // sync with the Prefabs tab. JS-detected prefabs ride on
               // the fallback list inside GridEditor (player, marker).
               prefabNames={Object.keys(manifest?.prefabs ?? {})}
               spriteIds={Object.keys(manifest?.sprites ?? {})}

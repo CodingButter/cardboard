@@ -570,4 +570,28 @@ export interface PackManifest {
    * See `docs/plans/EDITOR.md` §6.3.
    */
   prefabs?: Record<string, DeclarativePrefab>;
+  /**
+   * Procedural image recipes — IL2 of `docs/plans/IMAGE_LAB.md`.
+   * Keys are recipe ids referenced by `api.procedural.load(id)`;
+   * values point at the `.recipe.json` file inside the pack. A pack
+   * with no `recipes` field skips the procedural subsystem entirely
+   * (no offscreen WebGL context, byte-identical to pre-IL2).
+   *
+   * Recipes are loaded lazily — the engine scans this map at boot
+   * but defers GLSL compilation + bake to the first `load(id)` call.
+   * Pack-chain semantics mirror sprites / sounds: last-pack wins on
+   * id conflicts.
+   */
+  recipes?: Record<string, RecipeManifestEntry>;
+}
+
+/**
+ * One entry of `manifest.recipes` — points at a `.recipe.json` file
+ * inside the pack. Kept minimal in IL2; additive fields (per-instance
+ * variation flags, rebake triggers, manifest-level seed overrides)
+ * land in later phases without breaking the schema.
+ */
+export interface RecipeManifestEntry {
+  /** Path inside the pack to the recipe JSON (e.g. `"recipes/brick.recipe.json"`). */
+  file: string;
 }

@@ -4,6 +4,15 @@
     "y": 1.5,
     "facing": 0
   },
+  "controller": {
+    "components": {
+      "SpawnerList": {
+        "points": [
+          { "id": "main", "x": 1.5, "y": 1.5, "facing": 0 }
+        ]
+      }
+    }
+  },
   "shaders": {
     "worldHooks": "shaders/scene-fog.glsl"
   },

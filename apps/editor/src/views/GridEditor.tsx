@@ -8,6 +8,7 @@ import React, {
 import type { PackManifest, PresetResolver, ResolvedPresetData } from "@two_5_d/engine";
 import { IdbAssetPack } from "@two_5_d/engine";
 import { Button } from "../components/ui";
+import { ToggleSwitch } from "../components/ui/index";
 import { cn } from "../lib/cn";
 import {
   BUILT_IN_COMPONENT_SCHEMAS,
@@ -130,6 +131,20 @@ export interface GridEditorProps {
    *  scene from IDB and posts a `{type:"scene-changed"}` message to
    *  the engine iframe so the runtime picks up the new lightmap. */
   onSceneSavedExternally?: (path: string) => void;
+  /**
+   * Show anonymous tile presets (id starts with `_`) in the left-aside
+   * palette. Default `false` — anon presets are per-cell variants and
+   * tend to clutter the palette. MapView owns the persisted state
+   * (`useLocalStorage("editor.palette.showAnonymous")`) and renders a
+   * small toggle above the palette list via the props threaded through
+   * EditorViewport.
+   *
+   * NOTE: this only gates *palette visibility* — anon presets stay
+   * fully editable via the cell context menu's "Edit parent preset"
+   * action and the Cell Inspector's "Edit preset" button (#198).
+   */
+  showAnonymousPresets?: boolean;
+  onShowAnonymousPresetsChange?: (next: boolean) => void;
 }
 
 /** Reasonable default-pack prefabs surfaced when the editor hasn't
@@ -340,6 +355,10 @@ interface TexturePreviewBundle {
   data: ResolvedPresetData;
   /** Object URL for the preset's primary texture; null if not loaded yet. */
   url: string | null;
+  /** "anonymous" for ids starting with `_` (per-cell variants), "named"
+   *  otherwise. Drives the italic styling + the count of hidden
+   *  anonymous entries surfaced next to the "Show anonymous" toggle. */
+  kind: "named" | "anonymous";
 }
 
 /** Texture loader for the preset palette + cell renderer. Resolves
@@ -455,6 +474,8 @@ export function GridEditor({
   spriteIds,
   onPersistScene,
   onSceneSavedExternally,
+  showAnonymousPresets = false,
+  onShowAnonymousPresetsChange,
 }: GridEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -581,25 +602,53 @@ export function GridEditor({
   }, [scenePath, width, height]);
 
   // Preset palette — sorted, exposes a swatch + texture-url-or-null.
-  const presetList = useMemo<TexturePreviewBundle[]>(() => {
+  // We materialise the FULL list here (named + anonymous) so the
+  // header's "+N hidden" counter has something to count against; the
+  // user-visible `presetList` filters anonymous out at the next step
+  // unless the toggle is on.
+  const allPresets = useMemo<TexturePreviewBundle[]>(() => {
     if (!resolver) return [];
     const out: TexturePreviewBundle[] = [];
     for (const preset of resolver) {
       // Skip __legacy.* aliases from the picker — they're a back-compat
       // shim, not authoring vocabulary (per TILE_PRESETS.md §5.3).
       if (preset.id.startsWith("__legacy.")) continue;
-      // Skip anonymous content-hash presets — they're per-cell tweaks
-      // and don't belong in the global palette.
-      if (preset.id.startsWith("_")) continue;
+      const kind: "named" | "anonymous" = preset.id.startsWith("_")
+        ? "anonymous"
+        : "named";
       out.push({
         presetId: preset.id,
         data: preset.data,
         url: loadTexture(preset.data.texture),
+        kind,
       });
     }
-    out.sort((a, b) => a.presetId.localeCompare(b.presetId));
+    // Named presets first, then anonymous; within each bucket alphabetical.
+    out.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "named" ? -1 : 1;
+      return a.presetId.localeCompare(b.presetId);
+    });
     return out;
   }, [resolver, loadTexture]);
+
+  // Count of anonymous presets currently being suppressed by the
+  // toggle. Drives the "+N hidden" hint in the palette header so the
+  // user knows what they'd reveal by flipping the switch.
+  const hiddenAnonCount = useMemo(() => {
+    if (showAnonymousPresets) return 0;
+    let n = 0;
+    for (const p of allPresets) if (p.kind === "anonymous") n++;
+    return n;
+  }, [allPresets, showAnonymousPresets]);
+
+  // Palette list as the user sees it — anonymous entries excluded
+  // unless the toggle is on. Kept as `presetList` so the rest of the
+  // GridEditor body (default-active-preset effect, search filter, etc.)
+  // doesn't need to know about the toggle.
+  const presetList = useMemo<TexturePreviewBundle[]>(() => {
+    if (showAnonymousPresets) return allPresets;
+    return allPresets.filter((p) => p.kind !== "anonymous");
+  }, [allPresets, showAnonymousPresets]);
 
   const filteredPresets = useMemo(() => {
     const q = presetFilter.trim().toLowerCase();
@@ -1168,6 +1217,29 @@ export function GridEditor({
             placeholder="filter…"
             className="w-full h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-xs"
           />
+        </div>
+        {/* Anon-preset visibility row — sits between the filter input
+            and the scrolling palette list. Anonymous presets (id
+            starts with `_`) are per-cell variants; the toggle defaults
+            OFF so the palette stays focused on the authored vocab.
+            The "+N hidden" hint surfaces only when the toggle is off
+            AND there's actually something to reveal. */}
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800">
+          <ToggleSwitch
+            size="sm"
+            checked={showAnonymousPresets}
+            onChange={(next) => onShowAnonymousPresetsChange?.(next)}
+            aria-label="Show anonymous presets"
+            disabled={!onShowAnonymousPresetsChange}
+          />
+          <span className="text-[11px] text-zinc-400 truncate">
+            Show anonymous
+          </span>
+          {!showAnonymousPresets && hiddenAnonCount > 0 ? (
+            <span className="text-[11px] text-zinc-500 ml-auto shrink-0">
+              +{hiddenAnonCount} hidden
+            </span>
+          ) : null}
         </div>
         <div className="flex-1 overflow-auto p-2 space-y-1">
           {resolverError ? (
