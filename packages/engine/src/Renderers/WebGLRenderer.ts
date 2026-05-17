@@ -41,6 +41,16 @@ export interface WebGLRendererProps {
    * pack behaviour byte-identical.
    */
   chain?: ReadonlyArray<AssetPack>;
+  /**
+   * When `true` (default), the renderer attaches a fullscreen fixed-
+   * position HUD canvas to `document.body` and installs a window
+   * resize listener that keeps it in sync with the WebGL canvas.
+   * Standalone preview surfaces (`CellPreviewEngine`) pass `false`
+   * so they don't pollute the document body / window listener set —
+   * the HUD canvas is still constructed as an offscreen surface so
+   * HUD-touching code stays safe, but nothing renders there.
+   */
+  embedHud?: boolean;
 }
 
 /* --- Tile texture array --------------------------------------------------- */
@@ -702,6 +712,14 @@ export class WebGLRenderer implements SceneRenderer {
 
   private readonly gl: WebGL2RenderingContext;
   private readonly hudCanvas: HTMLCanvasElement;
+  /**
+   * Whether the HUD canvas is attached to `document.body` and the
+   * window-resize listener is installed. `false` for embedded preview
+   * surfaces (`CellPreviewEngine`); the HUD canvas is still created
+   * as an offscreen surface in that case so HUD-touching code stays
+   * safe, but `syncHud()` / append / resize-listener are skipped.
+   */
+  private readonly embedHud: boolean;
 
   private readonly skyProgram: WebGLProgram;
   private readonly skyTopLoc: WebGLUniformLocation;
@@ -981,6 +999,7 @@ export class WebGLRenderer implements SceneRenderer {
     height = canvas.clientHeight,
     shaderSources,
     chain,
+    embedHud = true,
   }: WebGLRendererProps) {
     canvas.width = width;
     canvas.height = height;

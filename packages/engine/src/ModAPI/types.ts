@@ -419,6 +419,65 @@ export interface AudioHandle {
 }
 
 /**
+ * Per-voice options forwarded to `api.proceduralAudio.playInstrument`.
+ * Mirrors `PlayInstrumentOpts` from the engine's procedural-audio
+ * module (re-declared here so the ModAPI surface doesn't drag
+ * `ProceduralAudio` types into pack-side `.d.ts` consumers).
+ *
+ * Sound Lab SL2 of `docs/plans/SOUND_LAB.md` §3.5.
+ */
+export interface ProceduralPlayInstrumentOpts {
+  /** Note frequency in Hz — drives oscillators tagged `voiceNote: true`. */
+  frequency?: number;
+  /** Gate length in seconds. Voices auto-release after the gate. */
+  gateMs?: number;
+  /** Velocity 0..1 — scales the output gain. Default 1. */
+  velocity?: number;
+  /** Group override. Defaults to recipe.group or `"sfx"`. */
+  group?: SoundGroup;
+  /** Volume multiplier. Default 1. */
+  volume?: number;
+}
+
+/**
+ * Procedural-audio surface — SL2 of `docs/plans/SOUND_LAB.md`. Sound
+ * recipes (JSON files at `recipes/*.sound.json`) compile to Web Audio
+ * node graphs at pack-load time. Three modes: `static` + `loop`
+ * render once to an `AudioBuffer` (cached in IDB); `instrument`
+ * instantiates per-voice live.
+ *
+ * Static + loop recipes also resolve through the existing
+ * `api.audio.play(id)` path — the registry checks the recipe store
+ * first, then `manifest.sounds` (per §6.6 + §12 Q11 RESOLVED:
+ * shared namespace). This `proceduralAudio` surface gives pack scripts
+ * direct access to the underlying recipe machinery for advanced use
+ * — most pack scripts can stick with `api.audio.play(...)`.
+ */
+export interface ProceduralAudioAPI {
+  /**
+   * Load (render or cache-hit) the rendered `AudioBuffer` for a
+   * static/loop recipe. Returns `null` for unknown ids or
+   * instrument-mode recipes (which have no bake).
+   */
+  load(recipeId: string): Promise<AudioBuffer | null>;
+  /**
+   * Instantiate a per-voice instrument-mode recipe. Returns `null`
+   * for unknown ids, non-instrument recipes, or when the AudioContext
+   * isn't ready (pre-user-gesture). The handle's `dispose()` stops
+   * the voice; the engine's voice-pool also auto-cleans after the
+   * gate + release tail completes.
+   */
+  playInstrument(
+    recipeId: string,
+    opts?: ProceduralPlayInstrumentOpts,
+  ): { dispose(): void } | null;
+  /** `true` when a recipe with this id is registered. */
+  has(recipeId: string): boolean;
+  /** Currently-registered recipe ids. */
+  ids(): readonly string[];
+}
+
+/**
  * Audio playback surface — Au1 of `docs/plans/AUDIO.md`. Pack scripts
  * call `api.audio.play("gunshot")` and get back a handle they can stop
  * or retune. The engine owns the `AudioContext`, the per-group gain
