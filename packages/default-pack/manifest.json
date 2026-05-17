@@ -17,6 +17,25 @@
     "scripts/systems/events-demo.js",
     "scripts/hello.js"
   ],
+  "components": [
+    { "name": "Position",      "tags": ["entity"] },
+    { "name": "Facing",        "tags": ["entity"] },
+    { "name": "Movement",      "tags": ["entity"] },
+    { "name": "PlayerInput",   "tags": ["entity", "input"] },
+    { "name": "Aim",           "tags": ["entity", "input"] },
+    { "name": "Camera",        "tags": ["entity", "render"] },
+    { "name": "MinimapMarker", "tags": ["entity", "ui"] },
+    { "name": "Weapon",        "tags": ["entity"] },
+    { "name": "Inventory",     "tags": ["entity"] },
+    { "name": "Sprite",        "tags": ["entity", "render"] },
+    { "name": "Animation",     "tags": ["entity", "render"] },
+    { "name": "Pickup",        "tags": ["entity"] },
+    { "name": "Light",         "tags": ["entity", "render"] },
+    { "name": "Shader",        "tags": ["entity", "render"] },
+    { "name": "SpawnerList",   "tags": ["scene", "spawning"] },
+    { "name": "Systems" },
+    { "name": "Scripts" }
+  ],
   "prefabs": {
     "player": {
       "name": "player",

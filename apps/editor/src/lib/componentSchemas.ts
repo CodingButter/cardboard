@@ -148,41 +148,6 @@ export const BUILT_IN_COMPONENT_SCHEMAS: ComponentSchema[] = [
     defaultData: { current: "", frame: 0, elapsed: 0 },
   },
   {
-    name: "Animation",
-    fields: [
-      {
-        key: "current",
-        kind: "animationName",
-        label: "current",
-        hint: "Animation name from the sprite's `animations` dict",
-      },
-      {
-        key: "frame",
-        kind: "number",
-        min: 0,
-        step: 1,
-        hint: "Index into the animation's frames[] array",
-      },
-      {
-        key: "elapsed",
-        kind: "number",
-        min: 0,
-        step: 0.01,
-        hint: "Seconds elapsed in the current frame",
-      },
-      { key: "paused", kind: "boolean" },
-      {
-        key: "playbackRate",
-        kind: "number",
-        min: 0,
-        max: 4,
-        step: 0.1,
-        hint: "Multiplier on dt for this entity",
-      },
-    ],
-    defaultData: { current: "", frame: 0, elapsed: 0 },
-  },
-  {
     name: "Shader",
     fields: [
       { key: "worldHooks", kind: "string", hint: "path/to.glsl" },
@@ -205,6 +170,36 @@ export const BUILT_IN_COMPONENT_SCHEMAS: ComponentSchema[] = [
       { key: "fov", kind: "number", min: 0.3, max: 2.5, step: 0.05 },
     ],
     defaultData: { fov: Math.PI / 3 },
+  },
+  {
+    name: "Aim",
+    fields: [
+      { key: "screenY", kind: "number", step: 0.01, hint: "Pitch offset (screen-space)" },
+    ],
+    defaultData: { screenY: 0 },
+  },
+  {
+    name: "PlayerInput",
+    fields: [],
+    defaultData: { bindings: {} },
+  },
+  {
+    name: "Weapon",
+    fields: [],
+    defaultData: { lastFireTime: -100, walkPhase: 0, wasFiring: false, reloadStart: -Infinity },
+  },
+  {
+    name: "Inventory",
+    fields: [],
+    defaultData: { bag: [], hotbar: [], equipment: {}, activeHotbarIndex: 0 },
+  },
+  {
+    name: "Pickup",
+    fields: [
+      { key: "itemId", kind: "string", hint: "Item id from manifest.items" },
+      { key: "count", kind: "number", min: 1, step: 1 },
+    ],
+    defaultData: { itemId: "", count: 1 },
   },
 ];
 
