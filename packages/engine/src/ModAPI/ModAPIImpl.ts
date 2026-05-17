@@ -64,6 +64,7 @@ import { AudioRegistry } from "./AudioRegistry";
 import { RecipeStore } from "ProceduralAudio";
 import { EventsRegistry } from "./EventsRegistry";
 import { ConsoleRegistry, type ConsoleAPI } from "./ConsoleAPI";
+import { SystemScheduler, type SystemPhase } from "./SystemScheduler";
 
 /**
  * Dependencies the engine wires into the ModAPI implementation. Kept
@@ -212,6 +213,16 @@ export class ModAPIImpl implements ModAPI {
    * exposed via `ModAPI`.
    */
   readonly console: ConsoleAPI;
+  /**
+   * Phased system scheduler — WORLD_STATE.md §7.2 + §11. Fed by
+   * `Systems`-component attach handlers (not yet wired in this MVP);
+   * `Game.update` / `Game.render` drive the `update` / `fixedUpdate` /
+   * `render` phases every frame so any system that *is* registered
+   * runs at the right boundary. Held publicly so future `Systems`
+   * component handlers reach `register` / `unregisterEntity` without
+   * casting.
+   */
+  readonly systemScheduler: SystemScheduler = new SystemScheduler();
 
   /**
    * Internal handle to the UI registry. The engine's `Game.update`
@@ -558,6 +569,17 @@ export class ModAPIImpl implements ModAPI {
   /** Called by `Game.update`. Runs every mod-registered system in order. */
   runFrame(deltaTime: number): void {
     this.systemRegistry.runFrame(this.world, deltaTime);
+  }
+
+  /**
+   * Run every system registered against `phase` on the
+   * `SystemScheduler`. Driven by `Game.update` (`update` /
+   * `fixedUpdate`) and `Game.render` (`render`) per WORLD_STATE.md
+   * §7.2. Safe to call before any system attaches — `SystemScheduler.run`
+   * short-circuits on an empty queue.
+   */
+  runSchedulerPhase(phase: SystemPhase, deltaTime: number): void {
+    this.systemScheduler.run(phase, this.world, deltaTime, this);
   }
 
   /**

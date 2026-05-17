@@ -735,6 +735,12 @@ export class Game {
       // close-side path runs inside the Preact component itself
       // (window keydown listener) and so doesn't need a frame tick.
       this.api.runFrame(deltaTime);
+      // WORLD_STATE.md §7.2 — drive the `Systems`-component scheduler
+      // for `update` (per-tick gameplay) + `fixedUpdate` (deterministic
+      // physics-class work). No-op until a `Systems` component registers
+      // an entry; safe to call when the scheduler is empty.
+      this.api.runSchedulerPhase("update", deltaTime);
+      this.api.runSchedulerPhase("fixedUpdate", deltaTime);
       // A1 of ANIMATIONS.md — engine-side animation advance runs in
       // the update phase (gameplay-paused while a modal is open), so
       // when the inventory / settings UI is up the world freezes
@@ -826,6 +832,12 @@ export class Game {
   }
 
   private readonly render = (deltaTime: number): void => {
+    // WORLD_STATE.md §7.2 — drive the `Systems`-component scheduler's
+    // `render` phase. Runs before any renderer-phase fan-out so a
+    // render-phase system can stage state (e.g. HUD prep) that the
+    // renderer systems below then consume.
+    this.api.runSchedulerPhase("render", deltaTime);
+
     // 0. `before-world` phase — pack-registered renderer systems that
     //    want to draw under everything (sky overlays, etc.) run before
     //    the world pass kicks off. No-op until something registers.

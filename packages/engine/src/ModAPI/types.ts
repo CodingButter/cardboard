@@ -670,6 +670,24 @@ export interface ModAPI {
    * gating, etc.; the recording methods declared here stay stable.
    */
   readonly console: import("./ConsoleAPI").ConsoleAPI;
+  /**
+   * Phased system scheduler — WORLD_STATE.md §7.2 + §11. Fed by
+   * `Systems`-component attach handlers (forthcoming). Pack scripts
+   * rarely touch this directly; the engine's `Game.update` /
+   * `Game.render` drive its phases every frame via
+   * `runSchedulerPhase`.
+   */
+  readonly systemScheduler: import("./SystemScheduler").SystemScheduler;
+
+  /**
+   * Run every system registered against `phase` on `systemScheduler`.
+   * Called by the engine each frame (WORLD_STATE.md §7.2); pack
+   * scripts only invoke this from tests / debug tooling.
+   */
+  runSchedulerPhase(
+    phase: import("./SystemScheduler").SystemPhase,
+    deltaTime: number,
+  ): void;
   /** Vec2 constructor — handy because positions are Vec2 instances. */
   readonly Vec2: typeof Vec2;
   /** Component class — for advanced use (most mods can use `defineComponent` instead). */
