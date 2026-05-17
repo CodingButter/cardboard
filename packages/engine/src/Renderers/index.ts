@@ -31,3 +31,12 @@ export {
   findMode1WinnerForRole,
   type CascadedPostPass,
 } from "./ShaderChainCascade";
+
+// M4 — pack-chain shader cascade (MATERIALS.md §10).
+export {
+  cascadeHooks,
+  cascadePostPasses,
+  chainHasMode1ForRole,
+  findMode1WinnerForRole,
+  type CascadedPostPass,
+} from "./ShaderChainCascade";

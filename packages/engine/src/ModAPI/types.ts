@@ -163,6 +163,12 @@ export interface UIAPI {
     props?: () => P,
   ): void;
   unregisterModal(name: string): void;
+  /**
+   * `true` if a component is currently registered for `name`. Used by
+   * the engine's default-modal auto-registration to detect whether a
+   * pack already claimed the slot (override-by-re-registering pattern).
+   */
+  has(name: string): boolean;
 }
 
 /**

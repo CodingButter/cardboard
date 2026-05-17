@@ -4,5 +4,16 @@
 {
   "stone.ceiling": {
     "texture": "images/tiles/ceiling.jpg"
+  },
+  "ceiling.glow.green": {
+    "texture": "images/tiles/ceiling.jpg",
+    "emissive": {
+      "color": [
+        0.6,
+        1,
+        0.7
+      ],
+      "intensity": 1.2
+    }
   }
 }

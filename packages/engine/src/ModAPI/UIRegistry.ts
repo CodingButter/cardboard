@@ -67,6 +67,10 @@ export class UIRegistry implements UIAPI {
     }
   }
 
+  has(name: string): boolean {
+    return this.entries.has(name);
+  }
+
   /**
    * Called by `Game.update` every frame. Picks the first open modal
    * with a registered component and renders it; renders `null` when no

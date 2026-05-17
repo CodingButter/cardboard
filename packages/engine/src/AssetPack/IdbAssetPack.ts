@@ -208,6 +208,10 @@ export class IdbAssetPack extends AssetPack {
     return Array.from(this.paths);
   }
 
+  override listPaths(): string[] {
+    return Array.from(this.paths);
+  }
+
   async textBody(path: string): Promise<string> {
     const body = await loadAssetBody(this.db, this.projectId, path);
     if (body === null) {

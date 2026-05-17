@@ -26,6 +26,15 @@ import type { PackManifest } from "AssetPack";
  * Total: 25 canonical events. See §4.9 of EVENTS.md for the full list.
  */
 export interface CanonicalEvents {
+  // --- World lifecycle (WORLD_STATE.md §6.1) ------------------------
+  /**
+   * Fires ONCE per `Game` lifetime, AFTER `runPackScripts()` and
+   * BEFORE the first scene-controller spawns. Pack scripts use it
+   * for one-time setup that doesn't depend on a live scene
+   * controller or its components.
+   */
+  "world:ready": Record<string, never>;
+
   // --- Scene lifecycle (§4.1) ---------------------------------------
   /** Fires before a scene swap begins; new scene parsed, no entities spawned for it yet. */
   "scene:beforeLoad": { from?: string; to: string };
@@ -33,6 +42,14 @@ export interface CanonicalEvents {
   "scene:loaded": { name: string; size: { x: number; y: number } };
   /** Fires before the active scene's world is torn down. Last chance to read entity state. */
   "scene:beforeUnload": { name: string };
+  /**
+   * Alias for `scene:beforeUnload` per WORLD_STATE.md §6.2 — same
+   * payload, same fire moment. Both names fire so subscribers using
+   * the new vocabulary and legacy subscribers both see the event.
+   * The duplicate name is intentional during the one-release
+   * back-compat window.
+   */
+  "scene:willUnload": { name: string };
 
   // --- Entity lifecycle (§4.2) --------------------------------------
   /** Fires from `ModAPIImpl.spawnPrefab` after the factory returns. Prefab spawns only. */

@@ -4,6 +4,15 @@
     "y": 5.5,
     "facing": 0
   },
+  "controller": {
+    "components": {
+      "SpawnerList": {
+        "points": [
+          { "id": "main", "x": 2.5, "y": 5.5, "facing": 0 }
+        ]
+      }
+    }
+  },
   "idMap": {
     "0": null,
     "1": "brick.wall",

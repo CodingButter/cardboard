@@ -17,6 +17,9 @@
  *    - ready { projectId, scene }
  *    - scene-loaded { path }
  *    - error { message }
+ *    - engine-stats { data: EngineStats }  // I2 telemetry (Q5 of
+ *      EDITOR_REDESIGN.md §12). Pushed at 10 Hz; consumer is the
+ *      editor's Playtest stats panel.
  *
  * Only one bridge is installed per page. Re-installing (HMR) is a
  * no-op — the global listener is keyed on a window symbol so the
@@ -123,4 +126,16 @@ export function installEditorBridge(
   // Mirror the ready as a scene-loaded so the editor can highlight
   // the active scene row in its sidebar.
   post({ type: "scene-loaded", path: startScenePath });
+
+  // I2 telemetry channel — Q5 of EDITOR_REDESIGN.md §12. Push the
+  // engine's stats snapshot (`api.debug.stats()`) to the parent at
+  // 10 Hz. The collector smooths fps / frameMs internally over a
+  // 1s window so the editor's Playtest panel can render a stable
+  // number without its own debouncing. The interval lives for the
+  // page's lifetime (no detach needed — iframe disposal stops it).
+  const STATS_INTERVAL_MS = 100; // 10 Hz
+  setInterval(() => {
+    const data = game.api.debug.stats();
+    post({ type: "engine-stats", data });
+  }, STATS_INTERVAL_MS);
 }

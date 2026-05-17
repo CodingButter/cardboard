@@ -95,3 +95,6 @@ export type { StatusBarProps, StatusBarSection } from "./StatusBar";
 
 export { PreviewHost } from "./PreviewHost";
 export type { PreviewHostProps, PreviewEngine } from "./PreviewHost";
+
+export { PreviewHost } from "./PreviewHost";
+export type { PreviewHostProps, PreviewEngine } from "./PreviewHost";

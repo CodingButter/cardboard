@@ -3,8 +3,37 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>two_5_d editor</title>
-    <meta name="theme-color" content="#09090b" />
+    <title>Cardboard</title>
+    <meta name="theme-color" content="#08090b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Cardboard" />
+    <!--
+      Manifest + icon links are injected at runtime instead of declared
+      as <link> here. Bun's HTML bundler tries to resolve every `href`
+      it sees, and these point at root-relative public assets it doesn't
+      know about at build time — which would make `bun build` fail.
+      Injecting them keeps the bundler happy while still making the page
+      installable as a PWA (browsers parse dynamically-added link tags
+      for both manifest and icons). Mirrors apps/game/index.html.
+    -->
+    <script>
+      (function () {
+        var head = document.head;
+        function add(rel, href, extra) {
+          var l = document.createElement("link");
+          l.rel = rel;
+          l.href = href;
+          if (extra) for (var k in extra) l.setAttribute(k, extra[k]);
+          head.appendChild(l);
+        }
+        add("manifest", "/manifest.webmanifest");
+        add("icon", "/icons/icon-192.png", { type: "image/png", sizes: "192x192" });
+        add("icon", "/icons/icon-512.png", { type: "image/png", sizes: "512x512" });
+        add("apple-touch-icon", "/icons/icon-512.png");
+      })();
+    </script>
     <link href="./index.css" rel="stylesheet" />
     <script src="./index.tsx" type="module" defer></script>
   </head>

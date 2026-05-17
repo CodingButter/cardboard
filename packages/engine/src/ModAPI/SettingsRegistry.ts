@@ -18,10 +18,12 @@ import type { SettingsAPI } from "./types";
  * intended to keep.
  *
  * Why settings live in the ModAPI surface even though they're an
- * engine concern: the pack-side `SettingsScreenSystem` (post-R3 split)
- * is the only consumer. The system runs from a pack script and can't
- * import `Settings.ts` directly — it only sees `api`. Re-exposing
- * the four functions on `api.settings` is the cheapest crossing.
+ * engine concern: the engine's own `DefaultSettingsScreen` reads them
+ * through `api.settings` (so it shares one code path with pack-side
+ * overrides), and any pack that ships its own custom settings modal
+ * does too — pack scripts run from a Blob URL and can't import
+ * `Settings.ts` directly, they only see `api`. Re-exposing the four
+ * functions on `api.settings` is the cheapest crossing for both.
  */
 export class SettingsRegistry implements SettingsAPI {
   constructor(private readonly packConfig: PartialGameConfig) {}

@@ -56,6 +56,7 @@
 import type { AssetPack, PostPassDef } from "AssetPack";
 import { headerForPostPass } from "./shaderHeaders";
 import { cascadePostPasses } from "./ShaderChainCascade";
+import { cascadePostPasses } from "./ShaderChainCascade";
 
 /**
  * Vertex shader for every post-pass — a pass-through fullscreen quad.
@@ -145,6 +146,42 @@ export class PostPassChain {
     if (compiled.length === 0) {
       console.warn(
         `[two_5_d] pack '${pack.manifest.name}' declares postPasses but none compiled — falling back to direct rendering.`,
+      );
+      return null;
+    }
+    return new PostPassChain(gl, compiled, width, height);
+  }
+
+  /**
+   * Chain-aware variant — M4 of `docs/plans/MATERIALS.md` §10 (cross-
+   * ref ENGINE_PACK_SHADERS.md §10.3). Concatenates every pack's
+   * `shaders.postPasses` in chain order (deps-first → root-last);
+   * cross-pack name collisions log a soft warning but BOTH passes
+   * run — two CRT passes is a valid stylistic choice.
+   *
+   * Length-1 chains delegate to `create(pack, …)` to keep pre-M4
+   * diagnostics byte-identical for single-pack flows.
+   */
+  static async createFromChain(
+    gl: WebGL2RenderingContext,
+    chain: ReadonlyArray<AssetPack>,
+    width: number,
+    height: number,
+  ): Promise<PostPassChain | null> {
+    if (chain.length === 0) return null;
+    if (chain.length === 1) return PostPassChain.create(gl, chain[0]!, width, height);
+
+    const cascaded = cascadePostPasses(chain);
+    if (cascaded.length === 0) return null;
+
+    const compiled: CompiledPass[] = [];
+    for (const entry of cascaded) {
+      const pass = await PostPassChain.compilePass(gl, entry.pack, entry.def);
+      if (pass) compiled.push(pass);
+    }
+    if (compiled.length === 0) {
+      console.warn(
+        `[two_5_d] pack-chain declares postPasses across ${cascaded.length} entries but none compiled — falling back to direct rendering.`,
       );
       return null;
     }

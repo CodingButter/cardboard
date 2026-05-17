@@ -4,5 +4,34 @@
 {
   "brick.wall": {
     "texture": "images/tiles/wall.jpg"
+  },
+  "wall.short.glow.pink": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.35,
+    "topCap": "images/tiles/tile_floor.jpg",
+    "emissive": {
+      "color": [
+        1,
+        0.4,
+        0.8
+      ],
+      "intensity": 1.5
+    }
+  },
+  "wall.medium": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.7,
+    "topCap": "images/tiles/tile_floor.jpg"
+  },
+  "wall.short": {
+    "texture": "images/tiles/wall.jpg",
+    "wallHeight": 0.35,
+    "topCap": "images/tiles/tile_floor.jpg"
+  },
+  "wall.short.hanging": {
+    "texture": "images/tiles/wall.jpg",
+    "wallStartZ": 0.6,
+    "wallHeight": 0.4,
+    "bottomCap": "images/tiles/ceiling.jpg"
   }
 }

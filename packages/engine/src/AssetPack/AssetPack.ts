@@ -31,6 +31,38 @@ export abstract class AssetPack {
   }
 
   /**
+   * Enumerate every asset path the pack contains. Used by the editor's
+   * chain conflict detector (`apps/editor/src/lib/chainConflictDetector.ts`)
+   * to flag asset-path collisions across sibling deps, and by future
+   * tooling (export, audit) that needs a pack inventory.
+   *
+   * Returns the in-memory mirror — for ZipAssetPack that's every entry
+   * in the decoded `.apg`; for IdbAssetPack it's the path index built
+   * at construction time. Subclasses override; this default returns
+   * an empty array so a custom AssetPack that doesn't bother to
+   * implement enumeration still typechecks.
+   */
+  listPaths(): string[] {
+    return [];
+  }
+
+  /**
+   * Enumerate every asset path stored in the pack (manifest.json
+   * included). Used by editor tooling — specifically the chain
+   * conflict detector (`apps/editor/src/lib/chainConflictDetector.ts`)
+   * — to walk the file set without having to know which backing
+   * subclass is in play.
+   *
+   * Order is implementation-defined and not stable across runs;
+   * callers that need a stable order should sort the result. The
+   * default implementation returns an empty array so subclasses
+   * that haven't been upgraded yet still construct.
+   */
+  listPaths(): string[] {
+    return [];
+  }
+
+  /**
    * Read a binary asset (sound, font, arbitrary bytes) as a raw
    * `ArrayBuffer` — the form `AudioContext.decodeAudioData` consumes
    * directly. Au1 of `docs/plans/AUDIO.md` §5.4.

@@ -144,4 +144,48 @@ export class World {
   entityCount(): number {
     return this.alive.size;
   }
+
+  /**
+   * Generator that yields every entity carrying all `components`.
+   * Same membership semantics as `each` but exposes the entity ids
+   * to the caller — useful for serialise / despawn-loops / generic
+   * introspection where the per-component values aren't needed.
+   *
+   * Walks the FIRST component's entity list and filters by the rest
+   * (same iteration strategy as `each`). Pass the rarest component
+   * first to minimise inner-check work.
+   *
+   * WORLD_STATE.md §9. The string-named counterpart
+   * `api.world.query("Position", "Health")` lives on `ModAPIImpl`
+   * and resolves names through `ComponentRegistry.getComponent`
+   * before delegating here.
+   */
+  *queryComponents(
+    ...components: ReadonlyArray<Component<unknown>>
+  ): IterableIterator<Entity> {
+    if (components.length === 0) return;
+    const primary = components[0]!;
+    outer: for (const entity of primary.entities()) {
+      for (let i = 1; i < components.length; i++) {
+        if (!components[i]!.has(entity)) continue outer;
+      }
+      yield entity;
+    }
+  }
+
+  /**
+   * Iterate every entity carrying the listed components, calling
+   * `fn` with the entity id only (no per-component values). Cheap
+   * when callers walk a wide query and only need the ids.
+   *
+   * Internally a `for-of` over `queryComponents`; kept as a method
+   * so the registry-side `world.query(...names)` adapter has a
+   * single call site to inline.
+   */
+  eachId(
+    components: ReadonlyArray<Component<unknown>>,
+    fn: (entity: Entity) => void,
+  ): void {
+    for (const entity of this.queryComponents(...components)) fn(entity);
+  }
 }

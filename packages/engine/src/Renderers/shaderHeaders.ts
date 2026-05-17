@@ -126,6 +126,31 @@ out vec4 outColor;
 `;
 
 /**
+ * Post-pass header (Mode 2, S4) — auto-injected for every
+ * `manifest.shaders.postPasses[]` entry. Per §5.5 of
+ * `docs/plans/ENGINE_PACK_SHADERS.md`. Kept INTENTIONALLY minimal —
+ * post-passes are 2D image filters operating on the previous color
+ * buffer; they don't get world textures, lightmaps, or column data.
+ *
+ * Exposed contract (verbatim §5.5):
+ *   uniform sampler2D u_color   — previous pass output
+ *   uniform vec2      u_resolution
+ *   uniform float     u_time    — seconds since renderer start
+ *   uniform float     u_frame   — monotonic frame counter
+ *   in vec2           v_uv      — [0,1] screen UV
+ *   out vec4          outColor
+ */
+const HEADER_POST_PASS = `#version 300 es
+precision highp float;
+uniform sampler2D u_color;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform float u_frame;
+in vec2 v_uv;
+out vec4 outColor;
+`;
+
+/**
  * Sprite frag header — varyings from the sprite vertex shader, sprite
  * atlas sampler, plus the lightmap / dynamic-light contract.
  */
@@ -199,6 +224,19 @@ export function helpersFor(role: ShaderRole): string {
  */
 export function fullHeaderFor(role: ShaderRole): string {
   return headerFor(role) + hookPreludeFor(role) + helpersFor(role) + "// ==== user body begins ====\n";
+}
+
+/**
+ * Auto-injected post-pass header (Mode 2, S4). Pack ships only the
+ * body of a fragment shader (helpers + `void main()`); the engine
+ * prepends this stanza so the body can reference `u_color`,
+ * `u_resolution`, `u_time`, `u_frame`, `v_uv`, and write `outColor`
+ * without redeclaration. Trailing marker mirrors the role-pipeline
+ * version so error-line subtraction (in `ShaderValidator`) works the
+ * same way.
+ */
+export function headerForPostPass(): string {
+  return HEADER_POST_PASS + "// ==== user body begins ====\n";
 }
 
 /**

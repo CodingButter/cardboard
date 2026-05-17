@@ -1,4 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import {
+  FolderOpen,
+  Plus,
+  Upload,
+  Link as LinkIcon,
+  Play,
+  Pencil,
+  Trash2,
+  Settings,
+  ExternalLink,
+  Sparkles,
+  BookOpen,
+  GitBranch,
+} from "lucide-react";
 import {
   EditorProjectStore,
   type ProjectMeta,
@@ -13,22 +27,43 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
   Input,
   Label,
   Modal,
 } from "../components/ui";
+import {
+  Badge,
+  EmptyState,
+  FilePicker,
+  IconButton,
+  KeyValueList,
+  PanelHeader,
+  ScrollArea,
+  StatsBlock,
+} from "../components/ui/index";
+import { useStatusBar } from "../shell/StatusBarContext";
+import type { StatusBarSection } from "../components/ui/StatusBar";
 import { cn } from "../lib/cn";
 
 /**
- * Home screen — project list + create / import actions.
+ * Home view — R4a redesign.
  *
- * EDITOR.md §10 E1 calls for: list / create / rename / delete plus
- * import .apg from file and (folded in from E6+) open from URL.
+ * Spec: docs/plans/EDITOR_REDESIGN.md §7.1.
  *
- * Layout: two top-level cards side by side.
- *   - Recent projects (left): clickable rows; rename + delete inline.
- *   - Create / Import (right): three stacked actions.
+ * Composition (per §6.5 grammar):
+ *   <aside col-span-3>  — Recents sidebar (PanelHeader + scrollable list).
+ *   <main  col-span-6>  — Project grid (cards with thumbnail + metadata + Play).
+ *   <aside col-span-3>  — Create / import actions + templates + quick links.
+ *
+ * The view does NOT register Save / Export EditorActions — Home has no
+ * project context to save against. The shell keeps the TopBar Save /
+ * Export buttons in their default disabled state.
+ *
+ * StatusBar contribution (pushed via useStatusBar() on mount):
+ *   - project-count : "Projects" | <n>
+ *   - last-opened   : "Last opened" | <project-name or em-dash>
+ *
+ * EmptyState (no projects yet) is rendered inside the main column.
  */
 
 interface HomeScreenProps {
@@ -36,18 +71,18 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({ onOpenProject }: HomeScreenProps) {
-  const [projects, setProjects] = useState<ProjectMeta[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [projects, setProjects] = React.useState<ProjectMeta[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
   // URL-import dialog state.
-  const [urlOpen, setUrlOpen] = useState(false);
-  const [urlInput, setUrlInput] = useState("");
-  const [hashInput, setHashInput] = useState("");
-  const [urlConfirmed, setUrlConfirmed] = useState(false);
+  const [urlOpen, setUrlOpen] = React.useState(false);
+  const [urlInput, setUrlInput] = React.useState("");
+  const [hashInput, setHashInput] = React.useState("");
+  const [urlConfirmed, setUrlConfirmed] = React.useState(false);
 
-  const refreshProjects = async () => {
+  const refreshProjects = React.useCallback(async () => {
     setLoading(true);
     try {
       const list = await EditorProjectStore.listProjects();
@@ -57,11 +92,31 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    refreshProjects();
   }, []);
+
+  React.useEffect(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
+
+  // ─── StatusBar wiring ────────────────────────────────────────────────
+  // Push project-count + last-opened sections while Home is mounted.
+  // The shell's StatusBar reads these via useStatusBarSections().
+  const { setSections } = useStatusBar();
+  React.useEffect(() => {
+    const mostRecent = projects[0]; // listProjects() returns newest-first.
+    const sections: StatusBarSection[] = [
+      { id: "project-count", label: "Projects", value: String(projects.length) },
+      {
+        id: "last-opened",
+        label: "Last opened",
+        value: mostRecent?.name ?? "—",
+      },
+    ];
+    setSections(sections);
+    return () => setSections([]);
+  }, [projects, setSections]);
+
+  // ─── Actions ──────────────────────────────────────────────────────────
 
   const handleCreate = async () => {
     const name = window.prompt("Project name?", "Untitled project")?.trim();
@@ -135,34 +190,106 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800 px-8 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">
-            <span className="text-amber-400">cardboard</span>{" "}
-            <span className="text-zinc-400 font-normal">editor</span>
-          </h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            In-browser level + pack authoring tool
-          </p>
-        </div>
-        <a
-          href="https://github.com/codingbutter/two_5_d"
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-xs text-zinc-400 hover:text-amber-400 transition-colors"
-        >
-          GitHub →
-        </a>
-      </header>
+  // ─── Derived ─────────────────────────────────────────────────────────
 
-      <main className="px-8 py-10 max-w-6xl mx-auto">
+  const mostRecent = projects[0];
+  const totalProjects = projects.length;
+  // WIRING: real "imported pack count" — `ProjectMeta.forkedFrom` is set
+  // for any URL/blob import. Count those once additional provenance
+  // shapes land.
+  const importedCount = projects.filter((p) => p.forkedFrom).length;
+
+  return (
+    <div className="grid grid-cols-12 gap-6 h-full p-6 text-zinc-100">
+      {/* ─────────── Recents sidebar (left, 3 cols) ─────────── */}
+      <aside className="col-span-12 lg:col-span-3 flex flex-col min-h-0 rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+        <PanelHeader
+          title="Recents"
+          action={
+            totalProjects > 0 ? (
+              <Badge variant="zinc">{totalProjects}</Badge>
+            ) : null
+          }
+        />
+        <ScrollArea className="flex-1 min-h-0 p-2">
+          {loading ? (
+            <div className="px-3 py-6 text-xs text-zinc-500 text-center">
+              Loading…
+            </div>
+          ) : projects.length === 0 ? (
+            <div className="px-3 py-6 text-xs text-zinc-500 text-center leading-relaxed">
+              No recent projects.
+              <br />
+              Create one or import a pack.
+            </div>
+          ) : (
+            <ul className="space-y-1">
+              {projects.slice(0, 12).map((p) => {
+                const isMostRecent = p.id === mostRecent?.id;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenProject(p.id)}
+                      className={cn(
+                        "w-full text-left rounded-md px-3 py-2 transition-colors",
+                        "hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+                        isMostRecent
+                          ? "bg-amber-500/10 border border-amber-500/40 text-amber-100"
+                          : "border border-transparent text-zinc-200",
+                      )}
+                    >
+                      <div className="text-sm font-medium truncate">
+                        {p.name}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                        {formatRelative(p.modifiedAt)}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </ScrollArea>
+        <div className="border-t border-zinc-800 px-3 py-2 grid grid-cols-2 gap-2">
+          <StatsBlock label="Total" value={String(totalProjects)} />
+          <StatsBlock
+            label="Imported"
+            value={String(importedCount)}
+            emphasis={importedCount > 0 ? "success" : "default"}
+          />
+        </div>
+      </aside>
+
+      {/* ─────────── Project grid (center, 6 cols) ─────────── */}
+      <main className="col-span-12 lg:col-span-6 flex flex-col min-h-0">
+        <header className="flex items-end justify-between mb-4 shrink-0">
+          <div>
+            <h1 className="text-lg font-semibold text-zinc-100">
+              Your projects
+            </h1>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Everything lives in your browser — nothing is uploaded.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            onClick={handleCreate}
+            disabled={busy !== null}
+            className="gap-2"
+          >
+            <Plus size={14} />
+            New project
+          </Button>
+        </header>
+
         {error ? (
-          <div className="mb-6 rounded-md border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
+          <div className="mb-4 rounded-md border border-red-700/60 bg-red-900/30 px-4 py-3 text-sm text-red-200">
             <div className="font-medium">Something went wrong</div>
             <div className="mt-1 text-red-300/90">{error}</div>
             <button
+              type="button"
               className="mt-2 text-xs text-red-200 hover:text-white underline underline-offset-2"
               onClick={() => setError(null)}
             >
@@ -171,136 +298,174 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent projects</CardTitle>
-              <CardDescription>
-                {loading
-                  ? "Loading…"
-                  : projects.length === 0
-                    ? "No projects yet — create one or import a pack."
-                    : `${projects.length} project${projects.length === 1 ? "" : "s"} in this browser.`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {projects.length === 0 ? (
-                <div className="text-sm text-zinc-500 py-6 text-center">
-                  Your projects live in this browser's IndexedDB storage.
-                  Nothing is uploaded anywhere.
-                </div>
-              ) : (
-                <ul className="divide-y divide-zinc-800">
-                  {projects.map((p) => (
-                    <li
-                      key={p.id}
-                      className={cn(
-                        "py-3 flex items-center justify-between group",
-                        "hover:bg-zinc-800/40 -mx-3 px-3 rounded-md",
-                      )}
-                    >
-                      <button
-                        className="text-left flex-1"
-                        onClick={() => onOpenProject(p.id)}
-                      >
-                        <div className="font-medium text-zinc-100">
-                          {p.name}
-                        </div>
-                        <div className="text-xs text-zinc-500 mt-0.5">
-                          Updated{" "}
-                          {new Date(p.modifiedAt).toLocaleString()}
-                          {p.forkedFrom?.url ? (
-                            <>
-                              {" · "}
-                              <span title={p.forkedFrom.url}>
-                                forked from URL
-                              </span>
-                            </>
-                          ) : null}
-                        </div>
-                      </button>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleRename(p.id, p.name)}
-                        >
-                          Rename
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-400 hover:bg-red-900/30 hover:text-red-200"
-                          onClick={() => handleDelete(p.id, p.name)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Create or import</CardTitle>
-              <CardDescription>
-                Start a fresh project or load an existing pack.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button
-                variant="primary"
-                className="w-full"
-                onClick={handleCreate}
-                disabled={busy !== null}
-              >
-                New empty project
-              </Button>
-
-              <label
-                className={cn(
-                  "block w-full cursor-pointer rounded-md border border-zinc-700 bg-zinc-800",
-                  "px-4 py-2 text-sm text-zinc-100 text-center hover:bg-zinc-700 transition-colors",
-                  busy !== null && "opacity-60 cursor-not-allowed",
-                )}
-              >
-                {busy === "import-file"
-                  ? "Importing…"
-                  : "Import .apg from file"}
-                <input
-                  type="file"
-                  accept=".apg,application/zip"
-                  className="hidden"
-                  disabled={busy !== null}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleImportFile(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={() => setUrlOpen(true)}
-                disabled={busy !== null}
-              >
-                Open URL pack
-              </Button>
-
-              <p className="text-xs text-zinc-500 leading-relaxed mt-2">
-                Everything stays in this browser. Use <strong>Export</strong>{" "}
-                later to share a project as a standalone <code>.apg</code>.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        <ScrollArea className="flex-1 min-h-0 -mx-1 px-1">
+          {loading ? (
+            <div className="py-12 text-sm text-zinc-500 text-center">
+              Loading projects…
+            </div>
+          ) : projects.length === 0 ? (
+            <EmptyState
+              icon={<FolderOpen size={24} />}
+              title="No projects yet"
+              description="Start a fresh project or import an existing pack to begin authoring."
+              tutorial="home-intro"
+              action={
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleCreate}
+                    disabled={busy !== null}
+                    className="gap-2"
+                  >
+                    <Plus size={14} />
+                    New project
+                  </Button>
+                  <FilePicker
+                    mode="button"
+                    accept=".apg,application/zip"
+                    onFiles={(files) => files[0] && handleImportFile(files[0])}
+                    disabled={busy !== null}
+                  >
+                    Import .apg
+                  </FilePicker>
+                </>
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-2">
+              {projects.map((p) => {
+                const isMostRecent = p.id === mostRecent?.id;
+                return (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    highlight={isMostRecent}
+                    onOpen={() => onOpenProject(p.id)}
+                    onRename={() => handleRename(p.id, p.name)}
+                    onDelete={() => handleDelete(p.id, p.name)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </ScrollArea>
       </main>
 
+      {/* ─────────── Create / import / quick links (right, 3 cols) ─────────── */}
+      <aside className="col-span-12 lg:col-span-3 flex flex-col min-h-0 space-y-4 overflow-y-auto">
+        <Card>
+          <CardHeader>
+            <CardTitle>Create or import</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              variant="primary"
+              className="w-full gap-2"
+              onClick={handleCreate}
+              disabled={busy !== null}
+            >
+              <Plus size={14} />
+              New empty project
+            </Button>
+            <FilePicker
+              mode="dropzone"
+              accept=".apg,application/zip"
+              onFiles={(files) => files[0] && handleImportFile(files[0])}
+              disabled={busy !== null}
+              className="min-h-[120px]"
+            >
+              <Upload size={22} className="text-zinc-400" aria-hidden="true" />
+              <div className="text-sm text-zinc-200 font-medium">
+                {busy === "import-file"
+                  ? "Importing…"
+                  : "Drop a .apg pack here"}
+              </div>
+              <div className="text-[11px] text-zinc-500">
+                or click to browse
+              </div>
+            </FilePicker>
+            <Button
+              variant="secondary"
+              className="w-full gap-2"
+              onClick={() => setUrlOpen(true)}
+              disabled={busy !== null}
+            >
+              <LinkIcon size={14} />
+              Open URL pack
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Templates</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {/* WIRING: real template gallery. Spec §7.1 calls for tiles
+                (Empty / Classic Dungeon / Sci-Fi Base) that bootstrap a
+                project from a starter pack manifest. Wire this once the
+                pack-templates module exists (likely under
+                packages/default-pack/templates/ + an
+                EditorProjectStore.createFromTemplate(id) helper). */}
+            <div className="grid grid-cols-1 gap-2">
+              <TemplateTile
+                disabled
+                title="Empty"
+                caption="Blank manifest + one starter scene."
+              />
+              <TemplateTile
+                disabled
+                title="Classic Dungeon"
+                caption="Tile palette + sample mobs."
+                badge="Soon"
+              />
+              <TemplateTile
+                disabled
+                title="Sci-Fi Base"
+                caption="Metal corridors + neon lights."
+                badge="Soon"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick links</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <QuickLink
+              href="https://github.com/codingbutter/two_5_d"
+              icon={<GitBranch size={14} />}
+              label="GitHub repository"
+            />
+            <QuickLink
+              href="https://github.com/codingbutter/two_5_d/tree/main/docs"
+              icon={<BookOpen size={14} />}
+              label="Docs"
+            />
+            {/* WIRING: open the EditorSettingsModal directly. Currently
+                only the shell's TopBar cog opens it — the shell owns the
+                open/close state. Either lift via a context or expose
+                onOpenSettings through HomeScreenProps when needed. */}
+            <button
+              type="button"
+              disabled
+              className={cn(
+                "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
+                "text-zinc-500 cursor-not-allowed",
+              )}
+              title="Open settings from the gear in the top bar"
+            >
+              <Settings size={14} />
+              Editor settings (use top-bar gear)
+            </button>
+          </CardContent>
+        </Card>
+      </aside>
+
+      {/* URL-import dialog */}
       <Modal
         open={urlOpen}
         onClose={() => {
@@ -369,12 +534,228 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
               disabled={busy === "import-url"}
             />
             <span>
-              I understand this pack is from an unverified source. It will be
-              loaded into my local editor.
+              I understand this pack is from an unverified source. It will
+              be loaded into my local editor.
             </span>
           </label>
         </div>
       </Modal>
     </div>
   );
+}
+
+/* -------------------------------------------------------------------- */
+/* ProjectCard                                                           */
+/* -------------------------------------------------------------------- */
+
+interface ProjectCardProps {
+  project: ProjectMeta;
+  highlight: boolean;
+  onOpen: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}
+
+function ProjectCard({
+  project,
+  highlight,
+  onOpen,
+  onRename,
+  onDelete,
+}: ProjectCardProps) {
+  return (
+    <div
+      className={cn(
+        "group relative rounded-lg border bg-zinc-950/40 overflow-hidden",
+        "transition-colors",
+        highlight
+          ? "border-amber-500/40 bg-amber-500/[0.04]"
+          : "border-zinc-800 hover:border-zinc-700",
+      )}
+    >
+      {/* Thumbnail — 16:9 region. */}
+      {/* WIRING: replace placeholder with EditorProjectStore.getProjectThumbnail(id).
+          The bake step (Project tab in R4f) writes a PNG into IDB; the
+          Home view should `<img>` it when present and fall back to this
+          radial-gradient placeholder otherwise. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block w-full aspect-video bg-zinc-900 relative overflow-hidden focus-visible:outline-none"
+        aria-label={`Open ${project.name}`}
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              highlight
+                ? "radial-gradient(circle at 30% 30%, rgba(245, 158, 11, 0.25), rgba(8, 9, 11, 0.95) 65%)"
+                : "radial-gradient(circle at 30% 30%, rgba(63, 63, 70, 0.6), rgba(8, 9, 11, 0.95) 65%)",
+          }}
+          aria-hidden="true"
+        />
+        <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+          <Sparkles size={28} aria-hidden="true" />
+        </div>
+        {highlight && (
+          <div className="absolute top-2 left-2">
+            <Badge variant="amber">Most recent</Badge>
+          </div>
+        )}
+        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-500 text-zinc-950 shadow-lg">
+            <Play size={16} aria-hidden="true" />
+          </span>
+        </div>
+      </button>
+
+      <div className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <button
+            type="button"
+            onClick={onOpen}
+            className="text-left flex-1 min-w-0 focus-visible:outline-none"
+          >
+            <div className="text-sm font-semibold text-zinc-100 truncate">
+              {project.name}
+            </div>
+            <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+              Updated {formatRelative(project.modifiedAt)}
+            </div>
+          </button>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            <IconButton
+              icon={<Pencil size={14} />}
+              tooltip="Rename"
+              variant="ghost"
+              onClick={onRename}
+            />
+            <IconButton
+              icon={<Trash2 size={14} />}
+              tooltip="Delete"
+              variant="ghost"
+              className="text-red-400 hover:text-red-200 hover:bg-red-900/30"
+              onClick={onDelete}
+            />
+          </div>
+        </div>
+
+        <KeyValueList
+          density="dense"
+          divided={false}
+          rows={[
+            { label: "Created", value: formatDate(project.createdAt) },
+            {
+              label: "Source",
+              value: project.forkedFrom?.url ? (
+                <span title={project.forkedFrom.url}>URL import</span>
+              ) : project.sourcePackId ? (
+                <span title={project.sourcePackId}>Pack fork</span>
+              ) : (
+                <span className="text-zinc-500">Local</span>
+              ),
+            },
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* TemplateTile                                                          */
+/* -------------------------------------------------------------------- */
+
+interface TemplateTileProps {
+  title: string;
+  caption: string;
+  badge?: string;
+  disabled?: boolean;
+  onClick?: () => void;
+}
+
+function TemplateTile({
+  title,
+  caption,
+  badge,
+  disabled = false,
+  onClick,
+}: TemplateTileProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "text-left rounded-md border border-zinc-800 bg-zinc-950/40 p-3",
+        "transition-colors",
+        !disabled && "hover:border-amber-400 hover:bg-zinc-900",
+        disabled && "opacity-60 cursor-not-allowed",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium text-zinc-100 truncate">
+          {title}
+        </div>
+        {badge && <Badge variant="zinc">{badge}</Badge>}
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+        {caption}
+      </div>
+    </button>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* QuickLink                                                             */
+/* -------------------------------------------------------------------- */
+
+function QuickLink({
+  href,
+  icon,
+  label,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={cn(
+        "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
+        "text-zinc-300 hover:bg-zinc-800/60 hover:text-amber-300 transition-colors",
+      )}
+    >
+      <span className="text-zinc-500">{icon}</span>
+      <span className="flex-1 truncate">{label}</span>
+      <ExternalLink size={12} className="text-zinc-500" aria-hidden="true" />
+    </a>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Formatting helpers                                                    */
+/* -------------------------------------------------------------------- */
+
+function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "just now";
+  if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+  if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }

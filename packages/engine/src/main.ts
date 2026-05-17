@@ -183,6 +183,22 @@ export async function bootFromChain(
   // AudioContext.
   void game.api.audio.preloadAll();
 
+  // 5a'. SL2 of SOUND_LAB.md — scan the pack for `recipes/*.sound.json`
+  // and register every valid recipe in the procedural-audio store.
+  // No render at this point — static + loop recipes lazily render on
+  // first `load(id)` / `api.audio.play(id)`; instrument recipes
+  // instantiate per voice. A pack without any recipes loads byte-
+  // identically to pre-SL2 (no AudioContext, no IDB writes).
+  await game.api.proceduralAudio.loadFromPack();
+
+  // 5a'. SL2 of SOUND_LAB.md — scan the pack for `recipes/*.sound.json`
+  // and register every valid recipe in the procedural-audio store.
+  // No render at this point — static + loop recipes lazily render on
+  // first `load(id)` / `api.audio.play(id)`; instrument recipes
+  // instantiate per voice. A pack without any recipes loads byte-
+  // identically to pre-SL2 (no AudioContext, no IDB writes).
+  await game.api.proceduralAudio.loadFromPack();
+
   // 5b. Spawn the initial world entities (player today).
   game.spawnInitialEntities();
 

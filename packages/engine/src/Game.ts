@@ -29,6 +29,7 @@ import {
 import { ModAPIImpl, PLAYER_MOVED_FRAME_THROTTLE } from "ModAPI";
 import ItemImages from "ItemImages";
 import { installPreactRuntime } from "PreactRuntime";
+import { installDefaultSettings } from "UI/DefaultSettingsSystem";
 
 /**
  * Long-lived state preserved across HMR reloads. Re-using the `World`
@@ -209,11 +210,13 @@ export class Game {
 
     this.scene = scene;
     // Engine-side systems still in the engine after R4: sprite + light
-    // collection are renderer bridges (not gameplay). The two modal
-    // screens (inventory + settings) moved to the default-pack in R4
-    // and now mount via `api.ui.registerModal`. The 7 pack-migrated
-    // systems from R3 (player-input, gun-render, pickup, minimap,
-    // reticle, stats, inventory-bar) are loaded by `runPackScripts`.
+    // collection are renderer bridges (not gameplay). Modal screens
+    // mount via `api.ui.registerModal` — InventoryScreen lives in
+    // default-pack (game concept); SettingsScreen lives in the engine
+    // (universal — see `UI/DefaultSettingsScreen.tsx` + EDITOR_REDESIGN
+    // §12 Q4). The 7 pack-migrated systems from R3 (player-input,
+    // gun-render, pickup, minimap, reticle, stats, inventory-bar) are
+    // loaded by `runPackScripts`.
     this.itemImages = new ItemImages(pack);
     this.spriteRender = new SpriteRenderSystem();
     this.lightCollection = new LightCollectionSystem();
@@ -264,10 +267,11 @@ export class Game {
   private readonly onPointerLockChange = (): void => {
     // Esc-during-pointer-lock is swallowed by the browser, but it
     // still triggers `pointerlockchange`. Flip the "settings" modal
-    // open via the registry so the pack-side `SettingsScreenSystem`
-    // reacts on the next frame just as it would on a normal Esc edge.
-    // The engine never reads the modal's contents — only that it's
-    // open — so this stays content-agnostic.
+    // open via the registry so the engine's `DefaultSettingsSystem`
+    // (or whatever pack-supplied override claimed the slot) reacts on
+    // the next frame just as it would on a normal Esc edge. The
+    // engine never reads the modal's contents — only that it's open
+    // — so this stays content-agnostic.
     if (document.pointerLockElement === null && !this.modals.any()) {
       this.modals.setOpen("settings", true);
     }
@@ -326,6 +330,16 @@ export class Game {
     // That keeps the contract — spawn → entity carries init-attached
     // components synchronously — even for the first spawn of a session.
     await this.registerDeclarativePrefabsFromManifestAsync();
+
+    // Engine-shipped universal modals — Settings today, Console (#199)
+    // soon. Per `docs/plans/EDITOR_REDESIGN.md` §12 Q4, the engine
+    // owns the universal-to-every-game UI surfaces (every cardboard
+    // game needs settings access regardless of pack). Mounted via the
+    // same `api.ui.registerModal` path that packs use, so packs can
+    // override the slot by calling `registerModal("settings", …)`
+    // in their own scripts — and because pack scripts run BEFORE this
+    // line, the pack's component wins via the `has`-guarded install.
+    installDefaultSettings(this.api);
   }
 
   /**

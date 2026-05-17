@@ -4,6 +4,24 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import {
+  Box,
+  Cuboid,
+  Image as ImageIcon,
+  MapPin,
+  ArrowRight,
+  Sun,
+  Eye,
+  Layers,
+  Camera,
+  Sparkles,
+  Plus,
+  Trash2,
+  Code2,
+  Search,
+  FileText,
+  Save as SaveIcon,
+} from "lucide-react";
 import type {
   DeclarativePrefab,
   PackManifest,
@@ -11,22 +29,43 @@ import type {
 import type { SpriteDef } from "@two_5_d/engine/AssetPack";
 import { EditorProjectStore } from "../lib/EditorProjectStore";
 import {
-  ComponentSubform,
+  ComponentField,
+  JsonComponentEditor,
 } from "../components/ComponentForm";
 import {
   BUILT_IN_COMPONENT_SCHEMAS,
   findComponentSchema,
+  type ComponentFieldSpec,
 } from "../lib/componentSchemas";
 import { Button, Input, Label, Textarea } from "../components/ui";
+import {
+  Badge,
+  CollapsibleSection,
+  ColorChip,
+  EmptyState,
+  FilePicker,
+  IconButton,
+  PanelHeader,
+  PropertyRow,
+  ScrollArea,
+  Select,
+  Slider,
+  StatusPill,
+  ToggleSwitch,
+  Tooltip,
+} from "../components/ui/index";
 import { cn } from "../lib/cn";
 import type { PrefabConversionResult } from "../lib/prefabConverter";
 import {
   buildAnimationComponentFromSuggestion,
   computeAnimationWiringState,
 } from "../lib/prefabAnimationWiring";
+import { useStatusBar } from "../shell/StatusBarContext";
+import { useEditorActions } from "../shell/EditorActionsContext";
+import type { StatusBarSection } from "../components/ui/StatusBar";
 
 /**
- * E-ENT — Entities workflow tab. EDITOR.md §6.3.
+ * E-ENT — Entities workflow tab. EDITOR_REDESIGN.md §7.3 (R4c).
  *
  * Declarative prefab authoring. The user composes a prefab from
  * components (Position, Sprite, Light, ...) by filling schema-driven
@@ -35,16 +74,22 @@ import {
  * register the prefab via the same `api.registerPrefab` path the
  * JS-based prefabs (e.g. `default-pack/scripts/prefabs/player.js`)
  * use. Editor-authored prefabs coexist with JS-authored ones — the
- * left rail lists both, but JS prefabs are read-only (the editor
- * can't safely round-trip arbitrary JS).
+ * left rail lists both, but JS prefabs are read-only.
  *
- * Layout:
- *   ┌──────────────┬─────────────────────────────────┬──────────────┐
- *   │ Prefab list  │ Schema-driven prefab editor     │ JSON preview │
- *   │ + New        │  name + tags + description      │ + Save       │
- *   │              │  + add component                │              │
- *   │              │  + per-component schema form    │              │
- *   └──────────────┴─────────────────────────────────┴──────────────┘
+ * R4c layout (4-section shell grammar, §7.3):
+ *
+ *   ┌──────────────┬───────────────────────────────┬──────────────┐
+ *   │ Prefab list  │ Prefab name + component stack │ Per-tab      │
+ *   │ + Component  │  (CollapsibleSection per      │ Assets rail  │
+ *   │ palette      │   component, PropertyRows     │ (sprites +   │
+ *   │              │   inside)                     │ sub-prefabs) │
+ *   └──────────────┴───────────────────────────────┴──────────────┘
+ *   │ Bottom strip: validation / save status / preview thumbnail   │
+ *   └──────────────────────────────────────────────────────────────┘
+ *
+ * The view registers a `save` action via EditorActionsContext (used by
+ * the shell TopBar) and pushes three StatusBar sections — prefab-count,
+ * prefab-name, prefab-validation.
  */
 export interface EntitiesEditorProps {
   projectId: string;
@@ -65,6 +110,28 @@ interface PrefabRow {
 /** Regex that picks up `api.registerPrefab("name", ...)` and `.registerPrefab('name', …)`. */
 const REGISTER_PREFAB_RE = /registerPrefab\s*\(\s*["']([^"']+)["']/g;
 
+/**
+ * Map of built-in component name → lucide icon (per §7.3 — "Component
+ * icon resolved from a lookup table"). Falls back to a neutral Box icon
+ * for modder-defined components.
+ */
+const COMPONENT_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
+  Position: MapPin,
+  Light: Sun,
+  Sprite: ImageIcon,
+  Movement: ArrowRight,
+  Animation: Sparkles,
+  Camera: Camera,
+  Facing: Eye,
+  Shader: Layers,
+  MinimapMarker: MapPin,
+};
+
+function componentIcon(name: string, size = 14): React.ReactNode {
+  const Cmp = COMPONENT_ICONS[name] ?? Box;
+  return <Cmp size={size} />;
+}
+
 export function EntitiesEditor({
   projectId,
   onManifestChanged,
@@ -82,20 +149,18 @@ export function EntitiesEditor({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  /** Filter text for the prefab list. */
+  const [filter, setFilter] = useState("");
+  /** Filter text for the per-tab Assets rail. */
+  const [assetFilter, setAssetFilter] = useState("");
   /**
    * Phase #196 — converter modal open state. When non-null, the modal
-   * is open against the named JS prefab + script path. Set via the
-   * "Convert to declarative" button on a JS-prefab row.
+   * is open against the named JS prefab + script path.
    */
   const [converterTarget, setConverterTarget] = useState<
     { name: string; scriptPath: string } | null
   >(null);
-  /**
-   * Per-project "keep as JS" set — the converter writes a hidden asset
-   * row at `__editor__/prefab-keep-as-js.json` recording every prefab
-   * the user chose to leave alone. Drives the "JS" badge suppression
-   * after a cancel.
-   */
+  /** Per-project "keep as JS" suppression set. */
   const [keepAsJs, setKeepAsJs] = useState<ReadonlySet<string>>(new Set());
 
   const refresh = useCallback(async () => {
@@ -104,10 +169,8 @@ export function EntitiesEditor({
     setManifest(mf);
     setDraft({ ...(mf?.prefabs ?? {}) });
     setDirty(false);
-    // Detect JS-based prefabs by scanning script bodies.
     const detected = await detectJsPrefabs(projectId, mf);
     setJsPrefabs(detected);
-    // Pull the "keep as JS" suppression list.
     const keep = await loadKeepAsJs(projectId);
     setKeepAsJs(keep);
   }, [projectId]);
@@ -140,6 +203,25 @@ export function EntitiesEditor({
       jsRows.find((r) => r.name === activeId)
     );
   }, [activeId, declarativeRows, jsRows]);
+
+  // Filtered rows for the left-rail prefab list.
+  const filteredDeclarative = useMemo(() => {
+    if (!filter.trim()) return declarativeRows;
+    const f = filter.trim().toLowerCase();
+    return declarativeRows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(f) ||
+        (r.data?.tags ?? []).some((t) => t.toLowerCase().includes(f)),
+    );
+  }, [declarativeRows, filter]);
+
+  const filteredJs = useMemo(() => {
+    if (!filter.trim()) return jsRows;
+    const f = filter.trim().toLowerCase();
+    return jsRows.filter((r) => r.name.toLowerCase().includes(f));
+  }, [jsRows, filter]);
+
+  const totalPrefabCount = declarativeRows.length + jsRows.length;
 
   // ── Mutations ──────────────────────────────────────────────────
 
@@ -192,19 +274,25 @@ export function EntitiesEditor({
     setDirty(true);
   };
 
-  const addComponent = (compName: string) => {
-    patchActive((cur) => {
-      if (cur.components[compName]) return cur;
+  const addComponent = useCallback(
+    (compName: string) => {
+      if (!activeId) return;
+      const cur = draft[activeId];
+      if (!cur) return;
+      if (cur.components[compName]) return;
       const schema = findComponentSchema(compName);
       const defaultData = schema
         ? cloneJson(schema.defaultData)
         : ({} as Record<string, unknown>);
-      return {
+      const next = {
         ...cur,
         components: { ...cur.components, [compName]: defaultData },
       };
-    });
-  };
+      setDraft({ ...draft, [activeId]: next });
+      setDirty(true);
+    },
+    [activeId, draft],
+  );
 
   const removeComponent = (compName: string) => {
     patchActive((cur) => {
@@ -243,10 +331,6 @@ export function EntitiesEditor({
         setSavedAt(Date.now());
         onManifestChanged?.();
         if (alsoReload) {
-          // The iframe accepts `reset` and reloads the engine; per
-          // `apps/game/src/editor-bridge.ts` that's the simplest path
-          // to pick up new declarative prefabs. The editor doesn't
-          // own the iframe — broadcast to every same-origin frame.
           for (const f of Array.from(window.parent.frames)) {
             try {
               f.postMessage({ type: "reset" }, "*");
@@ -264,217 +348,205 @@ export function EntitiesEditor({
     [manifest, draft, projectId, onManifestChanged],
   );
 
-  // ── Sprite ids for the Sprite component's `imageId` dropdown ──
+  // ── Editor-action registration (shell TopBar Save button) ─────
+  const { register } = useEditorActions();
+  useEffect(() => {
+    return register({
+      save: () => handleSave(false),
+    });
+  }, [register, handleSave]);
+
+  // ── Sprite metadata for property pickers + Assets rail ────────
   const spriteIds = useMemo<ReadonlyArray<string>>(() => {
     if (!manifest?.sprites) return [];
     return Object.keys(manifest.sprites).sort();
   }, [manifest]);
 
-  /**
-   * Manifest's sprites dict — handed to the prefab form so the
-   * Animation auto-wire prompt + the `current` dropdown can resolve
-   * animation names from `Sprite.imageId`. Memoized so the form's
-   * `useMemo` lookups don't re-run on unrelated state changes.
-   */
   const spritesById = useMemo<Readonly<Record<string, SpriteDef>>>(() => {
     return manifest?.sprites ?? {};
   }, [manifest]);
 
-  // ── JSON preview ──
-  const jsonPreview = useMemo(() => {
-    if (!activeRow || activeRow.kind !== "declarative") return "";
-    return JSON.stringify(activeRow.data, null, 2);
+  /** Sub-prefab choices for the Assets rail — every prefab the user
+   *  could reference. Filters out the currently-edited prefab so the
+   *  list doesn't suggest "drag me into myself". */
+  const subPrefabIds = useMemo<ReadonlyArray<string>>(() => {
+    return [...declarativeRows.map((r) => r.name), ...jsRows.map((r) => r.name)]
+      .filter((n) => n !== activeId)
+      .sort();
+  }, [declarativeRows, jsRows, activeId]);
+
+  // ── Validation (very lightweight; placeholder for richer rules) ─
+  //
+  // WIRING: a richer validation system is planned (link from the
+  // "N errors" badge to a validation log panel). For now we surface a
+  // minimal sanity check: a declarative prefab with components is OK;
+  // empty components → 1 warning. R5 / scripts phase can plug a real
+  // validator into the same `prefabValidationIssues` slot.
+  const validationIssues = useMemo<ReadonlyArray<string>>(() => {
+    if (!activeRow || activeRow.kind !== "declarative") return [];
+    const out: string[] = [];
+    if (Object.keys(activeRow.data?.components ?? {}).length === 0) {
+      out.push("Prefab has no components.");
+    }
+    return out;
   }, [activeRow]);
+
+  // ── StatusBar wiring ──────────────────────────────────────────
+  // Push prefab-count + prefab-name + prefab-validation while mounted.
+  const { setSections } = useStatusBar();
+  useEffect(() => {
+    const sections: StatusBarSection[] = [
+      {
+        id: "prefab-count",
+        label: "Prefabs",
+        value: String(totalPrefabCount),
+      },
+      {
+        id: "prefab-name",
+        label: "Editing",
+        value: activeId ?? "—",
+      },
+      {
+        id: "prefab-validation",
+        label: "Validation",
+        value:
+          activeRow?.kind === "declarative"
+            ? validationIssues.length === 0
+              ? "OK"
+              : `${validationIssues.length} warning${
+                  validationIssues.length === 1 ? "" : "s"
+                }`
+            : "—",
+        align: "right",
+      },
+    ];
+    setSections(sections);
+    return () => setSections([]);
+  }, [
+    totalPrefabCount,
+    activeId,
+    activeRow,
+    validationIssues,
+    setSections,
+  ]);
+
+  // ── Drag-drop prefab JSON import (left-rail FilePicker) ────────
+  const handleImportFiles = async (files: File[]) => {
+    setError(null);
+    for (const file of files) {
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as DeclarativePrefab;
+        if (!parsed || typeof parsed !== "object" || !parsed.name) {
+          throw new Error(`${file.name}: missing "name" field.`);
+        }
+        setDraft((prev) => ({ ...prev, [parsed.name]: parsed }));
+        setActiveId(parsed.name);
+        setDirty(true);
+      } catch (err) {
+        setError(`Import failed: ${(err as Error).message}`);
+      }
+    }
+  };
 
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full min-h-[640px]">
-      {/* Left rail: prefab list. */}
-      <aside className="w-64 border-r border-zinc-800 bg-zinc-950/40 flex flex-col">
-        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-          <span className="text-xs uppercase tracking-wide text-zinc-400">
-            Prefabs
-          </span>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleNewPrefab}
-            title="Create a new declarative prefab"
-          >
-            + New
-          </Button>
-        </div>
-        <ul className="flex-1 overflow-auto">
-          {declarativeRows.length === 0 && jsRows.length === 0 ? (
-            <li className="px-4 py-3 text-xs text-zinc-500">
-              No prefabs yet. Click "+ New" to author one.
-            </li>
-          ) : null}
-          {declarativeRows.map((row) => (
-            <li
-              key={`d:${row.name}`}
-              className={cn(
-                "px-4 py-2 cursor-pointer hover:bg-zinc-800/40 border-b border-zinc-900/60 flex items-center justify-between gap-2",
-                activeId === row.name && "bg-zinc-800/60",
-              )}
-              onClick={() => setActiveId(row.name)}
-            >
-              <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{row.name}</div>
-                <div className="text-[10px] text-zinc-500">
-                  {Object.keys(row.data?.components ?? {}).length} component
-                  {Object.keys(row.data?.components ?? {}).length === 1
-                    ? ""
-                    : "s"}
-                  {row.data?.tags && row.data.tags.length > 0
-                    ? ` · ${row.data.tags.join(", ")}`
-                    : null}
-                </div>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`Delete prefab "${row.name}"?`)) {
-                    handleDelete(row.name);
-                  }
-                }}
-                className="text-[10px] text-zinc-500 hover:text-red-400 px-1"
-                title="Delete prefab"
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-          {jsRows.length > 0 ? (
-            <li className="px-4 py-2 text-[10px] uppercase tracking-wide text-zinc-500 border-y border-zinc-900/60">
-              From scripts (read-only)
-            </li>
-          ) : null}
-          {jsRows.map((row) => (
-            <li
-              key={`j:${row.scriptPath}:${row.name}`}
-              className={cn(
-                "px-4 py-2 cursor-pointer hover:bg-zinc-800/40 border-b border-zinc-900/60",
-                activeId === row.name && "bg-zinc-800/60",
-              )}
-              onClick={() => setActiveId(row.name)}
-              title={row.scriptPath}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm text-zinc-100 truncate">{row.name}</div>
-                {keepAsJs.has(row.name) ? (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
-                    JS·kept
-                  </span>
-                ) : (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200">
-                    JS
-                  </span>
-                )}
-              </div>
-              <div className="text-[10px] text-zinc-500 truncate font-mono">
-                {row.scriptPath}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </aside>
+    <div className="flex flex-col h-full min-h-[640px] bg-zinc-950 text-zinc-100">
+      <div className="flex flex-1 min-h-0">
+        {/* ─── Left rail: prefab list + component palette ─── */}
+        <PrefabListRail
+          declarative={filteredDeclarative}
+          jsRows={filteredJs}
+          activeId={activeId}
+          keepAsJs={keepAsJs}
+          filter={filter}
+          totalCount={totalPrefabCount}
+          onFilterChange={setFilter}
+          onSelect={setActiveId}
+          onNewPrefab={handleNewPrefab}
+          onDelete={handleDelete}
+          onImportFiles={handleImportFiles}
+          paletteEnabled={
+            activeRow?.kind === "declarative" && activeRow.data !== undefined
+          }
+          presentComponents={
+            activeRow?.kind === "declarative" && activeRow.data
+              ? Object.keys(activeRow.data.components)
+              : []
+          }
+          onAddComponent={addComponent}
+        />
 
-      {/* Center: prefab editor. */}
-      <section className="flex-1 overflow-auto bg-zinc-950/20">
-        {activeRow ? (
-          activeRow.kind === "declarative" ? (
-            <DeclarativeForm
-              prefab={activeRow.data!}
-              spriteIds={spriteIds}
-              spritesById={spritesById}
-              onRename={(next) => handleRename(activeRow.name, next)}
-              onSetDescription={(d) =>
-                patchActive((cur) => ({ ...cur, description: d || undefined }))
-              }
-              onSetTags={(t) => patchActive((cur) => ({ ...cur, tags: t }))}
-              onAddComponent={addComponent}
-              onRemoveComponent={removeComponent}
-              onPatchComponent={patchComponentData}
-            />
+        {/* ─── Center: prefab editor ─── */}
+        <section className="flex-1 min-w-0 overflow-hidden flex flex-col bg-zinc-950/20">
+          {activeRow ? (
+            activeRow.kind === "declarative" ? (
+              <DeclarativeForm
+                prefab={activeRow.data!}
+                spriteIds={spriteIds}
+                spritesById={spritesById}
+                onRename={(next) => handleRename(activeRow.name, next)}
+                onSetDescription={(d) =>
+                  patchActive((cur) => ({
+                    ...cur,
+                    description: d || undefined,
+                  }))
+                }
+                onSetTags={(t) => patchActive((cur) => ({ ...cur, tags: t }))}
+                onAddComponent={addComponent}
+                onRemoveComponent={removeComponent}
+                onPatchComponent={patchComponentData}
+              />
+            ) : (
+              <JsPrefabView
+                name={activeRow.name}
+                path={activeRow.scriptPath!}
+                keptAsJs={keepAsJs.has(activeRow.name)}
+                onConvert={() =>
+                  setConverterTarget({
+                    name: activeRow.name,
+                    scriptPath: activeRow.scriptPath!,
+                  })
+                }
+              />
+            )
           ) : (
-            <JsPrefabView
-              name={activeRow.name}
-              path={activeRow.scriptPath!}
-              keptAsJs={keepAsJs.has(activeRow.name)}
-              onConvert={() =>
-                setConverterTarget({
-                  name: activeRow.name,
-                  scriptPath: activeRow.scriptPath!,
-                })
-              }
-            />
-          )
-        ) : (
-          <div className="h-full flex items-center justify-center text-sm text-zinc-500">
-            Pick a prefab on the left, or click "+ New" to author one.
-          </div>
-        )}
-      </section>
-
-      {/* Right: JSON preview + Save. */}
-      <aside className="w-96 border-l border-zinc-800 bg-zinc-950/40 overflow-auto p-4 flex flex-col gap-3">
-        <div>
-          <h3 className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
-            JSON preview
-          </h3>
-          {activeRow?.kind === "declarative" ? (
-            <pre className="text-[10px] bg-zinc-950 border border-zinc-800 rounded-md p-2 overflow-auto max-h-[420px] font-mono text-zinc-300">
-              {jsonPreview || "{}"}
-            </pre>
-          ) : (
-            <p className="text-xs text-zinc-500">
-              {activeRow?.kind === "js"
-                ? "JS prefabs aren't editable from this pane — open the script in the Scripts tab."
-                : "Select a prefab to preview its manifest entry."}
-            </p>
+            <div className="h-full flex items-center justify-center">
+              <EmptyState
+                icon={<Cuboid size={28} />}
+                title="No prefab selected"
+                description='Pick a prefab on the left or click "+ New" to author one. A prefab is a reusable bundle of components scripts can spawn via api.spawn("id").'
+                tutorial="entities-intro"
+              />
+            </div>
           )}
-        </div>
+        </section>
 
-        {error ? (
-          <div className="text-xs text-red-300 bg-red-900/30 border border-red-700 rounded px-2 py-1">
-            {error}
-          </div>
-        ) : null}
+        {/* ─── Right rail: per-tab Assets (sprites + sub-prefabs) ─── */}
+        <AssetsRail
+          spriteIds={spriteIds}
+          spritesById={spritesById}
+          subPrefabIds={subPrefabIds}
+          filter={assetFilter}
+          onFilterChange={setAssetFilter}
+          targetEnabled={activeRow?.kind === "declarative"}
+        />
+      </div>
 
-        <div className="space-y-2 mt-auto">
-          {savedAt ? (
-            <p className="text-xs text-emerald-400">
-              Saved {new Date(savedAt).toLocaleTimeString()}
-            </p>
-          ) : dirty ? (
-            <p className="text-xs text-amber-400">Unsaved changes</p>
-          ) : null}
-          <Button
-            variant="primary"
-            className="w-full"
-            disabled={saving || !dirty || !manifest}
-            onClick={() => handleSave(false)}
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button
-            variant="secondary"
-            className="w-full"
-            disabled={saving || !manifest}
-            onClick={() => handleSave(true)}
-            title="Save and reload the engine in Play mode so the new prefab is spawnable"
-          >
-            Save & Test
-          </Button>
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Prefabs land in <code>manifest.prefabs</code>. The engine
-            registers them via <code>api.registerPrefab</code> at boot;
-            scripts call <code>api.spawn("id", opts)</code> to instance.
-          </p>
-        </div>
-      </aside>
+      {/* ─── Bottom strip: validation + save status + preview thumb ─── */}
+      <BottomStrip
+        active={activeRow}
+        dirty={dirty}
+        saving={saving}
+        savedAt={savedAt}
+        error={error}
+        validationIssues={validationIssues}
+        onSave={() => handleSave(false)}
+        onSaveAndTest={() => handleSave(true)}
+        manifestReady={!!manifest}
+      />
+
       {converterTarget ? (
         <PrefabConverterModal
           projectId={projectId}
@@ -482,10 +554,6 @@ export function EntitiesEditor({
           scriptPath={converterTarget.scriptPath}
           manifest={manifest}
           onCancel={async () => {
-            // Per Phase #196 B4 — record the cancel so the JS badge
-            // stops nagging on subsequent loads. The user opted out
-            // deliberately; we respect that until they manually
-            // re-open the converter from the JS prefab view.
             const next = new Set(keepAsJs);
             next.add(converterTarget.name);
             setKeepAsJs(next);
@@ -494,8 +562,6 @@ export function EntitiesEditor({
           }}
           onApplied={async () => {
             setConverterTarget(null);
-            // Refresh so the new declarative prefab appears in the
-            // left rail and the JS row vanishes.
             await refresh();
           }}
         />
@@ -504,9 +570,574 @@ export function EntitiesEditor({
   );
 }
 
-// ── Sub-components ───────────────────────────────────────────────
+// ── Left rail: prefab list + component palette ─────────────────────────
 
-/** Center pane — the schema-driven editor for one declarative prefab. */
+interface PrefabListRailProps {
+  declarative: ReadonlyArray<PrefabRow>;
+  jsRows: ReadonlyArray<PrefabRow>;
+  activeId: string | null;
+  keepAsJs: ReadonlySet<string>;
+  filter: string;
+  totalCount: number;
+  onFilterChange: (next: string) => void;
+  onSelect: (id: string) => void;
+  onNewPrefab: () => void;
+  onDelete: (id: string) => void;
+  onImportFiles: (files: File[]) => void;
+  paletteEnabled: boolean;
+  presentComponents: ReadonlyArray<string>;
+  onAddComponent: (name: string) => void;
+}
+
+function PrefabListRail({
+  declarative,
+  jsRows,
+  activeId,
+  keepAsJs,
+  filter,
+  totalCount,
+  onFilterChange,
+  onSelect,
+  onNewPrefab,
+  onDelete,
+  onImportFiles,
+  paletteEnabled,
+  presentComponents,
+  onAddComponent,
+}: PrefabListRailProps) {
+  return (
+    <aside className="w-72 shrink-0 border-r border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+      <PanelHeader
+        title="Entities"
+        action={
+          <>
+            <Badge variant="zinc">{totalCount}</Badge>
+            <Tooltip content="New declarative prefab" side="bottom">
+              <IconButton
+                icon={<Plus size={14} />}
+                tooltip="New prefab"
+                variant="primary"
+                size="sm"
+                onClick={onNewPrefab}
+              />
+            </Tooltip>
+          </>
+        }
+      />
+
+      {/* Search input. */}
+      <div className="px-3 py-2 border-b border-zinc-800">
+        <div className="relative">
+          <Search
+            size={12}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+          />
+          <Input
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder="Search prefabs…"
+            className="h-8 pl-7 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Scrollable prefab list. */}
+      <ScrollArea className="flex-1 min-h-0">
+        <ul className="py-1">
+          {declarative.length === 0 && jsRows.length === 0 ? (
+            <li className="px-4 py-3 text-xs text-zinc-500">
+              {filter
+                ? "No prefabs match that search."
+                : 'No prefabs yet. Click "+ New" to author one.'}
+            </li>
+          ) : null}
+
+          {declarative.map((row) => {
+            const active = activeId === row.name;
+            return (
+              <li
+                key={`d:${row.name}`}
+                className={cn(
+                  "group px-3 py-2 cursor-pointer border-l-2 transition-colors",
+                  "flex items-center justify-between gap-2",
+                  active
+                    ? "bg-amber-500/10 border-amber-400 text-amber-200"
+                    : "border-transparent hover:bg-zinc-800/40 text-zinc-100",
+                )}
+                onClick={() => onSelect(row.name)}
+              >
+                <div className="min-w-0 flex items-center gap-2">
+                  <Cuboid
+                    size={14}
+                    className={active ? "text-amber-300" : "text-zinc-500"}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm truncate">{row.name}</div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] text-zinc-500">
+                        {Object.keys(row.data?.components ?? {}).length} comp
+                        {Object.keys(row.data?.components ?? {}).length === 1
+                          ? ""
+                          : "s"}
+                      </span>
+                      {row.data?.tags?.slice(0, 2).map((t) => (
+                        <Badge key={t} variant="zinc" shape="pill">
+                          {t}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <Tooltip content="Delete prefab" side="left">
+                  <IconButton
+                    icon={<Trash2 size={12} />}
+                    tooltip="Delete prefab"
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete prefab "${row.name}"?`)) {
+                        onDelete(row.name);
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100"
+                  />
+                </Tooltip>
+              </li>
+            );
+          })}
+
+          {jsRows.length > 0 ? (
+            <li className="px-3 mt-2 mb-1">
+              <PanelHeader title="From scripts" size="sm" />
+            </li>
+          ) : null}
+          {jsRows.map((row) => {
+            const active = activeId === row.name;
+            return (
+              <li
+                key={`j:${row.scriptPath}:${row.name}`}
+                className={cn(
+                  "px-3 py-2 cursor-pointer border-l-2 transition-colors",
+                  active
+                    ? "bg-amber-500/10 border-amber-400 text-amber-200"
+                    : "border-transparent hover:bg-zinc-800/40 text-zinc-100",
+                )}
+                onClick={() => onSelect(row.name)}
+                title={row.scriptPath}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex items-center gap-2">
+                    <Code2
+                      size={14}
+                      className={active ? "text-amber-300" : "text-zinc-500"}
+                    />
+                    <span className="text-sm truncate">{row.name}</span>
+                  </div>
+                  {keepAsJs.has(row.name) ? (
+                    <Badge variant="zinc">JS·kept</Badge>
+                  ) : (
+                    <Badge variant="amber">JS</Badge>
+                  )}
+                </div>
+                <div className="ml-6 text-[10px] text-zinc-500 truncate font-mono">
+                  {row.scriptPath}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </ScrollArea>
+
+      {/* Component palette — visible when a declarative prefab is active. */}
+      <div className="border-t border-zinc-800">
+        <PanelHeader title="Component palette" size="sm" />
+        <div className="px-3 py-2 max-h-[40%] overflow-auto">
+          {paletteEnabled ? (
+            <div className="grid grid-cols-2 gap-1.5">
+              {BUILT_IN_COMPONENT_SCHEMAS.map((s) => {
+                const present = presentComponents.includes(s.name);
+                return (
+                  <Tooltip
+                    key={s.name}
+                    content={
+                      present ? "Already on prefab" : `Add ${s.name} component`
+                    }
+                    side="top"
+                  >
+                    <button
+                      type="button"
+                      disabled={present}
+                      onClick={() => onAddComponent(s.name)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2 h-7 rounded-md border text-[11px]",
+                        "transition-colors",
+                        present
+                          ? "border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed"
+                          : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-amber-500/60 hover:bg-amber-500/5 hover:text-amber-200 cursor-pointer",
+                      )}
+                    >
+                      {componentIcon(s.name, 12)}
+                      <span className="truncate">{s.name}</span>
+                    </button>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Select a declarative prefab to add components.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* FilePicker dropzone for prefab JSON imports. */}
+      <div className="border-t border-zinc-800 p-2">
+        <FilePicker
+          mode="dropzone"
+          accept="application/json,.json"
+          multiple
+          onFiles={onImportFiles}
+          className="!py-3 !px-2"
+        >
+          <FileText size={18} className="text-zinc-500" />
+          <div className="text-[11px] text-zinc-400 leading-tight">
+            Drag &amp; drop prefab JSON
+          </div>
+        </FilePicker>
+      </div>
+    </aside>
+  );
+}
+
+// ── Right rail: per-tab Assets ─────────────────────────────────────────
+
+interface AssetsRailProps {
+  spriteIds: ReadonlyArray<string>;
+  spritesById: Readonly<Record<string, SpriteDef>>;
+  subPrefabIds: ReadonlyArray<string>;
+  filter: string;
+  onFilterChange: (next: string) => void;
+  targetEnabled: boolean;
+}
+
+/**
+ * Per-tab Assets rail (§7.3): contextual sprite + sub-prefab browser.
+ *
+ * Drag semantics — each tile sets `text/plain` to the asset id and a
+ * custom `application/x-cardboard-prefab-asset` MIME with `{kind,id}`.
+ * WIRING: the matching `onDrop` handlers inside component sub-forms
+ * (e.g. drop a sprite onto Sprite.imageId, drop a prefab onto a slot
+ * that accepts a prefab id) land in a follow-up — R4c ships the rail
+ * + drag source, R4c+ wires the drop targets per-component.
+ */
+function AssetsRail({
+  spriteIds,
+  spritesById,
+  subPrefabIds,
+  filter,
+  onFilterChange,
+  targetEnabled,
+}: AssetsRailProps) {
+  const filteredSprites = useMemo(() => {
+    if (!filter.trim()) return spriteIds;
+    const f = filter.trim().toLowerCase();
+    return spriteIds.filter((id) => id.toLowerCase().includes(f));
+  }, [spriteIds, filter]);
+  const filteredPrefabs = useMemo(() => {
+    if (!filter.trim()) return subPrefabIds;
+    const f = filter.trim().toLowerCase();
+    return subPrefabIds.filter((id) => id.toLowerCase().includes(f));
+  }, [subPrefabIds, filter]);
+
+  return (
+    <aside className="w-72 shrink-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+      <PanelHeader
+        title="Assets"
+        action={
+          <Badge variant="zinc">
+            {filteredSprites.length + filteredPrefabs.length}
+          </Badge>
+        }
+      />
+      <div className="px-3 py-2 border-b border-zinc-800">
+        <div className="relative">
+          <Search
+            size={12}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+          />
+          <Input
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder="Filter sprites &amp; prefabs…"
+            className="h-8 pl-7 text-xs"
+          />
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="px-3 py-2 space-y-3">
+          {/* Sprites section. */}
+          <section>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                Sprites
+              </div>
+              <Badge variant="zinc">{filteredSprites.length}</Badge>
+            </div>
+            {filteredSprites.length === 0 ? (
+              <p className="text-[11px] text-zinc-500">
+                {spriteIds.length === 0
+                  ? "No sprites in manifest. Add via the Assets tab."
+                  : "No sprites match that filter."}
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {filteredSprites.map((id) => {
+                  const def = spritesById[id];
+                  const anims = def?.animations
+                    ? Object.keys(def.animations).length
+                    : 0;
+                  return (
+                    <li
+                      key={id}
+                      draggable={targetEnabled}
+                      onDragStart={(e) => {
+                        // WIRING — drop targets inside Sprite.imageId
+                        // PropertyRow are stubbed; for now the drag
+                        // source carries the id on `text/plain`. The
+                        // user can also click-pick via the existing
+                        // <Select> inside Sprite's editor.
+                        e.dataTransfer.setData("text/plain", id);
+                        e.dataTransfer.setData(
+                          "application/x-cardboard-prefab-asset",
+                          JSON.stringify({ kind: "sprite", id }),
+                        );
+                        e.dataTransfer.effectAllowed = "copy";
+                      }}
+                      className={cn(
+                        "flex items-center gap-2 px-2 py-1.5 rounded border border-zinc-800",
+                        "bg-zinc-900/40",
+                        targetEnabled
+                          ? "cursor-grab hover:border-amber-500/60 hover:bg-amber-500/5"
+                          : "opacity-60 cursor-default",
+                      )}
+                      title={
+                        targetEnabled
+                          ? `Drag onto a Sprite component to wire ${id}`
+                          : "Select a declarative prefab to drag this in"
+                      }
+                    >
+                      <ImageIcon size={14} className="text-sky-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-zinc-100 truncate font-mono">
+                          {id}
+                        </div>
+                        {def?.image ? (
+                          <div className="text-[10px] text-zinc-500 truncate">
+                            {def.image}
+                          </div>
+                        ) : null}
+                      </div>
+                      {anims > 0 ? (
+                        <Badge variant="amber">{anims}a</Badge>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          {/* Sub-prefabs section. */}
+          <section>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                Sub-prefabs
+              </div>
+              <Badge variant="zinc">{filteredPrefabs.length}</Badge>
+            </div>
+            {filteredPrefabs.length === 0 ? (
+              <p className="text-[11px] text-zinc-500">
+                {subPrefabIds.length === 0
+                  ? "No other prefabs yet."
+                  : "No prefabs match that filter."}
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {filteredPrefabs.map((id) => (
+                  <li
+                    key={id}
+                    draggable={targetEnabled}
+                    onDragStart={(e) => {
+                      // WIRING — sub-prefab drop targets (Weapon.bullet,
+                      // Pickup.contents, etc.) are stubbed. Drag source
+                      // ready; consumer-side drop wiring lands per
+                      // component as needed.
+                      e.dataTransfer.setData("text/plain", id);
+                      e.dataTransfer.setData(
+                        "application/x-cardboard-prefab-asset",
+                        JSON.stringify({ kind: "prefab", id }),
+                      );
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5 rounded border border-zinc-800",
+                      "bg-zinc-900/40",
+                      targetEnabled
+                        ? "cursor-grab hover:border-amber-500/60 hover:bg-amber-500/5"
+                        : "opacity-60 cursor-default",
+                    )}
+                  >
+                    <Cuboid size={14} className="text-purple-400 shrink-0" />
+                    <span className="text-xs text-zinc-100 truncate font-mono flex-1">
+                      {id}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </ScrollArea>
+    </aside>
+  );
+}
+
+// ── Bottom strip ───────────────────────────────────────────────────────
+
+interface BottomStripProps {
+  active: PrefabRow | undefined;
+  dirty: boolean;
+  saving: boolean;
+  savedAt: number | null;
+  error: string | null;
+  validationIssues: ReadonlyArray<string>;
+  onSave: () => void;
+  onSaveAndTest: () => void;
+  manifestReady: boolean;
+}
+
+function BottomStrip({
+  active,
+  dirty,
+  saving,
+  savedAt,
+  error,
+  validationIssues,
+  onSave,
+  onSaveAndTest,
+  manifestReady,
+}: BottomStripProps) {
+  // WIRING — Preview thumbnail is intentionally a tiny composed glyph
+  // for R4c; the real per-prefab thumbnail bake (using the existing
+  // sprite atlas + first-frame composite) lands as a follow-up. For
+  // now the slot shows a Cuboid icon over the prefab name so the
+  // strip layout is stable.
+  const saveState: "saved" | "saving" | "dirty" | "error" | "idle" =
+    error ? "error"
+      : saving ? "saving"
+      : dirty ? "dirty"
+      : savedAt ? "saved"
+      : "idle";
+
+  return (
+    <footer
+      className={cn(
+        "shrink-0 border-t border-zinc-800 bg-zinc-950/60",
+        "flex items-center gap-4 px-4 py-2 min-h-[48px]",
+      )}
+    >
+      {/* Preview thumb slot. */}
+      <div
+        className={cn(
+          "shrink-0 w-10 h-10 rounded border border-zinc-800 bg-zinc-900",
+          "flex items-center justify-center text-zinc-500",
+        )}
+        title="Prefab preview (WIRING — thumbnail bake lands later)"
+      >
+        <Cuboid size={20} />
+      </div>
+
+      {/* Validation summary. */}
+      <div className="flex-1 min-w-0 flex items-center gap-3 text-xs">
+        {active?.kind === "declarative" ? (
+          validationIssues.length === 0 ? (
+            <StatusPill variant="ok">Validation OK</StatusPill>
+          ) : (
+            <Tooltip
+              content={validationIssues.join(" · ")}
+              side="top"
+            >
+              <StatusPill variant="warn">
+                {validationIssues.length} warning
+                {validationIssues.length === 1 ? "" : "s"}
+              </StatusPill>
+            </Tooltip>
+          )
+        ) : active?.kind === "js" ? (
+          <StatusPill variant="neutral">JS prefab (read-only)</StatusPill>
+        ) : (
+          <StatusPill variant="neutral">No prefab selected</StatusPill>
+        )}
+        {error ? (
+          <span className="text-red-300 truncate">{error}</span>
+        ) : null}
+      </div>
+
+      {/* Save status pill. */}
+      <div className="shrink-0">
+        {saveState === "saving" ? (
+          <StatusPill variant="info">Saving…</StatusPill>
+        ) : saveState === "dirty" ? (
+          <StatusPill variant="warn">Unsaved changes</StatusPill>
+        ) : saveState === "error" ? (
+          <StatusPill variant="error">Save failed</StatusPill>
+        ) : saveState === "saved" ? (
+          <StatusPill variant="ok">
+            Saved {savedAt ? new Date(savedAt).toLocaleTimeString() : ""}
+          </StatusPill>
+        ) : (
+          <StatusPill variant="neutral" noDot>
+            Ready
+          </StatusPill>
+        )}
+      </div>
+
+      {/* Save buttons. */}
+      <div className="shrink-0 flex items-center gap-2">
+        <Tooltip content="Save the current prefab edits" side="top">
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={saving || !dirty || !manifestReady}
+            onClick={onSave}
+          >
+            <SaveIcon size={14} className="mr-1" />
+            Save
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content="Save and reload the engine in Play mode"
+          side="top"
+        >
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={saving || !manifestReady}
+            onClick={onSaveAndTest}
+          >
+            Save &amp; Test
+          </Button>
+        </Tooltip>
+      </div>
+    </footer>
+  );
+}
+
+// ── Center pane: schema-driven editor for one declarative prefab ──────
+
 function DeclarativeForm({
   prefab,
   spriteIds,
@@ -538,13 +1169,8 @@ function DeclarativeForm({
     (n) => !presentComponents.includes(n),
   );
 
-  // ── Animation auto-wire context ────────────────────────────────
-  //
-  // Pure analysis of the prefab vs. the manifest's sprite dict —
-  // surfaces a suggestion when the prefab has a sheet-based Sprite
-  // but no Animation component, and a mismatch warning when an
-  // Animation component points at an animation the sprite doesn't
-  // define. Same helper the smoke test runs against.
+  // Same wiring analysis the old layout used; surfaces the auto-add
+  // Animation prompt + the mismatch warning under the Animation row.
   const wiring = useMemo(
     () => computeAnimationWiringState(prefab, spritesById),
     [prefab, spritesById],
@@ -556,11 +1182,6 @@ function DeclarativeForm({
     animationCurrent,
   } = wiring;
 
-  /**
-   * Wire the inline "+ Add Animation component" button to the same
-   * addComponent path the picker uses, then patch `current` to the
-   * first animation name so the modder lands in a runnable state.
-   */
   const addAnimationFromSuggestion = () => {
     const payload = buildAnimationComponentFromSuggestion(
       spriteAnimationNames,
@@ -570,159 +1191,452 @@ function DeclarativeForm({
     onPatchComponent("Animation", payload);
   };
 
-  return (
-    <div className="p-4 space-y-4 max-w-2xl mx-auto">
-      <section>
-        <Label htmlFor="ent-name">Name</Label>
-        <Input
-          id="ent-name"
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={() => {
-            const trimmed = nameDraft.trim();
-            if (trimmed && trimmed !== prefab.name) onRename(trimmed);
-            else setNameDraft(prefab.name);
-          }}
-          placeholder="zombie"
-          className="font-mono mt-1"
-        />
-        <p className="text-[11px] text-zinc-500 mt-1">
-          Prefab id — same as the manifest record key. Used by{" "}
-          <code>api.spawn("&lt;name&gt;", opts)</code>.
-        </p>
-      </section>
-      <section>
-        <Label htmlFor="ent-desc">Description</Label>
-        <Textarea
-          id="ent-desc"
-          value={prefab.description ?? ""}
-          onChange={(e) => onSetDescription(e.target.value)}
-          placeholder="Optional — shown in the prefab list."
-          rows={2}
-          className="mt-1"
-        />
-      </section>
-      <section>
-        <Label htmlFor="ent-tags">Tags</Label>
-        <Input
-          id="ent-tags"
-          value={(prefab.tags ?? []).join(", ")}
-          onChange={(e) => {
-            const parts = e.target.value
-              .split(",")
-              .map((p) => p.trim())
-              .filter((p) => p.length > 0);
-            onSetTags(parts);
-          }}
-          placeholder="enemy, undead"
-          className="mt-1"
-        />
-        <p className="text-[11px] text-zinc-500 mt-1">
-          Comma-separated. Used for filtering in the prefab list.
-        </p>
-      </section>
+  const tagsInput = (prefab.tags ?? []).join(", ");
 
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs uppercase tracking-wide text-zinc-400">
-            Components
-          </h3>
-          {availableToAdd.length > 0 ? (
-            <select
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v) {
-                  onAddComponent(v);
-                  e.target.value = "";
-                }
-              }}
-              className="h-7 rounded border border-zinc-700 bg-zinc-900 px-2 text-[11px]"
-              defaultValue=""
-            >
-              <option value="" disabled>
-                + add component…
-              </option>
-              {availableToAdd.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-[11px] text-zinc-500">
-              every built-in attached
-            </span>
-          )}
-        </div>
-        {presentComponents.length === 0 ? (
-          <div className="text-xs text-zinc-500 border border-dashed border-zinc-800 rounded p-3">
-            No components yet. Pick one above — Position + Sprite +
-            optional Light is a typical entity recipe.
-          </div>
-        ) : (
-          <div className="space-y-3 text-xs">
-            {presentComponents.map((name) => {
-              // Component-specific header: under Sprite, surface the
-              // "this sprite has animations → add an Animation
-              // component" prompt. Under Animation, surface the
-              // mismatch warning when the sprite no longer offers
-              // the chosen animation.
-              let header: React.ReactNode = null;
-              if (name === "Sprite" && suggestAnimation) {
-                header = (
-                  <div
-                    data-testid="anim-suggestion"
-                    className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"
-                  >
-                    <span>
-                      ⚡ This sprite has {spriteAnimationNames.length}{" "}
-                      animation
-                      {spriteAnimationNames.length === 1 ? "" : "s"}
-                      {" "}defined.
-                    </span>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={addAnimationFromSuggestion}
-                      title="Add an Animation component pre-filled with the first animation"
-                    >
-                      + Add Animation component
-                    </Button>
-                  </div>
-                );
-              } else if (name === "Animation" && animationMismatch) {
-                header = (
-                  <div className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200">
-                    {spriteAnimationNames.length === 0
-                      ? `No Sprite component (or imageId points at a sprite without animations) — the Animation component is inert.`
-                      : `current = "${animationCurrent}" is not in the sprite's animations: ${spriteAnimationNames.join(", ")}.`}
-                  </div>
-                );
-              }
-              return (
-                <ComponentSubform
-                  key={name}
-                  name={name}
-                  data={prefab.components[name] as Record<string, unknown>}
-                  spriteIds={spriteIds}
-                  // Only the Animation subform consumes animationNames;
-                  // passing it everywhere is harmless (the field type
-                  // filter inside ComponentField gates the dropdown).
-                  animationNames={spriteAnimationNames}
-                  header={header}
-                  onPatch={(next) => onPatchComponent(name, next)}
-                  onRemove={() => onRemoveComponent(name)}
+  return (
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="p-5 space-y-5 max-w-3xl mx-auto">
+        {/* ─── Prefab header card ─── */}
+        <section className="rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+          <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Cuboid size={18} className="text-amber-400 shrink-0" />
+              <Input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => {
+                  const trimmed = nameDraft.trim();
+                  if (trimmed && trimmed !== prefab.name) onRename(trimmed);
+                  else setNameDraft(prefab.name);
+                }}
+                placeholder="zombie"
+                className="font-mono text-sm bg-transparent border-0 shadow-none px-1 focus-visible:bg-zinc-900"
+              />
+            </div>
+            <div className="shrink-0">
+              {availableToAdd.length > 0 ? (
+                <Select
+                  size="sm"
+                  options={[
+                    { value: "", label: "+ Add component…" },
+                    ...availableToAdd.map((n) => ({ value: n, label: n })),
+                  ]}
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) {
+                      onAddComponent(v);
+                      e.target.value = "";
+                    }
+                  }}
+                  className="!w-44"
                 />
-              );
-            })}
+              ) : (
+                <Badge variant="zinc">All built-ins attached</Badge>
+              )}
+            </div>
           </div>
-        )}
-      </section>
-    </div>
+
+          <div className="px-4 py-3 space-y-3">
+            <PropertyRow
+              label="Description"
+              stacked
+              hint="Optional — shown in the prefab list."
+            >
+              <Textarea
+                value={prefab.description ?? ""}
+                onChange={(e) => onSetDescription(e.target.value)}
+                placeholder="What does this prefab do?"
+                rows={2}
+                className="font-sans"
+              />
+            </PropertyRow>
+            <PropertyRow
+              label="Tags"
+              stacked
+              hint="Comma-separated — used for filtering in the prefab list."
+            >
+              <Input
+                value={tagsInput}
+                onChange={(e) => {
+                  const parts = e.target.value
+                    .split(",")
+                    .map((p) => p.trim())
+                    .filter((p) => p.length > 0);
+                  onSetTags(parts);
+                }}
+                placeholder="enemy, undead"
+              />
+            </PropertyRow>
+            <PropertyRow label="Prefab id" hint="Used by api.spawn().">
+              <Label className="font-mono text-zinc-300 normal-case tracking-normal">
+                {prefab.name}
+              </Label>
+            </PropertyRow>
+          </div>
+        </section>
+
+        {/* ─── Components stack ─── */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs uppercase tracking-wider text-zinc-400 font-semibold">
+              Components
+            </h3>
+            <Badge variant="zinc">{presentComponents.length}</Badge>
+          </div>
+
+          {presentComponents.length === 0 ? (
+            <EmptyState
+              icon={<Plus size={24} />}
+              title="No components yet"
+              description="Add components from the palette in the left rail. Position + Sprite + optional Light is a typical entity recipe."
+              tutorial="entities-intro"
+            />
+          ) : (
+            <div className="space-y-2">
+              {presentComponents.map((name) => {
+                let banner: React.ReactNode = null;
+                if (name === "Sprite" && suggestAnimation) {
+                  banner = (
+                    <div
+                      data-testid="anim-suggestion"
+                      className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"
+                    >
+                      <span>
+                        This sprite has {spriteAnimationNames.length}{" "}
+                        animation
+                        {spriteAnimationNames.length === 1 ? "" : "s"} defined.
+                      </span>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={addAnimationFromSuggestion}
+                      >
+                        + Add Animation component
+                      </Button>
+                    </div>
+                  );
+                } else if (name === "Animation" && animationMismatch) {
+                  banner = (
+                    <div className="rounded border border-amber-700/60 bg-amber-900/20 p-2 text-[11px] text-amber-200">
+                      {spriteAnimationNames.length === 0
+                        ? "No Sprite component (or imageId points at a sprite without animations) — the Animation component is inert."
+                        : `current = "${animationCurrent}" is not in the sprite's animations: ${spriteAnimationNames.join(", ")}.`}
+                    </div>
+                  );
+                }
+                return (
+                  <ComponentBlock
+                    key={name}
+                    name={name}
+                    data={prefab.components[name] as Record<string, unknown>}
+                    spriteIds={spriteIds}
+                    animationNames={spriteAnimationNames}
+                    banner={banner}
+                    onPatch={(next) => onPatchComponent(name, next)}
+                    onRemove={() => onRemoveComponent(name)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </ScrollArea>
   );
 }
 
-/** Read-only stub shown for JS-detected prefabs. */
+// ── Component block (CollapsibleSection wrapping schema fields) ────────
+
+interface ComponentBlockProps {
+  name: string;
+  data: Record<string, unknown> | undefined;
+  spriteIds: ReadonlyArray<string>;
+  animationNames: ReadonlyArray<string>;
+  banner?: React.ReactNode;
+  onPatch: (next: Record<string, unknown>) => void;
+  onRemove: () => void;
+}
+
+/**
+ * One component block on the prefab. CollapsibleSection wrapper +
+ * PropertyRow-per-field body. Replaces the legacy `<ComponentSubform/>`
+ * with the R2 primitive stack. The underlying `ComponentField` widgets
+ * are reused from `ComponentForm.tsx` for non-trivial field kinds
+ * (vec2/vec3/animationName) — that helper has special-case logic we
+ * don't want to reimplement here.
+ *
+ * For the common kinds (number, boolean, color3, string) we render via
+ * R2 primitives (Slider, ToggleSwitch, ColorChip, Select) inside
+ * PropertyRow so the visual contract matches §7.3.
+ */
+function ComponentBlock({
+  name,
+  data,
+  spriteIds,
+  animationNames,
+  banner,
+  onPatch,
+  onRemove,
+}: ComponentBlockProps) {
+  const schema = findComponentSchema(name);
+  const safe = data ?? {};
+  const [enabled, setEnabled] = useState(true);
+
+  const remove = (
+    <Tooltip content="Remove component" side="left">
+      <IconButton
+        icon={<Trash2 size={12} />}
+        tooltip="Remove component"
+        variant="ghost"
+        size="sm"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+      />
+    </Tooltip>
+  );
+
+  // Modder-defined components without a known schema fall through to
+  // the JSON textarea — same path the legacy ComponentSubform took.
+  if (!schema) {
+    return (
+      <CollapsibleSection
+        title={
+          <span className="flex items-center gap-2">
+            {name}{" "}
+            <Badge variant="zinc">JSON</Badge>
+          </span>
+        }
+        icon={componentIcon(name)}
+        defaultOpen
+        trailing={
+          <div className="flex items-center gap-1">
+            {remove}
+          </div>
+        }
+      >
+        {banner ? <div className="mb-2">{banner}</div> : null}
+        <JsonComponentEditor data={safe} onPatch={onPatch} />
+      </CollapsibleSection>
+    );
+  }
+
+  return (
+    <CollapsibleSection
+      title={name}
+      icon={componentIcon(name)}
+      defaultOpen
+      trailing={
+        <div className="flex items-center gap-1">
+          <Tooltip
+            content="Disable this component in the prefab (UI-only, R5)"
+            side="top"
+          >
+            <ToggleSwitch
+              checked={enabled}
+              onChange={setEnabled}
+              size="sm"
+              aria-label={`Enable ${name}`}
+            />
+          </Tooltip>
+          {remove}
+        </div>
+      }
+    >
+      {banner ? <div className="mb-2">{banner}</div> : null}
+      <div className="divide-y divide-zinc-800/60">
+        {schema.fields.map((field) => (
+          <SchemaField
+            key={field.key}
+            componentName={name}
+            field={field}
+            value={safe[field.key]}
+            spriteIds={spriteIds}
+            animationNames={animationNames}
+            onChange={(v) => onPatch({ ...safe, [field.key]: v })}
+          />
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+// ── SchemaField — one PropertyRow per schema field ────────────────────
+
+interface SchemaFieldProps {
+  componentName: string;
+  field: ComponentFieldSpec;
+  value: unknown;
+  spriteIds: ReadonlyArray<string>;
+  animationNames: ReadonlyArray<string>;
+  onChange: (next: unknown) => void;
+}
+
+function SchemaField({
+  componentName,
+  field,
+  value,
+  spriteIds,
+  animationNames,
+  onChange,
+}: SchemaFieldProps) {
+  const label = field.label ?? field.key;
+
+  switch (field.kind) {
+    case "number": {
+      const n = typeof value === "number" ? value : 0;
+      const hasRange = field.min !== undefined && field.max !== undefined;
+      if (hasRange) {
+        return (
+          <PropertyRow label={label} hint={field.hint}>
+            <Slider
+              value={Number.isFinite(n) ? n : 0}
+              min={field.min!}
+              max={field.max!}
+              step={field.step ?? 0.01}
+              onChange={onChange}
+              valueLabel={(Number.isFinite(n) ? n : 0).toFixed(2)}
+            />
+          </PropertyRow>
+        );
+      }
+      // No range → numeric input.
+      return (
+        <PropertyRow label={label} hint={field.hint}>
+          <Input
+            type="number"
+            value={Number.isFinite(n) ? n : 0}
+            step={field.step ?? 0.01}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v)) onChange(v);
+            }}
+            className="font-mono"
+          />
+        </PropertyRow>
+      );
+    }
+
+    case "boolean": {
+      return (
+        <PropertyRow label={label} hint={field.hint}>
+          <ToggleSwitch
+            checked={Boolean(value)}
+            onChange={onChange}
+            aria-label={label}
+          />
+        </PropertyRow>
+      );
+    }
+
+    case "color3": {
+      const arr =
+        Array.isArray(value) && value.length === 3
+          ? (value as number[])
+          : [1, 1, 1];
+      const hex = rgbArrayToHex(arr);
+      return (
+        <PropertyRow label={label} hint={field.hint}>
+          <ColorChip
+            value={hex}
+            onChange={(next) => {
+              const parsed = hexToRgbArray(next);
+              if (parsed) onChange(parsed);
+            }}
+          />
+        </PropertyRow>
+      );
+    }
+
+    case "string": {
+      const s = typeof value === "string" ? value : "";
+      // Special case: Sprite.imageId → Select sourced from manifest.
+      if (
+        componentName === "Sprite" &&
+        field.key === "imageId" &&
+        spriteIds.length > 0
+      ) {
+        return (
+          <PropertyRow label={label} hint={field.hint}>
+            <Select
+              value={s}
+              onChange={(e) => onChange(e.target.value)}
+              options={[
+                { value: "", label: "(none)" },
+                ...spriteIds.map((id) => ({ value: id, label: id })),
+              ]}
+            />
+          </PropertyRow>
+        );
+      }
+      return (
+        <PropertyRow label={label} hint={field.hint}>
+          <Input
+            value={s}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.hint}
+            className="font-mono"
+          />
+        </PropertyRow>
+      );
+    }
+
+    case "vec2":
+    case "vec3":
+    case "animationName": {
+      // Composite / context-aware fields — defer to the existing
+      // ComponentField helper. It already handles the vector grids and
+      // the animation-name fallback logic. Wrap in a PropertyRow so the
+      // outer layout matches its siblings.
+      return (
+        <PropertyRow label={label} stacked hint={field.hint}>
+          <ComponentField
+            field={field}
+            value={value}
+            spriteIds={spriteIds}
+            spriteFieldKey={
+              componentName === "Sprite" && field.key === "imageId"
+            }
+            animationNames={animationNames}
+            onChange={onChange}
+          />
+        </PropertyRow>
+      );
+    }
+  }
+}
+
+// ── RGB ↔ hex helpers (RGB triples are [0,1] floats) ──────────────────
+
+function rgbArrayToHex(rgb: ReadonlyArray<number>): string {
+  const toByte = (v: number): string => {
+    const clamped = Math.max(0, Math.min(1, v));
+    const byte = Math.round(clamped * 255);
+    return byte.toString(16).padStart(2, "0");
+  };
+  return `#${toByte(rgb[0] ?? 0)}${toByte(rgb[1] ?? 0)}${toByte(rgb[2] ?? 0)}`;
+}
+
+function hexToRgbArray(
+  hex: string,
+): [number, number, number] | null {
+  let h = hex.trim();
+  if (h.startsWith("#")) h = h.slice(1);
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+    return null;
+  }
+  return [r / 255, g / 255, b / 255];
+}
+
+// ── JS-prefab read-only view ──────────────────────────────────────────
+
 function JsPrefabView({
   name,
   path,
@@ -735,36 +1649,44 @@ function JsPrefabView({
   onConvert: () => void;
 }) {
   return (
-    <div className="p-4 max-w-2xl mx-auto text-sm space-y-3">
-      <h2 className="text-base font-semibold text-zinc-100">{name}</h2>
-      <div className="text-xs text-zinc-500">
-        Registered from <code className="font-mono">{path}</code> via{" "}
-        <code>api.registerPrefab</code>.
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="p-6 max-w-2xl mx-auto space-y-4">
+        <div className="flex items-center gap-3">
+          <Code2 size={24} className="text-amber-400" />
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">{name}</h2>
+            <p className="text-xs text-zinc-500 font-mono">{path}</p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-300 leading-relaxed space-y-2">
+          <p>
+            Registered from{" "}
+            <code className="font-mono text-amber-300">{path}</code> via{" "}
+            <code className="font-mono">api.registerPrefab</code>.
+          </p>
+          <p className="text-zinc-400">
+            This prefab is authored in JavaScript and edits live in the
+            Scripts mode. The Entities tab only round-trips declarative
+            prefabs (those stored in{" "}
+            <code className="font-mono">manifest.prefabs</code>). The
+            converter below can extract statically-resolvable{" "}
+            <code className="font-mono">world.add</code> calls into the
+            declarative form and route the residual logic into an{" "}
+            <code className="font-mono">initScript</code>.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="primary" size="sm" onClick={onConvert}>
+            Convert to declarative
+          </Button>
+          {keptAsJs ? (
+            <Badge variant="zinc">
+              You previously chose to keep this prefab as JS.
+            </Badge>
+          ) : null}
+        </div>
       </div>
-      <div className="text-xs text-zinc-300 rounded border border-zinc-800 bg-zinc-950/50 p-3 leading-relaxed">
-        This prefab is authored in JavaScript and edits live in the
-        Scripts mode. The Entities tab only round-trips declarative
-        prefabs (those stored in <code>manifest.prefabs</code>). The
-        converter below can extract statically-resolvable
-        <code> world.add</code> calls into the declarative form and
-        route the residual logic into an <code>initScript</code>.
-      </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onConvert}
-          title="Run the JS→declarative converter against this prefab"
-        >
-          Convert to declarative
-        </Button>
-        {keptAsJs ? (
-          <span className="text-[11px] text-zinc-500">
-            You previously chose to keep this prefab as JS.
-          </span>
-        ) : null}
-      </div>
-    </div>
+    </ScrollArea>
   );
 }
 
@@ -773,8 +1695,7 @@ function JsPrefabView({
 /**
  * Find JS prefabs referenced by `manifest.scripts[]`. Each script body
  * is scanned for `registerPrefab("name", …)` / `registerPrefab('name', …)`
- * calls; the first match per script wins. Returns an empty list when
- * the project has no scripts or none of them register a prefab.
+ * calls; the first match per script wins.
  */
 async function detectJsPrefabs(
   projectId: string,
@@ -803,14 +1724,11 @@ function cloneJson<T>(v: T): T {
 }
 
 /* ────────────────────────────────────────────────────────────────────
- * Phase #196 — JS→declarative converter UI
+ * Phase #196 — JS→declarative converter UI (preserved verbatim;
+ * R4c keeps the existing modal unchanged — the converter logic is
+ * outside the scope of the visual re-skin).
  * ──────────────────────────────────────────────────────────────────── */
 
-/**
- * Hidden asset slot that stores the "keep as JS" suppression list. Not
- * part of the runtime manifest; lives under `__editor__/` so the pack-
- * builder strips it out of the .apg.
- */
 const KEEP_AS_JS_PATH = "__editor__/prefab-keep-as-js.json";
 
 async function loadKeepAsJs(projectId: string): Promise<Set<string>> {
@@ -836,22 +1754,6 @@ async function saveKeepAsJs(
   );
 }
 
-/**
- * Modal UI driving the converter. Side-by-side diff:
- *
- *   ┌───────────────────────────┬───────────────────────────┐
- *   │ Original JS source        │ Declarative + init script │
- *   │ scripts/prefabs/zombie.js │ manifest.prefabs.zombie:  │
- *   │ <verbatim>                │ { components: { ... },    │
- *   │                           │   initScript: "..." }     │
- *   │                           │ scripts/prefabs/...-init  │
- *   │                           │ <generated body>          │
- *   └───────────────────────────┴───────────────────────────┘
- *
- * Checkboxes let the user un-extract a component (forcing it back into
- * the residual). Apply writes the new manifest + new asset and removes
- * the original script from `manifest.scripts[]`.
- */
 function PrefabConverterModal({
   projectId,
   name,
@@ -885,8 +1787,6 @@ function PrefabConverterModal({
           setParseError(`Could not load ${scriptPath}.`);
           return;
         }
-        // Lazy-load the converter — keeps Babel out of the editor's
-        // main bundle. Same dynamic import the smoke test uses.
         const mod = await import("../lib/prefabConverter");
         if (cancelled) return;
         setSource(body);
@@ -903,8 +1803,6 @@ function PrefabConverterModal({
           return;
         }
         setResult(match);
-        // Default to extracting every component the converter flagged
-        // as extractable.
         const o: Record<string, boolean> = {};
         for (const c of match.calls) {
           if (c.extractable) o[c.componentName] = true;
@@ -921,9 +1819,6 @@ function PrefabConverterModal({
     };
   }, [projectId, name, scriptPath]);
 
-  // Derive the final declarative `components` map + the residual init
-  // script source from the live overrides. Re-run on toggle so the
-  // preview updates in real time.
   const preview = useMemo(() => {
     if (!result) return null;
     const staticComponents: Record<string, unknown> = {};
@@ -933,8 +1828,6 @@ function PrefabConverterModal({
       if (extract && c.staticValue !== undefined) {
         staticComponents[c.componentName] = c.staticValue;
       } else if (c.extractable && c.staticValue !== undefined) {
-        // User explicitly opted out — emit an explicit world.add line
-        // into the residual so the runtime behaviour is preserved.
         residualLines.push(
           `  world.add(entity, C.${c.componentName}, ${JSON.stringify(c.staticValue)});`,
         );

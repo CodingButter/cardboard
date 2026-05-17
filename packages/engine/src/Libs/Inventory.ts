@@ -52,11 +52,37 @@ export function defaultStackMax(def: ItemDef): number {
   }
 }
 
+// ─── DEBUG instrumentation ──────────────────────────────────────────
+// Bug report under investigation: "ammo should be available for a
+// weapon even if it's in your hotbar; right now it seems to only pull
+// for items in the backpack." Static analysis suggests the helpers
+// below are correct, so we log the live inventory state on every
+// `countItem` and `removeItem` call. Open DevTools console, fire
+// shots, press R to reload, then verify the printed inventory.
+//
+// REMOVE THESE LOGS once the bug is identified.
+const INVENTORY_DEBUG = true;
+function debugSummary(inv: InventoryShape, itemId: string): string {
+  const sum = (list: ReadonlyArray<ItemStack | null>) =>
+    list
+      .map((s, i) => (s ? `[${i}]${s.itemId}×${s.count}${s.mag !== undefined ? `(mag${s.mag})` : ""}` : null))
+      .filter((v) => v !== null)
+      .join(" ");
+  return `id="${itemId}" hotbar=${sum(inv.hotbar) || "(empty)"} bag=${sum(inv.bag) || "(empty)"}`;
+}
+
 /** Sum of `count` for every stack of `itemId` in bag + hotbar. */
 export function countItem(inv: InventoryShape, itemId: string): number {
   let total = 0;
   for (const slot of inv.bag) if (slot?.itemId === itemId) total += slot.count;
   for (const slot of inv.hotbar) if (slot?.itemId === itemId) total += slot.count;
+  if (INVENTORY_DEBUG && itemId === "rifle_ammo") {
+    // Throttle: only log when total is "interesting" — first call per
+    // animation frame would flood. Use a low-frequency stamp instead.
+    if (Math.random() < 0.005) {
+      console.log(`[inv.countItem] total=${total} ${debugSummary(inv, itemId)}`);
+    }
+  }
   return total;
 }
 
@@ -67,10 +93,18 @@ export function countItem(inv: InventoryShape, itemId: string): number {
  * shouldn't dismantle the player's gear.
  */
 export function removeItem(inv: InventoryShape, itemId: string, count: number): number {
+  if (INVENTORY_DEBUG) {
+    console.log(`[inv.removeItem] BEFORE want=${count} ${debugSummary(inv, itemId)}`);
+  }
   let remaining = count;
   for (const list of [inv.bag, inv.hotbar]) {
     for (let i = 0; i < list.length; i++) {
-      if (remaining <= 0) return count;
+      if (remaining <= 0) {
+        if (INVENTORY_DEBUG) {
+          console.log(`[inv.removeItem] AFTER  got=${count} ${debugSummary(inv, itemId)}`);
+        }
+        return count;
+      }
       const slot = list[i];
       if (slot?.itemId === itemId) {
         const take = Math.min(slot.count, remaining);
@@ -79,6 +113,9 @@ export function removeItem(inv: InventoryShape, itemId: string, count: number): 
         if (slot.count === 0) list[i] = null;
       }
     }
+  }
+  if (INVENTORY_DEBUG) {
+    console.log(`[inv.removeItem] AFTER  got=${count - remaining} ${debugSummary(inv, itemId)}`);
   }
   return count - remaining;
 }

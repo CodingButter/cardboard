@@ -3,6 +3,31 @@ import index from "./index.html";
 
 const PUBLIC_DIR = `${import.meta.dir}/public`;
 
+/**
+ * Resolve content-type / cache headers for files Bun.file might not
+ * infer correctly. Most things are fine (it sniffs from the extension),
+ * but the PWA manifest needs to be served as JSON and the service
+ * worker as JS — both with no-cache so future deploys actually update
+ * on the client. Mirrors apps/game/server.ts.
+ */
+function pwaHeaders(pathname: string): HeadersInit | undefined {
+  if (pathname === "/manifest.webmanifest") {
+    return {
+      "content-type": "application/manifest+json; charset=utf-8",
+      "cache-control": "no-cache",
+    };
+  }
+  if (pathname === "/sw.js") {
+    return {
+      "content-type": "application/javascript; charset=utf-8",
+      "cache-control": "no-cache",
+      // Allow the SW to control the whole origin even if the file moves.
+      "service-worker-allowed": "/",
+    };
+  }
+  return undefined;
+}
+
 const server = Bun.serve({
   port: 3001,
   routes: {
@@ -12,6 +37,8 @@ const server = Bun.serve({
       // Try the path as an exact file first.
       let file = Bun.file(`${PUBLIC_DIR}${pathname}`);
       if (await file.exists()) {
+        const extra = pwaHeaders(pathname);
+        if (extra) return new Response(file, { headers: extra });
         return new Response(file);
       }
       // Fall back to directory-index lookup so `/play/` resolves to

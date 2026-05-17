@@ -70,6 +70,24 @@ export interface PresetPartialWall {
 }
 
 /**
+ * Tilesheet crop coordinate — selects a single cell within a sheet
+ * referenced by `texture`. Authors keep the full sheet PNG as their
+ * `texture` path and use `sheetCrop` to pick which cell renders.
+ *
+ * The resolver translates `(texture sheetPath, col, row)` into the
+ * per-cell tile id the renderer already generates from
+ * `manifest.tileSheets[i].startTileId + row * cols + col` (see
+ * WebGLRenderer.registerSheet / TwoDRenderer's mirror).
+ *
+ * Both fields are zero-based and bounded by the sheet's `cols` / `rows`.
+ * Out-of-range values fall back to the whole-sheet texture path resolution.
+ */
+export interface PresetSheetCrop {
+  col: number;
+  row: number;
+}
+
+/**
  * What the resolver returns for a single preset, with every field
  * either set or explicitly defaulted. The renderer reads this flat
  * record without having to know the file format that fed it.
@@ -96,6 +114,14 @@ export interface ResolvedPresetData {
   wallStartZ: number;
   /** Partial-wall geometry. Omit = fills the cell. */
   partialWall?: PresetPartialWall;
+  /**
+   * Optional crop into the sheet referenced by `texture`. When present
+   * and `texture` matches a path in `manifest.tileSheets`, the renderer
+   * uses the per-cell layer for `(col, row)` instead of the whole-sheet
+   * fallback. Out-of-range or unknown-sheet values fall back to the
+   * whole-sheet texture-id lookup.
+   */
+  sheetCrop?: PresetSheetCrop;
   /** Floor world-z. Default 0. */
   floorHeight: number;
   /** Ceiling world-z. Default 1. */
@@ -139,6 +165,7 @@ export interface PresetSource {
   wallHeight?: number;
   wallStartZ?: number;
   partialWall?: PresetPartialWall;
+  sheetCrop?: PresetSheetCrop;
   floorHeight?: number;
   ceilingHeight?: number;
   reflectiveness?: number;
@@ -224,6 +251,11 @@ const PARTIAL_WALL_SCHEMA: SchemaShape = {
   widthU: { kind: "number" },
 };
 
+const SHEET_CROP_SCHEMA: SchemaShape = {
+  col: { kind: "number" },
+  row: { kind: "number" },
+};
+
 const EMISSIVE_SCHEMA: SchemaShape = {
   color: { kind: "rgbTriple" },
   intensity: { kind: "number" },
@@ -256,6 +288,7 @@ const PRESET_SCHEMA: SchemaShape = {
   wallHeight: { kind: "number" },
   wallStartZ: { kind: "number" },
   partialWall: { kind: "object", schema: PARTIAL_WALL_SCHEMA },
+  sheetCrop: { kind: "object", schema: SHEET_CROP_SCHEMA },
   floorHeight: { kind: "number" },
   ceilingHeight: { kind: "number" },
   reflectiveness: { kind: "number" },
@@ -566,6 +599,7 @@ function withDefaults(src: PresetSource): ResolvedPresetData {
     wallHeight: src.wallHeight ?? 1,
     wallStartZ: src.wallStartZ ?? 0,
     partialWall: src.partialWall,
+    sheetCrop: src.sheetCrop,
     floorHeight: src.floorHeight ?? 0,
     ceilingHeight: src.ceilingHeight ?? 1,
     reflectiveness: src.reflectiveness ?? 0,
@@ -628,15 +662,29 @@ export class PresetResolver {
   readonly errors: ReadonlyArray<PresetError>;
   /** Reverse map for renderer integration: texture path → first tile id seen. */
   private readonly textureToTileId: ReadonlyMap<string, number>;
+  /**
+   * Sheet reverse map: sheet PNG path → `{ startTileId, cols, rows }`.
+   * Used by `tileIdForSheetCrop` to translate a `sheetCrop: { col, row }`
+   * preset field into the per-cell layer id the renderer cropped at load.
+   */
+  private readonly sheetSpecByPath: ReadonlyMap<
+    string,
+    { startTileId: number; cols: number; rows: number }
+  >;
 
   private constructor(
     presets: ReadonlyMap<string, Preset>,
     errors: ReadonlyArray<PresetError>,
     textureToTileId: ReadonlyMap<string, number>,
+    sheetSpecByPath: ReadonlyMap<
+      string,
+      { startTileId: number; cols: number; rows: number }
+    >,
   ) {
     this.presets = presets;
     this.errors = errors;
     this.textureToTileId = textureToTileId;
+    this.sheetSpecByPath = sheetSpecByPath;
   }
 
   /**
@@ -826,7 +874,34 @@ export class PresetResolver {
       if (!textureToTileId.has(path)) textureToTileId.set(path, tileId);
     }
 
-    return new PresetResolver(resolved, errors, textureToTileId);
+    // Also register `tileSheets` paths so a preset whose `texture`
+    // points at a whole-sheet PNG (with NO `sheetCrop`) still resolves
+    // to *some* tile id. The renderer uploads the whole sheet's first
+    // cell at `startTileId`; using it as the texture-id fallback gives
+    // the legacy "first cell of the sheet" behaviour. Presets that opt
+    // into `sheetCrop` route through `tileIdForSheetCrop` instead.
+    const sheets = manifest.tileSheets ?? [];
+    const sheetSpecByPath = new Map<
+      string,
+      { startTileId: number; cols: number; rows: number }
+    >();
+    for (const sheet of sheets) {
+      if (!Number.isFinite(sheet.startTileId)) continue;
+      if (!textureToTileId.has(sheet.path)) {
+        textureToTileId.set(sheet.path, sheet.startTileId);
+      }
+      // First-spec-wins for the sheet reverse map too — if the same PNG
+      // is registered twice (unusual but legal), keep the earlier spec.
+      if (!sheetSpecByPath.has(sheet.path)) {
+        sheetSpecByPath.set(sheet.path, {
+          startTileId: sheet.startTileId,
+          cols: sheet.cols,
+          rows: sheet.rows,
+        });
+      }
+    }
+
+    return new PresetResolver(resolved, errors, textureToTileId, sheetSpecByPath);
   }
 
   /** Convenience lookup. Returns `undefined` for unknown ids. */
@@ -854,6 +929,30 @@ export class PresetResolver {
   tileIdForTexture(texture: string | undefined): number | undefined {
     if (!texture) return undefined;
     return this.textureToTileId.get(texture);
+  }
+
+  /**
+   * Resolve a sheet-cropped tile id for `texture` at cell `(col, row)`.
+   *
+   * `texture` must match a sheet path registered in `manifest.tileSheets`.
+   * Returns `startTileId + row * cols + col` (the same formula the
+   * renderers use when they crop the sheet at upload time). Returns
+   * `undefined` if `texture` isn't a known sheet path or `(col, row)`
+   * is out of range — callers should fall back to `tileIdForTexture`
+   * (whole-sheet) when this happens.
+   */
+  tileIdForSheetCrop(
+    texture: string | undefined,
+    col: number,
+    row: number,
+  ): number | undefined {
+    if (!texture) return undefined;
+    const spec = this.sheetSpecByPath.get(texture);
+    if (!spec) return undefined;
+    if (!Number.isInteger(col) || !Number.isInteger(row)) return undefined;
+    if (col < 0 || col >= spec.cols) return undefined;
+    if (row < 0 || row >= spec.rows) return undefined;
+    return spec.startTileId + row * spec.cols + col;
   }
 
   /** Iterate every registered preset. */
