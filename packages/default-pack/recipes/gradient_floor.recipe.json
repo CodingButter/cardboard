@@ -1,0 +1,33 @@
+{
+  "id": "gradient_floor",
+  "size": { "width": 64, "height": 64 },
+  "seed": 7,
+  "nodes": [
+    {
+      "id": "ramp",
+      "op": "gradient",
+      "params": {
+        "kind": "linear",
+        "angle": 90,
+        "color1": [0.12, 0.10, 0.08, 1.0],
+        "color2": [0.30, 0.24, 0.18, 1.0]
+      }
+    },
+    {
+      "id": "grain",
+      "op": "perlin",
+      "params": { "scale": 12.0, "octaves": 2, "amplitude": 0.35 }
+    },
+    {
+      "id": "noisy",
+      "op": "blend",
+      "params": { "mode": "overlay", "opacity": 0.4 },
+      "inputs": { "bottom": "ramp", "top": "grain" }
+    },
+    {
+      "id": "out",
+      "op": "output",
+      "inputs": { "input": "noisy" }
+    }
+  ]
+}

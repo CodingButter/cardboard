@@ -1,0 +1,184 @@
+import React from "react";
+import {
+  Home,
+  Grid3x3,
+  Boxes,
+  Image as ImageIcon,
+  Code2,
+  Film,
+  Palette,
+  AudioLines,
+  LayoutPanelTop,
+  Package,
+} from "lucide-react";
+import { TabStrip, type TabDescriptor } from "../components/ui/TabStrip";
+
+/**
+ * PrimaryTabs — the 10-tab horizontal strip below the TopBar.
+ *
+ * Tab list: Home / Scene / Prefabs / Assets / Scripts / Animation /
+ * Image Lab / Sound Lab / UI Builder / Project. (Scene = the legacy
+ * "Map" tab renamed; Prefabs = the legacy "Entities" tab renamed —
+ * see EDITOR_REDESIGN.md §6.3 + §12 Q4.)
+ *
+ * The active tab is persisted to localStorage under `editor.workflowMode`
+ * so a tab reload lands the user back where they were. Keys are
+ * cardboard-specific so they don't collide with other tools in the
+ * browser profile.
+ *
+ * Tabs without a real implementation (Assets, Image Lab, Sound Lab,
+ * UI Builder) are still selectable; the shell's body region renders an
+ * EmptyState placeholder for them — they get real content in R4.
+ *
+ * Keyboard nav: when focus is on a tab button, ←/→ moves selection
+ * between non-disabled tabs.
+ */
+
+export type PrimaryTabId =
+  | "home"
+  | "scene"
+  | "prefabs"
+  | "assets"
+  | "scripts"
+  | "animation"
+  | "imageLab"
+  | "soundLab"
+  | "uiBuilder"
+  | "project";
+
+export const PRIMARY_TAB_ORDER: ReadonlyArray<PrimaryTabId> = [
+  "home",
+  "scene",
+  "prefabs",
+  "assets",
+  "scripts",
+  "animation",
+  "imageLab",
+  "soundLab",
+  "uiBuilder",
+  "project",
+];
+
+/**
+ * Canonical labels and icon assignments. Icons are 16px Lucide
+ * glyphs — they match the §6.3 spec (Home/Grid3X3/Cuboid/ImageIcon/
+ * Code2/Film/Package) where lucide-react has a direct equivalent, and
+ * use the closest substitute otherwise (Boxes for "Cuboid"; Palette
+ * for Image Lab, AudioLines for Sound Lab, LayoutPanelTop for UI
+ * Builder — all new tabs added in §12 Q4).
+ */
+export const PRIMARY_TABS: ReadonlyArray<{
+  id: PrimaryTabId;
+  label: string;
+  icon: React.ReactNode;
+  /** Whether this tab requires an open project to be useful. */
+  requiresProject: boolean;
+}> = [
+  { id: "home", label: "Home", icon: <Home size={16} />, requiresProject: false },
+  { id: "scene", label: "Scene", icon: <Grid3x3 size={16} />, requiresProject: true },
+  { id: "prefabs", label: "Prefabs", icon: <Boxes size={16} />, requiresProject: true },
+  { id: "assets", label: "Assets", icon: <ImageIcon size={16} />, requiresProject: true },
+  { id: "scripts", label: "Scripts", icon: <Code2 size={16} />, requiresProject: true },
+  { id: "animation", label: "Animation", icon: <Film size={16} />, requiresProject: true },
+  { id: "imageLab", label: "Image Lab", icon: <Palette size={16} />, requiresProject: true },
+  { id: "soundLab", label: "Sound Lab", icon: <AudioLines size={16} />, requiresProject: true },
+  { id: "uiBuilder", label: "UI Builder", icon: <LayoutPanelTop size={16} />, requiresProject: true },
+  { id: "project", label: "Project", icon: <Package size={16} />, requiresProject: true },
+];
+
+const WORKFLOW_MODE_KEY = "editor.workflowMode";
+
+/** Legacy → current tab-id migrations. Map → Scene and Entities →
+ *  Prefabs were renamed; existing persisted state still references
+ *  the old strings. Migrating on read keeps the next-session default
+ *  working without forcing the user back to Home. */
+const LEGACY_TAB_ID_MIGRATIONS: Record<string, PrimaryTabId> = {
+  map: "scene",
+  entities: "prefabs",
+};
+
+export function readPersistedTab(): PrimaryTabId | null {
+  try {
+    const raw = localStorage.getItem(WORKFLOW_MODE_KEY);
+    if (!raw) return null;
+    const migrated = LEGACY_TAB_ID_MIGRATIONS[raw];
+    if (migrated) {
+      // Rewrite the persisted value in place so we only migrate once.
+      try {
+        localStorage.setItem(WORKFLOW_MODE_KEY, migrated);
+      } catch {
+        // ignore
+      }
+      return migrated;
+    }
+    if ((PRIMARY_TAB_ORDER as ReadonlyArray<string>).includes(raw)) {
+      return raw as PrimaryTabId;
+    }
+  } catch {
+    // localStorage may throw in sandboxed contexts. Fall through.
+  }
+  return null;
+}
+
+export function writePersistedTab(id: PrimaryTabId): void {
+  try {
+    localStorage.setItem(WORKFLOW_MODE_KEY, id);
+  } catch {
+    // Persisting is best-effort.
+  }
+}
+
+export interface PrimaryTabsProps {
+  value: PrimaryTabId;
+  onChange: (next: PrimaryTabId) => void;
+  /** When false, all tabs except `home` are disabled (no project open). */
+  hasProject: boolean;
+  className?: string;
+}
+
+export function PrimaryTabs({
+  value,
+  onChange,
+  hasProject,
+  className,
+}: PrimaryTabsProps) {
+  const tabs: ReadonlyArray<TabDescriptor<PrimaryTabId>> = React.useMemo(
+    () =>
+      PRIMARY_TABS.map((t) => ({
+        id: t.id,
+        label: t.label,
+        icon: t.icon,
+        disabled: t.requiresProject && !hasProject,
+      })),
+    [hasProject],
+  );
+
+  // Keyboard nav: ←/→ on the tablist moves selection between enabled
+  // tabs. Mirrors the WAI-ARIA Authoring Practices tabs pattern.
+  const onKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const enabled = tabs.filter((t) => !t.disabled);
+      if (enabled.length === 0) return;
+      const idx = enabled.findIndex((t) => t.id === value);
+      const delta = e.key === "ArrowRight" ? 1 : -1;
+      const nextIdx = (idx + delta + enabled.length) % enabled.length;
+      const target = enabled[nextIdx];
+      if (target) onChange(target.id);
+    },
+    [tabs, value, onChange],
+  );
+
+  return (
+    <div onKeyDown={onKeyDown} className={className}>
+      <TabStrip<PrimaryTabId>
+        variant="primary"
+        tabs={tabs}
+        value={value}
+        onChange={onChange}
+        aria-label="Editor workflow"
+      />
+    </div>
+  );
+}

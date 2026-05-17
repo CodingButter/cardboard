@@ -1,0 +1,556 @@
+import React from "react";
+import {
+  FolderOpen,
+  Palette,
+  AudioLines,
+  LayoutPanelTop,
+} from "lucide-react";
+import { useRoute } from "../lib/router";
+import {
+  EditorProjectStore,
+  type ProjectMeta,
+  type AssetMeta,
+} from "../lib/EditorProjectStore";
+import type { PackManifest } from "@two_5_d/engine";
+import { HomeScreen } from "../views/HomeScreen";
+import { ProjectView, type WorkflowMode } from "../views/ProjectView";
+import { ProjectTabView } from "../views/project/ProjectTabView";
+import { AssetsView } from "../views/AssetsView";
+import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
+import { ScriptsView } from "../views/ScriptsView";
+import { EditorSettingsModal } from "../views/EditorSettingsModal";
+import { EmptyState } from "../components/ui/EmptyState";
+import { StatusBarProvider } from "./StatusBarContext";
+import { StatusBar } from "./StatusBar";
+import { TopBar } from "./TopBar";
+import {
+  EditorActionsProvider,
+  useEditorActions,
+  useEditorActionsState,
+} from "./EditorActionsContext";
+import { ActiveSceneProvider, useActiveScene } from "./ActiveSceneContext";
+import {
+  PrimaryTabs,
+  readPersistedTab,
+  writePersistedTab,
+  type PrimaryTabId,
+} from "./PrimaryTabs";
+
+/**
+ * EditorShell — the chrome that wraps every editor view.
+ *
+ * Composition (top → bottom):
+ *
+ *     <TopBar/>            // brand, project/scene pickers, actions
+ *     <PrimaryTabs/>       // 10-tab strip (Home / Scene / … / Project)
+ *     <body>               // flex-1 region — current tab's view
+ *     <StatusBar/>          // per-view status sections
+ *
+ * R3 ships the chrome; the body regions for Scene / Prefabs / Animation
+ * / Scripts / Project still render the existing `ProjectView`
+ * unchanged. R4 sub-phases re-skin those views and remove ProjectView's
+ * internal workflow tab strip (which currently visually duplicates the
+ * shell's PrimaryTabs — accepted R3 state per the brief).
+ *
+ * Tab semantics:
+ *   - `home`: renders HomeScreen, regardless of whether a project is
+ *     open. Selecting it from a project view navigates back to `#/`.
+ *   - `assets`, `imageLab`, `soundLab`, `uiBuilder`: render an
+ *     EmptyState — content lands in R4.
+ *   - all other tabs: render ProjectView. The shell writes the inner
+ *     `cardboard_editor_workflow_mode_<projectId>` localStorage key so
+ *     ProjectView mounts in the matching internal mode, then uses
+ *     `key={mode}` to force a remount whenever the shell flips a tab.
+ */
+
+const PROJECT_WORKFLOW_TABS: ReadonlyArray<PrimaryTabId> = [
+  "scene",
+  "prefabs",
+  "animation",
+  // R4e promoted `scripts` out — it renders its own top-level
+  // ScriptsView with a Monaco-backed editor (lazy-loaded).
+];
+
+/** Tabs that have an actual implementation today. Other project-
+ *  scoped tabs render an EmptyState. R4f promoted `project` out of
+ *  this list — see `ProjectTabView`. R4g promoted `assets` out — see
+ *  `AssetsView`. */
+const PROJECT_PLACEHOLDER_TABS: ReadonlyArray<PrimaryTabId> = [
+  "imageLab",
+  "soundLab",
+  "uiBuilder",
+];
+
+/** Scene dropdown is meaningful on these tabs (per §6.2). */
+const SCENE_TABS: ReadonlyArray<PrimaryTabId> = [
+  "scene",
+  "prefabs",
+  "animation",
+];
+
+export function EditorShell() {
+  const [route, navigate] = useRoute();
+
+  // Persisted tab. We hydrate from localStorage on mount and normalise
+  // against the current route — Home route → "home" tab regardless of
+  // the persisted value, project route → persisted tab or "scene".
+  const [tab, setTabState] = React.useState<PrimaryTabId>(() => {
+    const persisted = readPersistedTab();
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash;
+      const onProject = /^#\/?p\//.test(hash);
+      if (!onProject) return "home";
+      return persisted && persisted !== "home" ? persisted : "scene";
+    }
+    return persisted ?? "home";
+  });
+
+  // Whenever the route changes, reconcile the tab. Home route forces
+  // `home`; project route leaves whatever the user chose (or falls
+  // back to scene.
+  React.useEffect(() => {
+    if (route.view === "home") {
+      setTabState("home");
+    } else if (tab === "home") {
+      const persisted = readPersistedTab();
+      setTabState(persisted && persisted !== "home" ? persisted : "scene");
+    }
+    // We intentionally don't include `tab` in deps — we only want to
+    // run this on route changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route]);
+
+  const setTab = React.useCallback(
+    (next: PrimaryTabId) => {
+      // Home is a navigation target too — leaving project view if
+      // currently inside one.
+      if (next === "home") {
+        setTabState("home");
+        writePersistedTab("home");
+        if (route.view !== "home") navigate("#/");
+        return;
+      }
+      setTabState(next);
+      writePersistedTab(next);
+    },
+    [navigate, route.view],
+  );
+
+  // Cross-tab navigation event. Any view can dispatch
+  // `cardboard:set-tab` to ask the shell to switch tabs (and
+  // optionally surface an `assetId` the new view can pick up).
+  // Used by AssetsView's click flow (R4g) and reserved for future
+  // deep-link patterns.
+  React.useEffect(() => {
+    function onSetTab(e: Event) {
+      const ce = e as CustomEvent<SetTabEventDetail>;
+      const detail = ce.detail;
+      if (!detail || !detail.tab) return;
+      setTab(detail.tab);
+      // WIRING: when the destination view exists (R4d/R4e/labs) it
+      // should consume `detail.assetId` to auto-open the target.
+      // For now we stash it on a globally-readable property so
+      // late-mounting views can find it on next render.
+      if (detail.assetId) {
+        try {
+          (window as unknown as { __cardboardPendingAssetId?: string })
+            .__cardboardPendingAssetId = detail.assetId;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    window.addEventListener(SET_TAB_EVENT, onSetTab);
+    return () => window.removeEventListener(SET_TAB_EVENT, onSetTab);
+  }, [setTab]);
+
+  // ── Project metadata + manifest, surfaced to the TopBar scene dropdown
+  // and to views via the existing prop plumbing. The TopBar's project
+  // dropdown was removed (§12 Q9 reversed) — the Home tab is the only
+  // project switcher — so the shell no longer needs a `projects` list.
+  const projectId = route.view === "project" ? route.projectId : null;
+  const [meta, setMeta] = React.useState<ProjectMeta | null>(null);
+  const [manifest, setManifest] = React.useState<PackManifest | null>(null);
+  const [assets, setAssets] = React.useState<AssetMeta[]>([]);
+  const [refreshTick, setRefreshTick] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!projectId) {
+      setMeta(null);
+      setManifest(null);
+      setAssets([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [m, mf, as] = await Promise.all([
+          EditorProjectStore.getProject(projectId),
+          EditorProjectStore.loadManifest(projectId),
+          EditorProjectStore.listAssets(projectId),
+        ]);
+        if (cancelled) return;
+        setMeta(m);
+        setManifest(mf);
+        setAssets(as);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, refreshTick]);
+
+  // Scene picker derived from the project's `scenes/*.json` assets.
+  const scenes = React.useMemo(
+    () =>
+      assets
+        .filter((a) => a.path.startsWith("scenes/"))
+        .map((a) => ({
+          path: a.path,
+          label: a.path.replace(/^scenes\//, ""),
+        })),
+    [assets],
+  );
+
+  // Active scene state lives in `<ActiveSceneProvider/>` (mounted
+  // below) and is consumed inside `ShellChrome` via `useActiveScene()`.
+  // The provider persists per-project under
+  // `cardboard_editor_active_scene_<projectId>` and exposes a single
+  // setter that both the TopBar dropdown and ProjectView write through.
+  // The fallback when no scene has been pinned is `manifest?.startScene`
+  // — surfaced via the `fallbackScene` prop on ShellChrome below.
+  const fallbackScene = manifest?.startScene ?? null;
+
+  // Persist the active workflow tab per-project so the next session
+  // lands on the same view. ProjectView no longer reads this key
+  // directly — the shell now passes `workflowMode` as a controlled
+  // prop (see ShellBody). This write is purely a preference cache.
+  React.useEffect(() => {
+    if (!projectId) return;
+    if (!PROJECT_WORKFLOW_TABS.includes(tab)) return;
+    try {
+      localStorage.setItem(
+        `cardboard_editor_workflow_mode_${projectId}`,
+        tab,
+      );
+    } catch {
+      // ignore
+    }
+  }, [projectId, tab]);
+
+  // One-time migration of the per-project workflow-mode localStorage
+  // value when the project loads. The Map → Scene + Entities → Prefabs
+  // tab renames changed the persisted vocabulary; existing user state
+  // still contains the old strings. We rewrite stale values in place
+  // so the next read (and the persisted-tab default after a reload)
+  // picks up the new identifiers. Idempotent — once migrated the
+  // stored value matches the new vocab and this is a no-op.
+  React.useEffect(() => {
+    if (!projectId) return;
+    try {
+      const key = `cardboard_editor_workflow_mode_${projectId}`;
+      const raw = localStorage.getItem(key);
+      if (raw === "map") localStorage.setItem(key, "scene");
+      else if (raw === "entities") localStorage.setItem(key, "prefabs");
+    } catch {
+      // ignore
+    }
+  }, [projectId]);
+
+  // Settings modal (cog).
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+
+  const projectName = meta?.name ?? "";
+  const hasProject = projectId !== null && meta !== null;
+
+  return (
+    <StatusBarProvider>
+      <EditorActionsProvider>
+        <ActiveSceneProvider projectId={projectId}>
+          <ShellChrome
+            projectName={projectName}
+            tab={tab}
+            setTab={setTab}
+            hasProject={hasProject}
+            scenes={scenes}
+            fallbackScene={fallbackScene}
+            showSceneDropdown={hasProject && SCENE_TABS.includes(tab)}
+            projectId={projectId}
+            onOpenProject={(id) => {
+              navigate(`#/p/${id}`);
+              setRefreshTick((n) => n + 1);
+            }}
+            onProjectMutated={() => setRefreshTick((n) => n + 1)}
+            onNavigateHome={() => navigate("#/")}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+          <EditorSettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </ActiveSceneProvider>
+      </EditorActionsProvider>
+    </StatusBarProvider>
+  );
+}
+
+interface ShellChromeProps {
+  projectName: string;
+  tab: PrimaryTabId;
+  setTab: (next: PrimaryTabId) => void;
+  hasProject: boolean;
+  scenes: ReadonlyArray<{ path: string; label: string }>;
+  /** Manifest-declared start scene, surfaced as the dropdown value when
+   *  the user hasn't pinned a different scene yet. */
+  fallbackScene: string | null;
+  showSceneDropdown: boolean;
+  projectId: string | null;
+  onOpenProject: (id: string) => void;
+  onProjectMutated: () => void;
+  onNavigateHome: () => void;
+  onOpenSettings: () => void;
+}
+
+/**
+ * ShellChrome — the visible shell (TopBar + Tabs + body + StatusBar).
+ *
+ * Split out from `EditorShell` so it can read the action registry
+ * (`useEditorActionsState`) and register the default Save handler
+ * (`useEditorActions`) — both require being inside the provider.
+ */
+function ShellChrome({
+  projectName,
+  tab,
+  setTab,
+  hasProject,
+  scenes,
+  fallbackScene,
+  showSceneDropdown,
+  projectId,
+  onOpenProject,
+  onProjectMutated,
+  onNavigateHome,
+  onOpenSettings,
+}: ShellChromeProps) {
+  // Active scene from the shell-level context. When no scene has been
+  // pinned yet, fall back to the manifest's startScene so the TopBar
+  // shows something useful instead of "—".
+  const { activeScene, setActiveScene } = useActiveScene();
+  const resolvedScene = activeScene ?? fallbackScene;
+  const sceneName = resolvedScene
+    ? resolvedScene.replace(/^scenes\//, "")
+    : "";
+  // Register a default Save handler at the shell level so the legacy
+  // ProjectView path (which binds Ctrl+S internally for the GridEditor
+  // auto-save loop and EntitiesEditor) keeps working until R4f
+  // migrates ProjectView to register its own real Save handler.
+  // R4f removes this shim.
+  const { register } = useEditorActions();
+  React.useEffect(() => {
+    return register({
+      save: () => {
+        const event = new KeyboardEvent("keydown", {
+          key: "s",
+          code: "KeyS",
+          keyCode: 83,
+          ctrlKey: true,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        window.dispatchEvent(event);
+      },
+    });
+  }, [register]);
+
+  const actions = useEditorActionsState();
+
+  // Wrap the raw handlers so TopBar's onSave/onExport are non-optional
+  // functions; when no handler is registered, TopBar disables the
+  // button via the `*Available` flags below and these wrappers are
+  // never invoked.
+  const handleSave = React.useCallback(() => {
+    void actions.save?.();
+  }, [actions]);
+  const handleExport = React.useCallback(() => {
+    void actions.export?.();
+  }, [actions]);
+  const handleTogglePlaytest = React.useCallback(() => {
+    if (actions.playtestStop) actions.playtestStop();
+    else if (actions.playtestStart) actions.playtestStart();
+  }, [actions]);
+
+  return (
+    <div className="flex flex-col h-screen min-h-screen bg-zinc-950 text-zinc-100">
+      <TopBar
+        sceneName={sceneName}
+        scenes={scenes}
+        onSelectScene={setActiveScene}
+        sceneDropdownDisabled={!hasProject || scenes.length === 0}
+        showSceneDropdown={showSceneDropdown}
+        saveState="saved"
+        onSave={handleSave}
+        saveAvailable={typeof actions.save === "function"}
+        onExport={handleExport}
+        exportAvailable={typeof actions.export === "function"}
+        onTogglePlaytest={handleTogglePlaytest}
+        playtestDisabled={
+          !actions.playtestStart && !actions.playtestStop
+        }
+        // MapView registers `playtestStop` while playtest is active
+        // and `playtestStart` when inactive — exactly one is present
+        // at any time. The TopBar uses this to flip the button's
+        // visual state (Play → Stop, amber → red).
+        playtestActive={typeof actions.playtestStop === "function"}
+        onOpenSettings={onOpenSettings}
+      />
+      <PrimaryTabs value={tab} onChange={setTab} hasProject={hasProject} />
+      <main className="flex-1 min-h-0 overflow-hidden">
+        <ShellBody
+          tab={tab}
+          projectId={projectId}
+          onOpenProject={onOpenProject}
+          onProjectMutated={onProjectMutated}
+          onNavigateHome={onNavigateHome}
+        />
+      </main>
+      <StatusBar projectName={projectName || undefined} />
+    </div>
+  );
+}
+
+interface ShellBodyProps {
+  tab: PrimaryTabId;
+  projectId: string | null;
+  onOpenProject: (id: string) => void;
+  onProjectMutated: () => void;
+  onNavigateHome: () => void;
+}
+
+function ShellBody({
+  tab,
+  projectId,
+  onOpenProject,
+  onNavigateHome,
+}: ShellBodyProps) {
+  // Home: always rendered as-is. HomeScreen is independent of
+  // projectId — it lists every project and lets the user open one.
+  if (tab === "home") {
+    return (
+      <div className="h-full overflow-auto">
+        <HomeScreen onOpenProject={onOpenProject} />
+      </div>
+    );
+  }
+
+  // Every other tab needs an open project. If none, render an empty
+  // state that nudges the user back to Home.
+  if (!projectId) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <EmptyState
+          icon={<FolderOpen size={28} />}
+          title="No project open"
+          description="Choose a project from the Home tab to work in this view."
+          action={
+            <button
+              onClick={onNavigateHome}
+              className="inline-flex items-center justify-center rounded-md bg-amber-500 text-zinc-950 hover:bg-amber-400 h-8 px-3 text-xs font-medium"
+            >
+              Go to Home
+            </button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (PROJECT_PLACEHOLDER_TABS.includes(tab)) {
+    const meta = PLACEHOLDER_COPY[tab as keyof typeof PLACEHOLDER_COPY];
+    return (
+      <div className="h-full flex items-center justify-center">
+        <EmptyState
+          icon={meta.icon}
+          title={meta.title}
+          description={meta.description}
+        />
+      </div>
+    );
+  }
+
+  // R4f: Project tab renders the new top-level surface, not ProjectView.
+  if (tab === "project") {
+    return (
+      <div className="h-full overflow-hidden">
+        <ProjectTabView key={`project::${projectId}`} projectId={projectId} />
+      </div>
+    );
+  }
+
+  // R4g: Assets tab renders the new asset browser.
+  if (tab === "assets") {
+    return (
+      <div className="h-full overflow-hidden">
+        <AssetsView key={`assets::${projectId}`} projectId={projectId} />
+      </div>
+    );
+  }
+
+  // R4e: Scripts tab renders the Monaco-backed script editor.
+  // The Monaco bundle itself lazy-loads on first mount; this thin
+  // wrapper is in the main bundle.
+  if (tab === "scripts") {
+    return (
+      <div className="h-full overflow-hidden">
+        <ScriptsView key={`scripts::${projectId}`} projectId={projectId} />
+      </div>
+    );
+  }
+
+  // Real project-workflow tabs: Scene / Prefabs / Animation.
+  // ProjectView is the existing monolith that switches its body based
+  // on the `workflowMode` prop we feed in here. We keep `key={projectId}`
+  // so opening a different project still cleanly remounts the view
+  // (and its iframe/asset state), but the workflow-mode tab change no
+  // longer triggers a remount — the prop simply updates.
+  return (
+    <div className="h-full overflow-hidden">
+      <ProjectView
+        key={projectId}
+        projectId={projectId}
+        workflowMode={tab as WorkflowMode}
+        onBackHome={onNavigateHome}
+      />
+    </div>
+  );
+}
+
+const PLACEHOLDER_COPY: Record<
+  "imageLab" | "soundLab" | "uiBuilder",
+  {
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+  }
+> = {
+  imageLab: {
+    icon: <Palette size={28} />,
+    title: "Image Lab — coming soon",
+    description:
+      "Procedural image generation for tiles, sprites, and skyboxes. See docs/plans/IMAGE_LAB.md (in design now).",
+  },
+  soundLab: {
+    icon: <AudioLines size={28} />,
+    title: "Sound Lab — coming soon",
+    description:
+      "Procedural sound and music generation: SFX synthesis, music patterns, ambient beds. See docs/plans/SOUND_LAB.md (in design now).",
+  },
+  uiBuilder: {
+    icon: <LayoutPanelTop size={28} />,
+    title: "UI Builder — coming soon",
+    description:
+      "Visual editor for pack UI. Drag-drop builder outputs structured JSON trees that the engine renders at runtime. See #212.",
+  },
+};

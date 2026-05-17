@@ -1,0 +1,39 @@
+{
+  "id": "brick_wall_red",
+  "size": { "width": 64, "height": 64 },
+  "seed": 12345,
+  "nodes": [
+    {
+      "id": "base",
+      "op": "solid",
+      "params": { "color": [0.55, 0.17, 0.11, 1.0] }
+    },
+    {
+      "id": "noise",
+      "op": "perlin",
+      "params": { "scale": 5.0, "octaves": 3, "amplitude": 0.5 }
+    },
+    {
+      "id": "tinted",
+      "op": "blend",
+      "params": { "mode": "multiply", "opacity": 0.5 },
+      "inputs": { "bottom": "base", "top": "noise" }
+    },
+    {
+      "id": "pattern",
+      "op": "brick",
+      "params": {
+        "size": [16, 8],
+        "mortarWidth": 1.5,
+        "mortarColor": [0.23, 0.09, 0.06, 1.0],
+        "offsetEveryOtherRow": 0.5
+      },
+      "inputs": { "base": "tinted" }
+    },
+    {
+      "id": "out",
+      "op": "output",
+      "inputs": { "input": "pattern" }
+    }
+  ]
+}
