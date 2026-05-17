@@ -1220,11 +1220,19 @@ export function GridEditor({
       ) {
         return;
       }
+      // Skip modified key combos — Ctrl+S etc. are owned by the shell.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "w" || e.key === "W") setLayer("walls");
       else if (e.key === "f" || e.key === "F") setLayer("floors");
       else if (e.key === "c" || e.key === "C") setLayer("ceiling");
       else if (e.key === "p" || e.key === "P") setTool("paint");
-      else if (e.key === "e" || e.key === "E") setTool("entity");
+      // E used to be entity-tool but #246 introduces Erase as the canonical
+      // shortcut — entity placement now happens via the Entities layer +
+      // any paint-like tool, so the legacy E=entity binding is gone.
+      else if (e.key === "e" || e.key === "E") setTool("erase");
+      else if (e.key === "s" || e.key === "S") setTool("select");
+      else if (e.key === "m" || e.key === "M") setTool("move");
+      else if (e.key === "i" || e.key === "I") setTool("eyedropper");
       else if (e.key === "l" || e.key === "L") setTool("light");
       else if (e.key === "Escape") {
         setPrefabPopover(null);
@@ -1236,7 +1244,7 @@ export function GridEditor({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setLayer, setTool]);
 
   // Track wrapper size so the canvas matches its container.
   const [size, setSize] = useState({ w: 800, h: 480 });
