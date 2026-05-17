@@ -5,6 +5,14 @@ import type { DeclarativePrefab, PackManifest } from "./types";
 import { Vec2 } from "Libs/Vector";
 
 /**
+ * @deprecated PREFABS_EDITOR_ONLY (#290): the entire init-script
+ * code path here is on its way out. Prefabs collapse to pure
+ * component bundles; the engine drops `PrefabRegistry` + this
+ * module's init-script branches once the default-pack player
+ * migration lands per PE1–PE5. New pack work should NOT add
+ * `initScript` references — use a `Systems`/`Scripts` component on
+ * the spawned entity (WORLD_STATE.md §7 + §8) instead.
+ *
  * The shape an init-script's default export takes. Phase #196.
  *
  * Init scripts are regular pack scripts (compiled through the same

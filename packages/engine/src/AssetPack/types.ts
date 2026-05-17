@@ -287,15 +287,17 @@ export interface DeclarativePrefab {
   /** Optional one-liner shown in the editor's prefab list. */
   description?: string;
   /**
-   * Optional ES-module path (inside the pack) for a per-spawn init
-   * script. Hybrid declarative prefabs use this to mix static
-   * component data with imperative logic — the script's default
-   * export is invoked with `(entity, opts, api)` AFTER all the
-   * static `components` have been attached, so it can read live
-   * component values, register systems, attach pack-defined
-   * components, or roll in `opts`-driven dynamic data.
+   * @deprecated PREFABS_EDITOR_ONLY (#290): prefabs become pure
+   * component bundles. The `initScript` hybrid surface goes away —
+   * dynamic spawn-time setup migrates to either a `Systems`/`Scripts`
+   * component on the spawned entity (WORLD_STATE.md §7 + §8) or a
+   * pack boot script that does `world.spawn() + world.add(...)`
+   * directly. Default-pack's `player.initScript` is the last consumer
+   * and still ships pending the PE1–PE5 migration; remove this field
+   * + `registerDeclarativePrefabs`'s init-script code path once that
+   * lands. TODO(#290): drop after default-pack player migrates.
    *
-   * Authoring conventions:
+   * Authoring conventions (transitional):
    *  - The script is a regular pack-script (`.js` / `.ts` / `.tsx`)
    *    that default-exports `function(entity, opts, api): void`.
    *  - `.ts` / `.tsx` paths are compiled to `.js` by the pack
@@ -305,8 +307,6 @@ export interface DeclarativePrefab {
    *    still returns the (partially-initialized) entity with its
    *    static components attached. One bad initScript shouldn't
    *    take down a session.
-   *
-   * Phase #196 of `docs/PLAN.md`.
    */
   initScript?: string;
 }
