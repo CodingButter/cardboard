@@ -52,8 +52,72 @@ type LayerName = "walls" | "floors" | "ceiling";
 
 /** Mutation tool the GridEditor is currently in.  Driven by keyboard
  *  shortcuts (P = paint, E = entity, L = light) plus the toolbar
- *  buttons.  Defaults to `paint` so E3's behaviour is unchanged. */
-export type EditorTool = "paint" | "entity" | "light";
+ *  buttons.  Defaults to `paint` so E3's behaviour is unchanged.
+ *
+ *  The wider set (`select`, `move`, `eyedropper`, `erase`) is surfaced
+ *  by MapToolbar (#246 redesign) and routed through GridEditor's
+ *  pointer-down router. They're declared on the same union so the
+ *  MapView ↔ GridEditor interface stays in lockstep — narrowing back
+ *  to the paint subset is done at the GridEditor's tool dispatch
+ *  (`MapView.toMapTool` covers the reverse direction). */
+export type EditorTool =
+  | "paint"
+  | "entity"
+  | "light"
+  | "select"
+  | "move"
+  | "eyedropper"
+  | "erase";
+
+/**
+ * Selection payload pushed up from GridEditor to MapView's right-rail
+ * Cell Inspector. Captures the active cell coordinate, layer, and the
+ * resolved preset data the inspector renders. `presetOptions` is the
+ * palette catalogue (filtered by `showAnonymousPresets`) — used by the
+ * CellPreview override dropdowns so they stay in lockstep with the
+ * left-aside palette list.
+ */
+export interface MapSelectionInfo {
+  /** Cell the user clicked (grid coords, x,y in cells). */
+  selected: { x: number; y: number } | null;
+  /** Cell the cursor is hovering over (used for the status bar
+   *  fallback when no cell is "selected" yet). */
+  hover?: { x: number; y: number } | null;
+  /** Active layer at the time of the click. */
+  layer: LayerName;
+  /** Total entities in the scene — surfaced in the status bar. */
+  entityCount?: number;
+  /** Preset id painted on the active layer of this cell, or null. */
+  selectedPresetId: string | null;
+  /** Resolved preset data for the active-layer preset, or null. */
+  selectedPresetData: import("@two_5_d/engine").ResolvedPresetData | null;
+  /** Decoded object URL for the active-layer preset's texture, or null. */
+  selectedPresetTextureUrl?: string | null;
+  /** Preset id painted on the floor layer of this cell, or null. */
+  floorPresetId: string | null;
+  /** Resolved floor preset data, or null. */
+  floorPresetData: import("@two_5_d/engine").ResolvedPresetData | null;
+  floorPresetTextureUrl?: string | null;
+  /** Preset id painted on the ceiling layer of this cell, or null. */
+  ceilingPresetId: string | null;
+  /** Resolved ceiling preset data, or null. */
+  ceilingPresetData: import("@two_5_d/engine").ResolvedPresetData | null;
+  ceilingPresetTextureUrl?: string | null;
+  /** Palette catalogue for the CellPreview override dropdowns and the
+   *  PresetEditView floor / ceiling pickers. Each entry carries the
+   *  resolved preset data alongside the display label + source path so
+   *  consumers don't have to re-resolve. */
+  presetOptions: ReadonlyArray<{
+    id: string;
+    /** Display label — usually `data.label ?? id`. */
+    label: string;
+    data: import("@two_5_d/engine").ResolvedPresetData;
+    /** JSONC source path that owns this preset id (e.g.
+     *  `tilesheets/presets/walls.jsonc`). Used by Duplicate / Delete
+     *  flows and by the Preset-Edit save path. */
+    sourcePath: string;
+  }>;
+}
 
 /** Authored entity record on a scene.  `scene.entities[]` per
  *  `docs/plans/LIGHTING_ENTITIES_REFACTOR.md` §3.A.  R1 of that plan
@@ -145,6 +209,37 @@ export interface GridEditorProps {
    */
   showAnonymousPresets?: boolean;
   onShowAnonymousPresetsChange?: (next: boolean) => void;
+  /**
+   * Slot rendered above the canvas, inside GridEditor's own toolbar
+   * strip. MapView feeds in its MapToolbar (#280) so the Layer + Tool
+   * segmented controls anchor above the canvas only — not above the
+   * left palette aside. Optional; legacy callers just skip the slot.
+   */
+  toolbarSlot?: React.ReactNode;
+  /** Snap-to-grid toggle — paint mutations clamp to whole cells when
+   *  true. The toolbar owns the persisted state. */
+  snapToGrid?: boolean;
+  /** Active layer for paint operations + the right-rail Cell Inspector.
+   *  Threaded down so the toolbar + canvas stay in lockstep. */
+  gridLayer?: import("./MapToolbar").MapLayer;
+  onGridLayerChange?: (next: import("./MapToolbar").MapLayer) => void;
+  /** Active tool — paint / select / move / eyedropper / erase / etc. */
+  gridTool?: EditorTool;
+  onGridToolChange?: (next: EditorTool) => void;
+  /** Toolbar-side active preset for the paint brush. */
+  activePresetId?: string | null;
+  onActivePresetChange?: (id: string | null) => void;
+  /** Selection-state snapshot pushed up so MapView's Cell Inspector
+   *  + status bar can render the active cell's details. */
+  onMapSelectionChange?: (next: MapSelectionInfo | null) => void;
+  /** Select-tool right-click — opens MapView's cell context menu. */
+  onCellContextMenu?: (
+    payload: import("./MapContextMenu").CellContextMenuPayload,
+  ) => void;
+  /** Palette double-click — enter PresetEditView for the preset. */
+  onEditPreset?: (id: string) => void;
+  /** Palette right-click — opens MapView's preset context menu. */
+  onPresetContextMenu?: (id: string, x: number, y: number) => void;
 }
 
 /** Reasonable default-pack prefabs surfaced when the editor hasn't

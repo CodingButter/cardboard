@@ -163,3 +163,13 @@ export {
   findMode1WinnerForRole,
   type CascadedPostPass,
 } from "./Renderers/ShaderChainCascade";
+
+// Editor cell-preview engine — consumed by `apps/editor`'s
+// `CellPreview.tsx` via a dynamic import. Kept here so the editor
+// doesn't reach into engine internals via a deep path.
+export {
+  CellPreviewEngine,
+  type CellPreviewEngineOptions,
+  type PreviewScene,
+  type OrbitCamera,
+} from "./Preview";

@@ -75,6 +75,39 @@ export interface EditorViewportProps {
    * callback is silent.
    */
   onEngineStats?: (stats: import("./PlaytestOverlay").EngineStats) => void;
+  /**
+   * Optional toolbar slot rendered above the GridEditor canvas. MapView
+   * feeds in its MapToolbar (#280) so the layer + tool segmented
+   * controls live above the canvas, not above the left palette.
+   */
+  toolbarSlot?: React.ReactNode;
+  /** Snap-to-grid passthrough to the GridEditor. */
+  snapToGrid?: boolean;
+  /** Active layer + setter — threaded through to GridEditor so the
+   *  toolbar + canvas stay in lockstep. */
+  gridLayer?: import("./MapToolbar").MapLayer;
+  onGridLayerChange?: (next: import("./MapToolbar").MapLayer) => void;
+  /** Active tool + setter — same lockstep story as `gridLayer`. */
+  gridTool?: import("./GridEditor").EditorTool;
+  onGridToolChange?: (next: import("./GridEditor").EditorTool) => void;
+  /** Active palette preset for the brush. */
+  activePresetId?: string | null;
+  onActivePresetChange?: (id: string | null) => void;
+  /** Anon-preset palette visibility — bridged from MapView's
+   *  `useLocalStorage` state to GridEditor's palette filter. */
+  showAnonymousPresets?: boolean;
+  onShowAnonymousPresetsChange?: (next: boolean) => void;
+  /** Selection-state snapshot bubble-up. */
+  onMapSelectionChange?: (
+    next: import("./GridEditor").MapSelectionInfo | null,
+  ) => void;
+  /** Cell + palette context menus — same payload shapes the menu
+   *  components define. */
+  onCellContextMenu?: (
+    payload: import("./MapContextMenu").CellContextMenuPayload,
+  ) => void;
+  onEditPreset?: (id: string) => void;
+  onPresetContextMenu?: (id: string, x: number, y: number) => void;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
@@ -106,6 +139,20 @@ export function EditorViewport({
   spriteIds,
   onSceneRewrittenExternally,
   onEngineStats,
+  toolbarSlot,
+  snapToGrid,
+  gridLayer,
+  onGridLayerChange,
+  gridTool,
+  onGridToolChange,
+  activePresetId,
+  onActivePresetChange,
+  showAnonymousPresets,
+  onShowAnonymousPresetsChange,
+  onMapSelectionChange,
+  onCellContextMenu,
+  onEditPreset,
+  onPresetContextMenu,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror the iframe element through the parent-supplied ref so the
@@ -307,6 +354,20 @@ export function EditorViewport({
               );
               onSceneRewrittenExternally?.(path);
             }}
+            toolbarSlot={toolbarSlot}
+            snapToGrid={snapToGrid}
+            gridLayer={gridLayer}
+            onGridLayerChange={onGridLayerChange}
+            gridTool={gridTool}
+            onGridToolChange={onGridToolChange}
+            activePresetId={activePresetId}
+            onActivePresetChange={onActivePresetChange}
+            showAnonymousPresets={showAnonymousPresets}
+            onShowAnonymousPresetsChange={onShowAnonymousPresetsChange}
+            onMapSelectionChange={onMapSelectionChange}
+            onCellContextMenu={onCellContextMenu}
+            onEditPreset={onEditPreset}
+            onPresetContextMenu={onPresetContextMenu}
           />
         </div>
       ) : mode === "edit" ? (

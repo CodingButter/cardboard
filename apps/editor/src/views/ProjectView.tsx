@@ -37,6 +37,14 @@ import { ProjectSettingsModal } from "./ProjectSettingsModal";
 interface ProjectViewProps {
   projectId: string;
   onBackHome: () => void;
+  /**
+   * Optional controlled workflow-mode prop. The shell (EditorShell)
+   * supplies this from its outer tab strip so the workflow tab change
+   * doesn't force a remount of the project view. When omitted, the
+   * view falls back to its own localStorage-backed mode (legacy path
+   * used by routes that bypass the shell).
+   */
+  workflowMode?: WorkflowMode;
 }
 
 export type WorkflowMode = "scene" | "prefabs" | "scripts" | "assets" | "animation";
@@ -75,7 +83,7 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
+export function ProjectView({ projectId, onBackHome, workflowMode: controlledWorkflowMode }: ProjectViewProps) {
   const [meta, setMeta] = useState<ProjectMeta | null>(null);
   const [manifest, setManifest] = useState<PackManifest | null>(null);
   const [assets, setAssets] = useState<AssetMeta[]>([]);
@@ -96,7 +104,7 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
   // the page lands you back on the tab you were just on. Different
   // projects can remember different last-active modes independently.
   const workflowModeKey = `cardboard_editor_workflow_mode_${projectId}`;
-  const [workflowMode, setWorkflowModeState] = useState<WorkflowMode>(() => {
+  const [internalWorkflowMode, setWorkflowModeState] = useState<WorkflowMode>(() => {
     try {
       const saved = localStorage.getItem(workflowModeKey);
       // Migrate legacy values (Map → Scene, Entities → Prefabs tab
@@ -130,6 +138,9 @@ export function ProjectView({ projectId, onBackHome }: ProjectViewProps) {
     },
     [workflowModeKey],
   );
+  // Effective workflow mode: shell-controlled wins, otherwise the
+  // localStorage-backed internal state. See `ProjectViewProps`.
+  const workflowMode = controlledWorkflowMode ?? internalWorkflowMode;
 
   // Project Settings modal.
   const [settingsOpen, setSettingsOpen] = useState(false);

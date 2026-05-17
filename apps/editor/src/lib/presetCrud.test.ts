@@ -147,7 +147,6 @@ describe("autoNamePreset", () => {
       const id = autoNamePreset("foo", ["foo.000000"]);
       expect(id).toBe("foo_2");
     } finally {
-      // @ts-expect-error — restoring global.
       globalThis.crypto = realCrypto;
       Math.random = realRandom;
     }
