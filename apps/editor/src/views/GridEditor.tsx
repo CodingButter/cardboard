@@ -1254,29 +1254,46 @@ export function GridEditor({
                 : "Loading…"}
             </div>
           ) : null}
-          {filteredPresets.map((p) => (
-            <button
-              key={p.presetId}
-              onClick={() => setActivePreset(p.presetId)}
-              className={cn(
-                "flex items-center gap-2 w-full rounded px-2 py-1 text-left text-xs",
-                activePreset === p.presetId
-                  ? "bg-amber-500 text-zinc-950"
-                  : "hover:bg-zinc-800 text-zinc-200",
-              )}
-              title={p.presetId}
-            >
-              <span
-                className="block w-6 h-6 rounded border border-zinc-700 shrink-0"
-                style={{
-                  background: p.url
-                    ? `url("${p.url}") center/cover`
-                    : colorForPreset(p.presetId),
-                }}
-              />
-              <span className="truncate">{p.presetId}</span>
-            </button>
-          ))}
+          {filteredPresets.map((p) => {
+            const isAnon = p.kind === "anonymous";
+            const isActive = activePreset === p.presetId;
+            return (
+              <button
+                key={p.presetId}
+                onClick={() => setActivePreset(p.presetId)}
+                className={cn(
+                  "flex items-center gap-2 w-full rounded px-2 py-1 text-left text-xs",
+                  isActive
+                    ? "bg-amber-500 text-zinc-950"
+                    : isAnon
+                      ? "hover:bg-zinc-800 text-zinc-400"
+                      : "hover:bg-zinc-800 text-zinc-200",
+                )}
+                title={
+                  isAnon
+                    ? `${p.presetId} — Anonymous preset (per-cell variant)`
+                    : p.presetId
+                }
+              >
+                <span
+                  className="block w-6 h-6 rounded border border-zinc-700 shrink-0"
+                  style={{
+                    background: p.url
+                      ? `url("${p.url}") center/cover`
+                      : colorForPreset(p.presetId),
+                  }}
+                />
+                <span
+                  className={cn(
+                    "truncate",
+                    isAnon && !isActive && "italic",
+                  )}
+                >
+                  {p.presetId}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </aside>
 

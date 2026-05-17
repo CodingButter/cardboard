@@ -20,7 +20,9 @@ import { ProjectSettingsModal } from "./ProjectSettingsModal";
  *   - **Scene mode** (legacy "map") is pure: viewport (Play) +
  *     GridEditor (Edit) + a scene-list right rail. Manifest editing
  *     has moved into the Project Settings modal opened via the ⚙
- *     button in the header.
+ *     button in the header. The component file is still
+ *     `MapView.tsx` — only the user-facing tab name changed
+ *     (Map → Scene).
  *   - Other modes (Prefabs (legacy "entities"), Animation,
  *     Scripts/Assets placeholders) are unchanged.
  *

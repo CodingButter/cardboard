@@ -14,7 +14,6 @@ import { EditorViewport, type ViewportMode } from "./EditorViewport";
 import type { EditorTool, MapSelectionInfo, MutableScene } from "./GridEditor";
 import { MapToolbar, type MapLayer, type MapTool } from "./MapToolbar";
 import { PlaytestOverlay, type EngineStats } from "./PlaytestOverlay";
-import { PlaytestOverlay, type EngineStats } from "./PlaytestOverlay";
 import {
   MapContextMenu,
   type CellClipboardEntry,
@@ -175,29 +174,6 @@ export function MapView({
     "editor.palette.showAnonymous",
     false,
     (v): v is boolean => typeof v === "boolean",
-  );
-
-  // ── R4h — Playtest mode.
-  //
-  // `playtestActive` flips the MapView into "Playtest mode": a
-  // full-takeover overlay (`<PlaytestOverlay>`) renders on top of the
-  // existing Map layout. The iframe game-runner inside
-  // `<EditorViewport>` is NOT remounted — `EditorViewport` keeps the
-  // iframe mounted regardless of `mode`, and we additionally flip
-  // `mode` to "play" so the iframe is `visible` again (edit mode
-  // currently sets `invisible pointer-events-none`).
-  //
-  // §12 Q1 of EDITOR_REDESIGN.md: state survives across Edit ↔
-  // Playtest transitions; only the explicit Rerun button (or full
-  // reload) resets the world.
-  //
-  // `latestStats` is the most-recent engine-stats snapshot pushed by
-  // the iframe at ~10Hz (EDITOR_IFRAME.md I2 telemetry). We only set
-  // state while playtest is ACTIVE — the 10Hz push during normal Edit
-  // mode is wasted re-renders otherwise.
-  const [playtestActive, setPlaytestActive] = React.useState(false);
-  const [latestStats, setLatestStats] = React.useState<EngineStats | null>(
-    null,
   );
 
   // ── R4h — Playtest mode.
@@ -964,13 +940,6 @@ export function MapView({
             // inside EditorViewport. We bubble it through a ref-style
             // prop drilled down via EditorViewport (added below).
             onMapSelectionChange={setSelection}
-            // R4h — engine telemetry forwarded into the PlaytestOverlay
-            // (see below). We only stash the snapshot while Playtest
-            // mode is active so the 10Hz push doesn't trigger
-            // re-renders during normal editing.
-            onEngineStats={
-              playtestActive ? setLatestStats : undefined
-            }
             // R4h — engine telemetry forwarded into the PlaytestOverlay
             // (see below). We only stash the snapshot while Playtest
             // mode is active so the 10Hz push doesn't trigger
