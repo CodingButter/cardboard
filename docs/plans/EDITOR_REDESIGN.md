@@ -1930,41 +1930,124 @@ reads existing fields — no migration.
 ## 12. Open questions
 
 1. **Should the Playtest button replace the current Map mode's
-   Play/Edit toggle entirely, or live alongside it?** Playtest's
-   value is the debug overlays; the iframe-in-Map's value is
-   in-place authoring (paint a wall, immediately walk through
-   it). If Playtest replaces Map's play mode, authoring loop
-   becomes 2-click instead of 1-click. Lean: **alongside** —
-   Map's Edit/Play toggle stays for fast authoring, Playtest is
-   a dedicated debugging session.
+   Play/Edit toggle entirely, or live alongside it?** RESOLVED.
+   Per design discussion: drop Map's inline Play/Edit toggle.
+   Replace it with the **Cell Preview panel** that the Map.png
+   mockup already shows in the top-right (labelled "3D PREVIEW").
+   The preview re-renders live as the user edits a cell's preset
+   — reflectiveness, partial-wall config, emissive, etc. — with
+   optional rotation. This serves the tile-authoring loop better
+   than walking around does (cf. Substance Designer / Blender's
+   material-preview pattern).
 
-2. **Where does workflow-mode-per-project localStorage move
-   when Project Settings becomes a top-level tab?** Today the
-   modal opens regardless of mode. With Project as a tab, the
-   modal is a sub-surface of that tab — but it's also still
-   accessible from the cog IconButton in TopBar (which is mode-
-   independent). Should the cog always open the modal, or should
-   it switch to the Project tab if not already there? Lean:
-   **cog always opens modal** for muscle-memory continuity, even
-   though it's now a redundant entry point.
+   **Playtest** becomes the only "actually run the game" entry
+   point, accessed via the header button. **State is preserved**
+   across Edit ↔ Playtest transitions: player position, rotation,
+   entity ECS state, AI state, inventory — all kept. Live edits
+   apply on the fly. Only an explicit "Rerun" button (or full
+   reload) resets the world. The iframe never unmounts — Map mode
+   hides it via `invisible pointer-events-none`; Playtest shows
+   it with the debug-overlay chrome. The "2-click cost of going
+   to Playtest" disappears because no work is lost.
 
-3. **Logo plaque — keep the red rounded-xl pill, swap the
-   wordmark.** RESOLVED. Per design discussion: keep the red
-   plaque (it pops nicely against the amber-on-zinc body), swap
-   the wordmark from "RAYCAST" to "CARDBOARD", and replace the
-   placeholder Box glyph with a user-provided cardboard icon
-   (TBD — incoming via `Editor Design/`). Red is a brand accent,
-   not a Raycast-mode reference. Amber stays as the UI accent
-   for everything else (sliders, buttons, action states).
+   Implementation: R4b (Map view) replaces the Play/Edit toggle
+   with the cell-preview rail. R4h (Playtest) wires the state-
+   preserved iframe show/hide + the Rerun button. Removes the
+   `ViewportMode` type from EditorViewport's props once Playtest
+   subsumes "play."
 
-4. **Do existing engine-side modals (InventoryScreen,
-   SettingsScreen, MainMenu in default-pack) need a coordinated
-   visual refresh?** They live in `packages/default-pack/scripts/ui/`
-   and are pack content, not editor content. Visually they're
-   already amber-themed and they live inside the iframe at
-   runtime. Coordinating could yield a more unified look but
-   adds scope. Lean: **defer to a follow-up plan** — pack-side
-   UI gets its own doc once the editor is stable.
+2. **Project Settings access via the cog icon — what does the
+   cog actually do?** RESOLVED. Per design discussion: complete
+   split between project-scoped and editor-scoped config.
+
+   - **Project tab** = project-scoped config that lives in the
+     `.apg` and travels with the pack — manifest metadata,
+     dependencies, export modes, advanced flags, build
+     configuration, validation, log. No modal; the tab IS the
+     surface. ProjectSettingsModal (Manifest/Deps/Export/Advanced)
+     dissolves into this tab's sub-surfaces.
+   - **Cog icon → Editor Settings modal** = editor-scoped
+     preferences that live in localStorage and apply across all
+     projects — theme, accent color, keybindings, panel
+     visibility, auto-save interval, recent-project list cap,
+     telemetry opt-in, future store credentials.
+
+   Zero overlap. Matches the convention of VSCode / Photoshop /
+   Blender, where the cog never opens project settings — only
+   editor preferences. Implementation: R4f rebuilds the existing
+   `ProjectSettingsModal.tsx` AS the Project tab; a new
+   `EditorSettingsModal.tsx` (probably small) is what the cog
+   opens. R3 wires the cog button to the new modal.
+
+3. **Logo branding — drop the red plaque, use the cardboard hex
+   logo image with wordmark.** RESOLVED. User-provided logo at
+   `Editor Design/logo.png` is the canonical brand mark: a
+   hexagonal cardboard box opened to reveal a top-down dungeon
+   floor plan with an amber light pour from a corner. Warm
+   cardboard browns + amber accent pair naturally with the
+   editor's amber-on-zinc theme. The bright-red plaque from the
+   GPT mockups would clash with the logo's warm palette and is
+   discarded. TopBar layout: 28-32px logo image + "CARDBOARD"
+   wordmark in `text-lg` next to it (or wordmark-only at very
+   small sizes). Favicon: the hex silhouette + amber pour at
+   16/32/48 — the inner dungeon detail loses but the silhouette
+   still reads. Amber stays as the UI accent everywhere else
+   (sliders, buttons, action states).
+
+4. **Engine vs pack UI boundary — WHICH modals does the engine
+   ship, which belong to packs?** RESOLVED. Per design discussion:
+   the architecture today is wrong. The R3 follow-up moved
+   *everything* into default-pack including SettingsScreen, which
+   means a pack that doesn't depend on default-pack has no
+   Settings modal at all. The clean split:
+
+   **Engine ships (universal to every game built on cardboard):**
+   - Default **Settings** modal — graphics/audio/controls bindings.
+     Every game needs settings access. Lives at
+     `packages/engine/src/UI/DefaultSettingsScreen.tsx`. Engine
+     auto-registers via the same `api.ui.registerModal` path that
+     packs use; packs can override by registering "settings" again.
+   - Default **Console** (CONSOLE.md / #199) — universal dev tool.
+     Lives at `packages/engine/src/UI/DefaultConsoleScreen.tsx`.
+
+   **Default-pack ships (game-specific to its Doom-style shooter):**
+   - InventoryScreen, hotbar, minimap, ammo counter, reticle,
+     stats overlay, MainMenu. Stay where they are (under
+     `packages/default-pack/scripts/ui/` + `scripts/systems/`).
+     Packs that don't depend on default-pack have NO inventory /
+     hotbar / minimap — those are game concepts, not engine
+     concepts.
+
+   Implementation impact: R4 includes moving SettingsScreen from
+   default-pack back into the engine (partial undo of one R3-
+   follow-up decision, with the correct architectural reasoning
+   this time). Default-pack scripts/ui/SettingsScreen.tsx is
+   either deleted or kept as an example "this is how a pack
+   would override the engine's settings modal."
+
+   Default-pack's modals **adopt the new primitives** (Slider,
+   ToggleSwitch, etc.) so they look consistent with the editor.
+   Not a layout redesign — just a primitive-adoption pass.
+
+   **Related new direction (separate task #212)**: visual
+   **UI Builder tab** for authoring pack UI without writing
+   TSX — drag-drop builder outputs structured JSON UI trees that
+   `api.ui.renderTree()` interprets at runtime. Substantial
+   feature comparable to AE2 in scope; gets its own plan doc
+   (`docs/plans/UI_BUILDER.md`). Adds an 8th primary workflow
+   tab (Home / Map / Entities / Assets / Scripts / Animation /
+   UI Builder / Project) — slot allocated as **R4i** in the
+   editor-redesign phase grouping.
+
+   **Related new direction (separate task #212)**: visual
+   **UI Builder tab** for authoring pack UI without writing
+   TSX — drag-drop builder outputs structured JSON UI trees that
+   `api.ui.renderTree()` interprets at runtime. Substantial
+   feature comparable to AE2 in scope; gets its own plan doc
+   (`docs/plans/UI_BUILDER.md`). Adds an 8th primary workflow
+   tab (Home / Map / Entities / Assets / Scripts / Animation /
+   UI Builder / Project) — slot allocated as **R4i** in the
+   editor-redesign phase grouping.
 
 5. **For Playtest's stats panel — does this require new ModAPI
    surfaces (`api.debug.*`) for things like draw-call counts,

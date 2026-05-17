@@ -23,6 +23,112 @@ Status vocabulary:
 
 ---
 
+## 2026-05-16 — Engine vs pack UI boundary (architectural correction)
+
+R3 follow-up moved EVERY pack UI surface (InventoryScreen,
+SettingsScreen, hotbar, minimap, etc.) out of the engine into
+default-pack. Correct in principle (engine knows nothing about
+gameplay UI) but went too far — it left every non-default-pack
+game with NO settings modal at all.
+
+Clean split going forward:
+- **Engine ships** the universal-to-every-game stuff: default
+  Settings modal (graphics/audio/controls), default Console
+  (#199). Both override-able via `api.ui.registerModal`.
+- **Default-pack ships** the game-specific stuff: Inventory,
+  hotbar, minimap, ammo, reticle, MainMenu. These are concepts
+  of a Doom-style shooter, not concepts of the engine.
+
+R4 of the editor redesign includes moving SettingsScreen back
+into `packages/engine/src/UI/`. Default-pack version becomes
+either removed or kept as a worked example of overriding.
+
+Status: Captured. Implementation in R4 of EDITOR_REDESIGN.md.
+
+Refs: [editor-redesign](./plans/EDITOR_REDESIGN.md) §12 Q4,
+[engine-pack-split](./plans/ENGINE_PACK_SPLIT.md) R3 follow-up.
+
+---
+
+## 2026-05-16 — UI Builder tab (visual pack-UI authoring)
+
+New top-level editor tab for visual authoring of pack UI —
+HUDs, modals, notifications, dialogue boxes. Drag-drop builder
+outputs structured JSON UI trees that the engine's new
+`api.ui.renderTree(json)` helper interprets at runtime.
+Hot-reloadable, no compile step, accessible to non-developers.
+Code escape hatch: `api.ui.registerModal(name, Component)`
+still works for hand-written Preact components.
+
+Mockup at `Editor Design/UIDeisgner.png` shows the design
+direction. Comparable in scope to AE2 (FBX → spritesheet).
+
+Status: Captured. Plan doc + impl tracked as task #212.
+
+---
+
+## 2026-05-16 — Editor redesign Q1: drop Map's Play/Edit toggle
+
+In place of the inline Play/Edit toggle in Map mode, use the
+Cell Preview panel (from the Map.png mockup top-right) — re-
+renders live as the user edits a cell's preset (reflectiveness,
+partial-wall, emissive). Substance Designer / Blender material-
+preview pattern. Playtest in the header becomes the only "run
+the game" entry point, but state is **preserved across Edit ↔
+Playtest** so the "2-click cost" disappears. Iframe never
+unmounts; "Rerun" button is the explicit reset.
+
+Status: Resolved. Implementation in R4b (Map) + R4h (Playtest).
+
+Refs: [editor-redesign](./plans/EDITOR_REDESIGN.md) §12 Q1.
+
+---
+
+## 2026-05-16 — Editor redesign Q2: cog ≠ project settings
+
+The TopBar cog icon is for **editor preferences** (theme,
+keybindings, panel visibility, etc. — stored in localStorage,
+user-scoped). The **Project tab** owns project-scoped config
+(manifest, dependencies, export, build — stored in the .apg,
+travels with the pack). Zero overlap. Matches VSCode /
+Photoshop / Blender convention.
+
+Status: Resolved. Implementation in R3 (cog wiring) + R4f
+(Project tab replaces the existing ProjectSettingsModal).
+
+---
+
+## 2026-05-16 — Cardboard logo
+
+User-provided logo at `Editor Design/logo.png`: hexagonal
+cardboard box opened to reveal a top-down dungeon floor plan
+with an amber light pour from a corner. Warm cardboard brown
++ amber accent (pairs with editor's existing palette). Drops
+the red Raycast-style plaque from the GPT mockups.
+
+Status: Shipped (in EDITOR_REDESIGN.md Q3 resolution).
+
+---
+
+## 2026-05-16 — Editor redesign (8-tab + new chrome)
+
+Major editor visual overhaul. New chrome (TopBar + PrimaryTabs
++ StatusBar). 8 primary tabs: Home / Map / Entities / Assets /
+Scripts / Animation / UI Builder / Project. Playtest is a
+TopBar button (full takeover w/ debug overlays), not a tab.
+Dense IDE aesthetic, amber accents, hand-rolled primitives
+(no Radix/shadcn deps). Plan doc EDITOR_REDESIGN.md
+(2048 lines).
+
+Phases: R1 plan doc (done), R2 primitives, R3 shell, R4a-i
+per-view migrations (parallel-safe), R5 polish.
+
+Status: R1 shipped. R2-R5 queued.
+
+Refs: [editor-redesign](./plans/EDITOR_REDESIGN.md).
+
+---
+
 ## 2026-05-16 — Procedural assets (image + audio recipe DSL)
 
 Tiny recipe files (~200 bytes) replace rasterized assets (~50 KB).
