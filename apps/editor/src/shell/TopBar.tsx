@@ -156,11 +156,17 @@ export function TopBar({
         <SaveBadge state={saveState} />
         <Button
           variant={playtestActive ? "danger" : "primary"}
-          size="sm"
+          size="md"
           onClick={onTogglePlaytest}
           disabled={playtestDisabled}
+          leadingIcon={
+            playtestActive ? (
+              <Square size={14} className="fill-current" />
+            ) : (
+              <Play size={14} className="fill-current" />
+            )
+          }
           className={cn(
-            "gap-2",
             // When playtest is active, give the button a Stop-like
             // affordance: outlined red border + brighter focus ring
             // so it reads as "click to exit" rather than "click to
@@ -177,45 +183,40 @@ export function TopBar({
                 : "Run the pack in an embedded playtest viewport"
           }
         >
-          {playtestActive ? (
-            <Square size={14} className="fill-current" />
-          ) : (
-            <Play size={14} className="fill-current" />
-          )}
           {playtestActive ? "Stop" : "Playtest"}
         </Button>
         <Button
           variant="secondary"
-          size="sm"
+          size="md"
           onClick={onExport}
           disabled={!exportAvailable}
-          className="gap-2 border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+          leadingIcon={<Upload size={14} />}
+          className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
           title={
             exportAvailable ? "Export pack to .apg" : NOT_AVAILABLE_HINT
           }
         >
-          <Upload size={14} />
           Export
         </Button>
         <Button
           variant="secondary"
-          size="sm"
+          size="md"
           onClick={onSave}
           disabled={!saveAvailable}
-          className="gap-2"
+          leadingIcon={<SaveIcon size={14} />}
           title={
             saveAvailable
               ? "Save the current edit (Ctrl/Cmd+S)"
               : NOT_AVAILABLE_HINT
           }
         >
-          <SaveIcon size={14} />
           Save
         </Button>
         <IconButton
           icon={<Settings size={16} />}
           tooltip="Editor settings"
           onClick={onOpenSettings}
+          size="md"
         />
       </div>
     </header>
