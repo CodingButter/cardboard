@@ -4,7 +4,7 @@
  * Single source of truth for composed surface classes used by editor
  * pages and primitives. Pages reference named classes
  * (`.panel-surface`, `.button-primary`, `.tab-strip-item--active`,
- * `.scroll-amber`, etc.) instead of repeating long Tailwind utility
+ * `.section-eyebrow`, etc.) instead of repeating long Tailwind utility
  * chains. Retune here once → propagates everywhere.
  *
  * Sources:
@@ -403,32 +403,15 @@
 .divider-v { @apply w-px h-full bg-zinc-800; }
 .divider-h--strong { @apply h-px w-full bg-zinc-700; }
 
-/* ───────────────────────────────────────────────────────────────────
- * Scrollbars
- *   The editor-wide selector in index.css (`* { ... }`) already
- *   applies the amber-on-zinc treatment globally. `.scroll-amber`
- *   exists as an explicit class so a component can opt back in on
- *   a surface that resets scrollbar styling (e.g. iframe content,
- *   Monaco). Same visual contract as `.cardboard-scroll` in
- *   apps/game/index.css.
- * ─────────────────────────────────────────────────────────────────── */
-
-.scroll-amber {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(180, 83, 9, 0.7) transparent;
-}
-.scroll-amber::-webkit-scrollbar { width: 10px; height: 10px; }
-.scroll-amber::-webkit-scrollbar-track { background: transparent; }
-.scroll-amber::-webkit-scrollbar-thumb {
-  background-color: rgba(180, 83, 9, 0.7);
-  border-radius: 5px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.scroll-amber::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(217, 119, 6, 0.9);
-}
-.scroll-amber::-webkit-scrollbar-corner { background: transparent; }
+/*
+ * Scrollbars: deliberately NOT defined here. The global `* { ... }`
+ * selector in index.css already applies the amber-on-zinc treatment
+ * to every scrollable surface in the editor. A previous `.scroll-amber`
+ * class block was removed during Phase 0 audit (duplicate of the global
+ * selector, zero callers). If an iframe / Monaco surface ever needs to
+ * opt back in after resetting scrollbar styling, reintroduce the class
+ * here at that time.
+ */
 
 /* ───────────────────────────────────────────────────────────────────
  * Asset thumbnails + previews

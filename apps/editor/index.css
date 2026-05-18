@@ -14,7 +14,7 @@
  * Editor design-system class library (Phase 0). Composes the tokens
  * declared in the `@theme` block below into semantic class names
  * (`.panel-surface-rounded`, `.button-primary`, `.tab-strip-item--active`,
- * `.scroll-amber`, etc.) that pages and primitives reference instead
+ * `.section-eyebrow`, etc.) that pages and primitives reference instead
  * of repeating Tailwind utility chains. Imported after Tailwind so the
  * `@apply` directives resolve.
  */
@@ -97,13 +97,13 @@
   gap: var(--gap-section);
 }
 
-@utility uppercase-label {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.75rem;
-  color: var(--color-fg-muted);
-  font-weight: 500;
-}
+/*
+ * `uppercase-label` removed during Phase 0 audit — duplicated the
+ * intent of `.section-eyebrow` in design-system.css (small-caps
+ * section label). No callers existed for either, so the design-system
+ * vocabulary won. If a 12px / fg-muted variant is needed later,
+ * add a `.section-eyebrow--lg` modifier in design-system.css.
+ */
 
 @utility panel-surface {
   background: var(--color-bg-panel);
