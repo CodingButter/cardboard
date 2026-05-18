@@ -12,10 +12,6 @@ import {
   DockPanelHeaderOrnamentsContext,
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
-import {
-  WorkspacePanelContext,
-  WORKSPACE_PANEL_ID,
-} from "./WorkspacePanel";
 
 /**
  * DockShell — the editor's React wrapper around `<DockviewReact/>`.
@@ -111,6 +107,12 @@ export interface DockShellProps {
   /** Optional className for the dockview container (e.g. to force a
    *  specific height). */
   readonly className?: string;
+  /** Optional external ref filled with the live DockviewApi on ready.
+   *  Pages that mount a sibling component which calls api.fromJSON /
+   *  api.toJSON / api.addPanel (e.g. the Workspace rail's Layouts and
+   *  Docks modals) pass the same ref through here so the two surfaces
+   *  share a single api instance. */
+  readonly apiRef?: React.MutableRefObject<DockviewApi | null>;
 }
 
 /**
@@ -303,6 +305,7 @@ export function DockShell({
   defaultLayout,
   onLayoutChange,
   className,
+  apiRef: externalApiRef,
 }: DockShellProps) {
   const { initial, save } = useDockLayoutPersistence(storageKey);
 
@@ -318,8 +321,11 @@ export function DockShell({
     return map;
   }, [panels]);
 
-  // Hold the api so we can persist on layout change.
-  const apiRef = React.useRef<DockviewApi | null>(null);
+  // Hold the api so we can persist on layout change. If the caller
+  // passed an external apiRef (e.g. so a sibling Workspace rail can
+  // share the same api), populate that too.
+  const internalApiRef = React.useRef<DockviewApi | null>(null);
+  const apiRef = externalApiRef ?? internalApiRef;
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
@@ -351,210 +357,20 @@ export function DockShell({
         }
       }
 
-      // ── Workspace safety net ──────────────────────────────────────
-      //
-      // Workspace v1.5: the rail is a regular dockview panel — it can
-      // be closed, popped out, and dragged like any other. This safety
-      // net only re-adds the panel if a saved layout legitimately
-      // dropped it (so the user is never stranded without their
-      // layout-controls rail). The TopBar "Show Workspace" button is
-      // the explicit user-facing escape hatch.
-      const WORKSPACE_DEFAULT_WIDTH = 40;
-      const ensureWorkspace = () => {
-        if (!panels.some((p) => p.id === WORKSPACE_PANEL_ID)) return;
-        if (api.getPanel(WORKSPACE_PANEL_ID)) return;
-        try {
-          api.addPanel({
-            id: WORKSPACE_PANEL_ID,
-            component: WORKSPACE_PANEL_ID,
-            title: "Workspace",
-            params: {
-              pageId: storageKey.split("::")[0] ?? "default",
-              storageKey,
-            },
-            position: { direction: "left" },
-            // Rail is locked to a 40px strip on the docked axis from
-            // the moment the panel is created — dockview's gridview
-            // defaults a minimum of ~100px when these aren't set, so
-            // initialWidth alone leaves the rail at 100px. Passing
-            // min + max on the addPanel options bypasses that default.
-            // The opposite axis stays loose (minimum 40, no max) so
-            // the rail still flexes to its container along the long
-            // edge. syncWorkspaceOrientation re-asserts these when
-            // the user drags the rail to a different edge.
-            initialWidth: WORKSPACE_DEFAULT_WIDTH,
-            minimumWidth: WORKSPACE_DEFAULT_WIDTH,
-            maximumWidth: WORKSPACE_DEFAULT_WIDTH,
-            minimumHeight: WORKSPACE_DEFAULT_WIDTH,
-          });
-        } catch {
-          // Adding the panel failed — surface nothing to the user;
-          // they can still navigate away and back to reset.
-        }
-      };
-      ensureWorkspace();
-      // Persist the post-ensureWorkspace state once so a fresh load
-      // (no existing entry) saves the workspace-included layout
-      // immediately. Without this the dockLayouts slice stays empty
-      // until the user triggers a real layout change.
+      // Persist the post-load state once so a fresh load (no existing
+      // entry) saves the layout immediately. Without this the
+      // dockLayouts slice stays empty until the user triggers a real
+      // layout change.
       try {
         save(api);
       } catch {
         // ignore — first persist is best-effort
       }
 
-      // ── Workspace orientation sync ──────────────────────────────────
-      //
-      // Whenever the workspace group's orientation flips (user drags it
-      // from a left/right edge to a top/bottom edge or vice versa), we
-      // update TWO things in tandem:
-      //
-      //   1. Header position. dockview-core exposes
-      //      `group.api.setHeaderPosition()` / `getHeaderPosition()`
-      //      (see .../api/dockviewGroupPanelApi.d.ts lines 44-45).
-      //      We map orientation → header edge so the drag-handle tab
-      //      always sits "after" the icons:
-      //        - vertical dock (left/right edge) → header at 'bottom'
-      //        - horizontal dock (top/bottom edge) → header at 'right'
-      //
-      //   2. Size constraints. The rail is supposed to be a fixed 40px
-      //      strip — not resizable. We lock the size by setting both
-      //      min and max on the constrained axis to the same value:
-      //        - vertical rail → minWidth = maxWidth = 40 (also minH 40)
-      //        - horizontal rail → minH = maxH = 40 (also minW 40)
-      //      dockview's gridview respects these constraints; the
-      //      splitter rendered alongside the panel becomes inert
-      //      because there's no slack to redistribute.
-      //
-      // Orientation detection: there's no public orientation API on
-      // dockview's panel/group surface, so we infer from the measured
-      // width vs height of the group. width >= height → landscape.
-      // Cached last orientation. setConstraints + setSize only run
-      // when orientation ACTUALLY flips (vertical rail ↔ horizontal
-      // rail). Running them on every onDidLayoutChange event creates
-      // a feedback loop during drag — each setSize fires another
-      // layout change, which fires this handler, which calls setSize
-      // again — and Chrome eventually OOMs the tab ("Aw, Snap"). The
-      // cache breaks that loop: same orientation = no-op.
-      let lastOrientation: "landscape" | "portrait" | null = null;
-      let applyingSyncWork = false;
-
-      const syncWorkspaceOrientation = () => {
-        if (applyingSyncWork) return;
-        const panel = api.getPanel(WORKSPACE_PANEL_ID);
-        if (!panel) return;
-        const group = panel.group;
-        if (!group) return;
-        const w = group.api.width;
-        const h = group.api.height;
-        if (typeof w !== "number" || typeof h !== "number") return;
-        // Skip if the panel hasn't been laid out yet — w or h being
-        // zero means dockview is still bootstrapping. Earlier `w >= h`
-        // returned 0>=0 = true for the initial render, which
-        // incorrectly latched the orientation cache to "landscape"
-        // and pinned height instead of width — left the rail at
-        // dockview's 100px gridview default and the constraints never
-        // recovered.
-        if (w === 0 || h === 0) return;
-        const orientation: "landscape" | "portrait" =
-          w > h ? "landscape" : "portrait";
-        if (orientation === lastOrientation) return;
-        lastOrientation = orientation;
-        const isLandscape = orientation === "landscape";
-        const desired: "bottom" | "right" = isLandscape ? "right" : "bottom";
-        applyingSyncWork = true;
-        try {
-          const current = group.api.getHeaderPosition();
-          if (current !== desired) group.api.setHeaderPosition(desired);
-        } catch {
-          // Older dockview build or transient state — ignore.
-        }
-        try {
-          panel.api.setConstraints(
-            isLandscape
-              ? {
-                  minimumHeight: WORKSPACE_DEFAULT_WIDTH,
-                  maximumHeight: WORKSPACE_DEFAULT_WIDTH,
-                  minimumWidth: WORKSPACE_DEFAULT_WIDTH,
-                }
-              : {
-                  minimumWidth: WORKSPACE_DEFAULT_WIDTH,
-                  maximumWidth: WORKSPACE_DEFAULT_WIDTH,
-                  minimumHeight: WORKSPACE_DEFAULT_WIDTH,
-                },
-          );
-          // The snap to 40px is layered across three attempts because
-          // dockview's gridview ignores size changes in several
-          // post-drag-drop states:
-          //   - synchronous call: gridview is still settling splitter
-          //     weights → setSize silently dropped
-          //   - panel.api.setSize: scoped to the panel inside its
-          //     group; sometimes ignored when the group's slot in the
-          //     parent split is what actually needs resizing
-          //   - group.api.setSize: addresses the group's grid cell
-          //     directly, which is what the splitter clamps when the
-          //     user nudges it (the click-to-snap behaviour user sees)
-          // We call both APIs across two rAF frames, then force a
-          // full re-layout to make dockview apply the new constraints.
-          requestAnimationFrame(() => {
-            try {
-              const size = isLandscape
-                ? { height: WORKSPACE_DEFAULT_WIDTH }
-                : { width: WORKSPACE_DEFAULT_WIDTH };
-              panel.api.setSize(size);
-              try {
-                panel.group?.api.setSize(size);
-              } catch {
-                // ignore — group api shape can shift between versions
-              }
-              // Forcibly re-evaluate the entire dock's layout so the
-              // new constraints clamp the panel without waiting for
-              // user interaction with the splitter.
-              try {
-                api.layout(api.width, api.height, true);
-              } catch {
-                // ignore
-              }
-            } catch {
-              // ignore — panel may have been removed
-            }
-            // Belt-and-braces — second rAF in case the first ran while
-            // gridview was still settling.
-            requestAnimationFrame(() => {
-              try {
-                panel.api.setSize(
-                  isLandscape
-                    ? { height: WORKSPACE_DEFAULT_WIDTH }
-                    : { width: WORKSPACE_DEFAULT_WIDTH },
-                );
-                api.layout(api.width, api.height, true);
-              } catch {
-                // ignore
-              }
-            });
-          });
-        } catch {
-          // ignore
-        } finally {
-          // Allow further syncs after the rAF drains so the
-          // setSize-triggered onDidLayoutChange we'll emit can't
-          // re-enter the function before we exit the current pass.
-          requestAnimationFrame(() => {
-            applyingSyncWork = false;
-          });
-        }
-      };
-      // Initial sync after layout has settled.
-      syncWorkspaceOrientation();
-
       // Persist on every layout change. Cheap enough that debouncing
       // isn't necessary — the JSON is tiny and writes are synchronous.
       const layoutSub = api.onDidLayoutChange(() => {
         save(api);
-        // The workspace group's dimensions / location may have just
-        // changed (resize, dock move). Re-sync the header position so
-        // the tab strip lives on the correct edge.
-        syncWorkspaceOrientation();
         if (onLayoutChange) {
           try {
             onLayoutChange(api.toJSON());
@@ -870,40 +686,17 @@ export function DockShell({
       //
       // The Workspace rail's Reset button clears the persisted layout
       // from the store and dispatches this event on `window`. We
-      // re-apply the default layout (which always includes the
-      // workspace panel) so the user sees the page-default
-      // configuration restored.
+      // re-apply the page's default layout JSON.
       const onReset = (ev: Event) => {
         const detail = (ev as CustomEvent<{ storageKey?: string }>).detail;
         if (!detail || detail.storageKey !== storageKey) return;
         try {
           api.fromJSON(defaultLayout);
-          ensureWorkspace();
         } catch {
           // ignore
         }
       };
       window.addEventListener("cardboard:reset-workspace", onReset);
-
-      // ── Show-workspace event ─────────────────────────────────────
-      //
-      // The TopBar "Show Workspace" button dispatches this; if the
-      // workspace panel is missing (shouldn't happen because of the
-      // safety net but possible during transition states), we
-      // re-add it. Otherwise we focus it for a visual ping.
-      const onShow = () => {
-        const existing = api.getPanel(WORKSPACE_PANEL_ID);
-        if (existing) {
-          try {
-            existing.focus();
-          } catch {
-            // ignore
-          }
-        } else {
-          ensureWorkspace();
-        }
-      };
-      window.addEventListener("cardboard:show-workspace", onShow);
 
       // Clean up on unmount.
       return () => {
@@ -914,7 +707,6 @@ export function DockShell({
         willDragGroupSub.dispose();
         onDidDropSub.dispose();
         window.removeEventListener("cardboard:reset-workspace", onReset);
-        window.removeEventListener("cardboard:show-workspace", onShow);
         window.removeEventListener("pointermove", onPointerMove, true);
         window.removeEventListener("pointerup", onPointerUp, true);
         window.removeEventListener("dragend", onDragEnd, true);
@@ -922,7 +714,7 @@ export function DockShell({
         groupCleanups.clear();
       };
     },
-    [defaultLayout, initial, onLayoutChange, panels, save, storageKey],
+    [defaultLayout, initial, onLayoutChange, panels, save, storageKey, apiRef],
   );
 
   // Build the icon/controls map for `DockPanelHeader` to read from
@@ -939,46 +731,29 @@ export function DockShell({
     [panels],
   );
 
-  // Surface the live api ref + panel registry to the WorkspacePanel
-  // via context. The workspace rail needs both to (a) snapshot the
-  // current layout into a preset, (b) list available panels in the
-  // Panel Packer flyout, and (c) re-mount panels via api.addPanel.
-  // We can't pass these through dockview's params (api isn't
-  // serialisable; registry contains React components).
-  const workspaceCtxValue = React.useMemo(
-    () => ({ api: apiRef.current, registry: panels, apiRef }),
-    [panels],
-  );
-
   return (
     <div
       className={`dockview-theme-cardboard h-full w-full min-h-0 ${className ?? ""}`}
     >
-      <WorkspacePanelContext.Provider value={workspaceCtxValue}>
-        <DockPanelHeaderOrnamentsContext.Provider value={ornaments}>
-          <DockviewReact
-            components={components}
-            onReady={handleReady}
-            // When a group contains exactly one panel, render its tab
-            // strip full-width — combined with our custom
-            // `defaultTabComponent`, that single tab reads as a panel
-            // header bar (see Editor Design/Entities.png). Multi-panel
-            // groups revert to the narrow-tab look automatically.
-            singleTabMode="fullwidth"
-            // Every panel uses our `DockPanelHeader` renderer for its
-            // tab unless it explicitly specifies a different
-            // `tabComponent`. We pass the component directly (not a
-            // string id) because dockview-react accepts a React function
-            // component for `defaultTabComponent`.
-            defaultTabComponent={DockPanelHeader}
-            // Keep dockview's default tab close button hidden by default —
-            // editor panels are part of the page layout, not user-spawned
-            // documents the user is meant to dismiss. Pages can opt into
-            // closability per-panel by overriding this in their layout JSON.
-            disableDnd={false}
-          />
-        </DockPanelHeaderOrnamentsContext.Provider>
-      </WorkspacePanelContext.Provider>
+      <DockPanelHeaderOrnamentsContext.Provider value={ornaments}>
+        <DockviewReact
+          components={components}
+          onReady={handleReady}
+          // When a group contains exactly one panel, render its tab
+          // strip full-width — combined with our custom
+          // `defaultTabComponent`, that single tab reads as a panel
+          // header bar (see Editor Design/Entities.png). Multi-panel
+          // groups revert to the narrow-tab look automatically.
+          singleTabMode="fullwidth"
+          // Every panel uses our `DockPanelHeader` renderer for its
+          // tab unless it explicitly specifies a different
+          // `tabComponent`. We pass the component directly (not a
+          // string id) because dockview-react accepts a React function
+          // component for `defaultTabComponent`.
+          defaultTabComponent={DockPanelHeader}
+          disableDnd={false}
+        />
+      </DockPanelHeaderOrnamentsContext.Provider>
     </div>
   );
 }

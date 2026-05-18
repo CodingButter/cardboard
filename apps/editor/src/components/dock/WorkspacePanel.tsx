@@ -1,5 +1,5 @@
 import React from "react";
-import type { DockviewApi, IDockviewPanelProps } from "dockview";
+import type { DockviewApi } from "dockview";
 import {
   RotateCcw,
   Boxes,
@@ -15,50 +15,48 @@ import { DocksModal } from "./DocksModal";
 import type { DockPanelDef } from "./DockShell";
 
 /**
- * WorkspacePanel — the workspace rail (v1.5).
+ * WorkspaceRail — a fixed 40px-wide vertical rail that sits to the
+ * LEFT of the page's DockShell.
  *
- * No longer pinned: workspace is a regular dockview panel — closable,
- * popoutable, splitter-resizable. The rail still starts at 48px wide
- * via `initialWidth` in `ensureWorkspace`, and the auto-restore safety
- * net + TopBar "Show Workspace" button bring it back if the user
- * closes it.
+ * We previously tried to host the rail as a dockview panel so the user
+ * could move it, resize it, dock it horizontally, pop it out, etc.
+ * Every flavour of that hit dockview's gridview enforcing different
+ * constraints than ours, layout-change feedback loops, and orientation
+ * snap problems that fought the splitter on every drag. The rail is
+ * fundamentally page chrome — not a panel — and trying to model it
+ * inside the docking system was wrong.
  *
- * Rail contents (top→bottom vertical / left→right horizontal):
+ * New shape: a plain React component the page renders alongside
+ * `<DockShell/>` as a sibling. No drag handle, no resize splitter, no
+ * popout. The rail's children stay the same:
  *   1. Layouts button   → opens LayoutsModal
  *   2. Docks button     → opens DocksModal
- *   3. Reset Layout     → clears saved layout + re-applies default
+ *   3. Reset Layout     → clears saved layout for this page
  *   4. Flex spacer
- *   5. Settings cog     → page-specific settings modal (placeholder)
- *   6. Help             → page-specific help modal (placeholder)
+ *   5. Settings cog     → page-specific settings (placeholder)
+ *   6. Help             → page-specific help (placeholder)
  *
- * The dockview tab strip becomes the drag handle for the rail; its
- * position auto-flips between 'bottom' (vertical dock) and 'right'
- * (horizontal dock) — wired in DockShell.tsx via
- * `group.api.setHeaderPosition`.
+ * Pages mount the rail with the same `apiRef` they hand to `DockShell`
+ * so the modals can call `api.fromJSON / api.addPanel / api.toJSON`
+ * against the live dockview instance.
  */
 
-/** Params dockview passes through `panel.params`. String-only because
- *  params round-trip through saved-layout JSON. */
-export interface WorkspacePanelParams {
+export interface WorkspaceRailProps {
+  /** Page identifier — scopes the layout-presets slice in
+   *  `useWorkspaceStore` and routes the predefined layout registry. */
   pageId: string;
+  /** localStorage key dockview-layout persistence uses for this
+   *  page. Reset Layout clears this entry. */
   storageKey: string;
-}
-
-interface WorkspacePanelContext {
-  api: DockviewApi | null;
-  registry: readonly DockPanelDef[];
+  /** Same DockviewApi ref passed to the sibling DockShell. The
+   *  LayoutsModal calls api.fromJSON/toJSON against this; the
+   *  DocksModal calls api.addPanel against this. */
   apiRef: React.MutableRefObject<DockviewApi | null>;
+  /** Panel registry exposed to the DocksModal so it can list every
+   *  panel available on the page and route drag-source / addPanel
+   *  calls through it. */
+  registry: readonly DockPanelDef[];
 }
-
-export const WorkspacePanelContext = React.createContext<WorkspacePanelContext>(
-  {
-    api: null,
-    registry: [],
-    apiRef: { current: null },
-  },
-);
-
-export const WORKSPACE_PANEL_ID = "workspace";
 
 interface RailIconButtonProps {
   icon: React.ReactNode;
@@ -109,16 +107,12 @@ function RailIconButton({
   );
 }
 
-export function WorkspacePanel(
-  props: IDockviewPanelProps,
-): React.JSX.Element {
-  const params = (props.params ?? {}) as Partial<WorkspacePanelParams>;
-  const pageId = params.pageId ?? "default";
-  const storageKey = params.storageKey ?? "";
-
-  const ctx = React.useContext(WorkspacePanelContext);
-  const { apiRef, registry } = ctx;
-
+export function WorkspaceRail({
+  pageId,
+  storageKey,
+  apiRef,
+  registry,
+}: WorkspaceRailProps): React.JSX.Element {
   const setDockLayout = useWorkspaceStore((s) => s.setDockLayout);
 
   // Modal state — only one open at a time.
@@ -126,8 +120,6 @@ export function WorkspacePanel(
   const [docksOpen, setDocksOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
-
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
 
   const onResetLayout = () => {
     if (!storageKey) return;
@@ -140,54 +132,50 @@ export function WorkspacePanel(
   };
 
   return (
-    <div
-      ref={rootRef}
+    <aside
       className={cn(
-        "workspace-rail",
-        // The `@container size` CSS in design-system.css picks up
-        // both axes from this element. flex-col is the default; the
-        // landscape @container query flips it to flex-row.
-        "h-full w-full bg-(--color-bg-panel)",
+        // Fixed 40px column. shrink-0 so neighbouring flex children
+        // can't shave any pixels off. The rail isn't draggable, isn't
+        // resizable, isn't popoutable — it's page chrome.
+        "shrink-0 w-10 h-full",
+        "flex flex-col items-center gap-1",
+        "py-1.5 bg-(--color-bg-panel)",
+        "border-r border-(--color-border)",
       )}
-      data-workspace-panel
+      aria-label="Workspace"
     >
-      <div className="workspace-rail-stack flex flex-col items-center">
-        <RailIconButton
-          icon={<LayoutDashboard />}
-          label="Layouts"
-          onClick={() => setLayoutsOpen(true)}
-          active={layoutsOpen}
-        />
-        <RailIconButton
-          icon={<Boxes />}
-          label="Docks"
-          onClick={() => setDocksOpen(true)}
-          active={docksOpen}
-        />
-        <RailIconButton
-          icon={<RotateCcw />}
-          label="Reset Layout"
-          onClick={onResetLayout}
-        />
+      <RailIconButton
+        icon={<LayoutDashboard />}
+        label="Layouts"
+        onClick={() => setLayoutsOpen(true)}
+        active={layoutsOpen}
+      />
+      <RailIconButton
+        icon={<Boxes />}
+        label="Docks"
+        onClick={() => setDocksOpen(true)}
+        active={docksOpen}
+      />
+      <RailIconButton
+        icon={<RotateCcw />}
+        label="Reset Layout"
+        onClick={onResetLayout}
+      />
 
-        {/* Flex spacer — pushes settings + help to the opposite end.
-         *  The container-query CSS swaps flex-direction for
-         *  landscape mode; flex-1 spacer works on either axis. */}
-        <div className="workspace-rail-spacer flex-1" aria-hidden />
+      <div className="flex-1" aria-hidden />
 
-        <RailIconButton
-          icon={<Settings />}
-          label="Scene settings"
-          onClick={() => setSettingsOpen(true)}
-          active={settingsOpen}
-        />
-        <RailIconButton
-          icon={<CircleHelp />}
-          label="Scene help"
-          onClick={() => setHelpOpen(true)}
-          active={helpOpen}
-        />
-      </div>
+      <RailIconButton
+        icon={<Settings />}
+        label="Page settings"
+        onClick={() => setSettingsOpen(true)}
+        active={settingsOpen}
+      />
+      <RailIconButton
+        icon={<CircleHelp />}
+        label="Page help"
+        onClick={() => setHelpOpen(true)}
+        active={helpOpen}
+      />
 
       <LayoutsModal
         open={layoutsOpen}
@@ -207,7 +195,7 @@ export function WorkspacePanel(
       <Modal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        title="Scene settings"
+        title="Page settings"
         description="Coming soon."
         width="md"
       >
@@ -218,7 +206,7 @@ export function WorkspacePanel(
       <Modal
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
-        title="Scene help"
+        title="Page help"
         description="Coming soon."
         width="md"
       >
@@ -226,11 +214,8 @@ export function WorkspacePanel(
           Page-specific help will live here.
         </p>
       </Modal>
-    </div>
+    </aside>
   );
 }
 
-/** Lucide icon used for the workspace panel header (tab strip). */
-export const WorkspacePanelIcon = LayoutDashboard;
-
-export default WorkspacePanel;
+export default WorkspaceRail;

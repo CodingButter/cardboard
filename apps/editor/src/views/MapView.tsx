@@ -1,6 +1,6 @@
 import React from "react";
 import { Construction, MapIcon, SlidersHorizontal } from "lucide-react";
-import type { SerializedDockview } from "dockview";
+import type { DockviewApi, SerializedDockview } from "dockview";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useTabContextSlot } from "../lib/tabContextSlot";
 import { SceneTabContextPicker } from "./scene/SceneTabContextPicker";
@@ -10,11 +10,7 @@ import {
   type DockPanelDef,
 } from "../components/dock/DockShell";
 import { DockPanel } from "../components/dock/DockPanel";
-import {
-  WorkspacePanel,
-  WorkspacePanelIcon,
-  WORKSPACE_PANEL_ID,
-} from "../components/dock/WorkspacePanel";
+import { WorkspaceRail } from "../components/dock/WorkspacePanel";
 
 /**
  * MapView — Scene page shell.
@@ -90,12 +86,6 @@ function InspectorBody() {
  *  wire real controls later. */
 const PANELS: readonly DockPanelDef[] = [
   {
-    id: WORKSPACE_PANEL_ID,
-    title: "Workspace",
-    component: WorkspacePanel,
-    icon: <WorkspacePanelIcon size={12} />,
-  },
-  {
     id: "map",
     title: "Map",
     component: MapBody,
@@ -110,18 +100,11 @@ const PANELS: readonly DockPanelDef[] = [
 ];
 
 /** Initial layout JSON — Map (60%) + Inspector (40%) side by side.
- *  The Workspace rail is NOT included in the default JSON; DockShell's
- *  `ensureWorkspace` safety net adds it via `addPanel({ initialWidth: 48 })`
- *  after `fromJSON` completes. addPanel honours `initialWidth` in
- *  absolute pixels, whereas grid `size` fields in `fromJSON` are
- *  relative weights normalised to the viewport — making it impossible
- *  to declare an exact 48px column in JSON form.
  *
- *  Result is persisted via the workspace store under
- *  `cardboard_workspace.dockLayouts[scene::<projectId>]`. The
- *  Workspace panel always survives in the persisted snapshot because
- *  the safety net runs on every onReady, so dock layouts re-load with
- *  the rail present even if it was somehow removed. */
+ *  The Workspace rail is NOT a dockview panel anymore — it's a fixed
+ *  40px aside rendered as a sibling of <DockShell/> (see the JSX
+ *  below). Persisted via the workspace store under
+ *  `cardboard_workspace.dockLayouts[scene::<projectId>]`. */
 function buildDefaultLayout(): SerializedDockview {
   return {
     grid: {
@@ -194,20 +177,29 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
   }
 
   const storageKey = `scene::${projectId}`;
-  // Memoize so we don't rebuild the JSON every render (DockShell uses
-  // referential equality on `defaultLayout` in the onReady callback
-  // dep array). The default layout shape doesn't depend on the
-  // project — Workspace is added separately by DockShell's safety
-  // net using addPanel with absolute initialWidth.
   const defaultLayout = React.useMemo(() => buildDefaultLayout(), []);
 
+  // Shared dockview api ref — Workspace rail's Layouts + Docks modals
+  // call api.fromJSON / api.toJSON / api.addPanel against the same
+  // instance DockShell creates.
+  const apiRef = React.useRef<DockviewApi | null>(null);
+
   return (
-    <div className="h-full w-full min-h-0">
-      <DockShell
+    <div className="h-full w-full min-h-0 flex">
+      <WorkspaceRail
+        pageId="scene"
         storageKey={storageKey}
-        panels={PANELS}
-        defaultLayout={defaultLayout}
+        apiRef={apiRef}
+        registry={PANELS}
       />
+      <div className="flex-1 min-w-0 h-full">
+        <DockShell
+          storageKey={storageKey}
+          panels={PANELS}
+          defaultLayout={defaultLayout}
+          apiRef={apiRef}
+        />
+      </div>
     </div>
   );
 }

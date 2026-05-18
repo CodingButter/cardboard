@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, GripHorizontal, GripVertical } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { cn } from "../../lib/cn";
 
@@ -84,17 +84,6 @@ export function DockPanelHeader(
     return () => sub.dispose();
   }, [api]);
 
-  // The workspace panel renders a minimal grip-only handle instead of
-  // the full icon + title + chevron chrome. The rail itself IS the
-  // workspace's content; the tab area just needs to be a grabbable
-  // strip the user drags to relocate the rail. We pick the grip
-  // orientation based on the tab strip's current edge (bottom = horiz
-  // grip; right = vertical grip) by sniffing the parent group's
-  // header-position class.
-  if (api.id === "workspace") {
-    return <WorkspaceDragHandle />;
-  }
-
   const params = (props.params ?? {}) as DockPanelHeaderParams;
   const ornaments = React.useContext(DockPanelHeaderOrnamentsContext);
   const own = ornaments[api.id] ?? {};
@@ -148,79 +137,3 @@ export function DockPanelHeader(
 }
 
 export default DockPanelHeader;
-
-/**
- * WorkspaceDragHandle — minimal grip-only tab content for the workspace
- * panel. No icon, no title, no chevron — just a centred grip glyph
- * that reads as "grab me to move the rail". The surrounding tab
- * element is still a full dockview tab so native drag-to-relocate
- * works; we're only replacing what's painted inside.
- *
- * Orientation: dockview sets `dv-groupview-header-bottom` /
- * `-right` / `-top` / `-left` on the ancestor `.dv-groupview`. We
- * inspect the rendered tab element's ancestor on mount to pick a
- * horizontal grip (when the tab strip is at the top or bottom of the
- * rail) or a vertical grip (when at left or right). A MutationObserver
- * watches for headerPosition changes so the glyph flips along with
- * the live layout.
- */
-function WorkspaceDragHandle(): React.JSX.Element {
-  const ref = React.useRef<HTMLDivElement | null>(null);
-  // Orientation derived from the ancestor `.dv-groupview`'s
-  // header-position class (`dv-groupview-header-bottom` /
-  // `-right` / `-top` / `-left`). Checking the tab's own
-  // dimensions doesn't work — dockview keeps the tab roughly
-  // square regardless of which edge it sits on, so width vs
-  // height comparison always tips horizontal.
-  //
-  // We re-resolve the ancestor each evaluate() rather than
-  // observing a captured node directly; when dockview re-parents
-  // the panel during a drag, the captured ancestor would go stale
-  // but `.closest()` always returns the freshest one. ResizeObserver
-  // on our own element fires on any layout shift (including the
-  // header-position flip dockview triggers when relocating the
-  // panel), so a single observer covers both dimension changes
-  // and orientation flips.
-  const [horizontal, setHorizontal] = React.useState(true);
-
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const evaluate = () => {
-      const group = el.closest(".dv-groupview");
-      if (group) {
-        const cls = group.className;
-        setHorizontal(
-          cls.includes("dv-groupview-header-bottom") ||
-            cls.includes("dv-groupview-header-top"),
-        );
-        return;
-      }
-      // Fallback to dimension check if no ancestor (rare).
-      const r = el.getBoundingClientRect();
-      setHorizontal(r.width >= r.height);
-    };
-    evaluate();
-    const ro = new ResizeObserver(evaluate);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const Grip = horizontal ? GripHorizontal : GripVertical;
-  return (
-    <div
-      ref={ref}
-      data-dock-panel-header
-      data-panel-id="workspace"
-      className={cn(
-        "flex h-full w-full items-center justify-center",
-        "text-(--color-fg-muted) hover:text-(--color-fg-primary)",
-        "cursor-grab active:cursor-grabbing",
-        "select-none",
-      )}
-      title="Drag to move workspace"
-    >
-      <Grip size={14} aria-hidden />
-    </div>
-  );
-}

@@ -55,3 +55,7 @@ packages/*/types/
 
 # Playwright MCP screenshot debris
 .playwright-mcp/
+
+# Local screenshot scratchpad
+screenshots/
+=
