@@ -17,6 +17,12 @@ export interface TabDescriptor<T extends string> {
   icon?: React.ReactNode;
   badge?: React.ReactNode;
   disabled?: boolean;
+  /**
+   * If true, render a thin vertical divider after this tab to visually
+   * separate tab groups (no label, purely a category boundary).
+   * Used by PrimaryTabs to chunk Content / Authoring / Project Meta.
+   */
+  dividerAfter?: boolean;
 }
 
 export interface TabStripProps<T extends string> {
@@ -50,40 +56,47 @@ export function TabStrip<T extends string>({
       {tabs.map((tab) => {
         const active = tab.id === value;
         return (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-disabled={tab.disabled}
-            disabled={tab.disabled}
-            onClick={() => !tab.disabled && onChange(tab.id)}
-            className={cn(
-              "relative inline-flex items-center gap-2 px-4 -mb-px",
-              "transition-colors duration-150",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-inset",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              variant === "primary"
-                ? primaryTabClasses(active)
-                : secondaryTabClasses(active),
-            )}
-          >
-            {variant === "primary" && tab.icon && (
-              <span className="inline-flex items-center justify-center w-4 h-4">
-                {tab.icon}
-              </span>
-            )}
-            <span
-              className={
+          <React.Fragment key={tab.id}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-disabled={tab.disabled}
+              disabled={tab.disabled}
+              onClick={() => !tab.disabled && onChange(tab.id)}
+              className={cn(
+                "relative inline-flex items-center gap-2 px-4 -mb-px",
+                "transition-colors duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-inset",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
                 variant === "primary"
-                  ? "text-sm font-medium"
-                  : "text-sm font-medium"
-              }
+                  ? primaryTabClasses(active)
+                  : secondaryTabClasses(active),
+              )}
             >
-              {tab.label}
-            </span>
-            {tab.badge && <span className="ml-1">{tab.badge}</span>}
-          </button>
+              {variant === "primary" && tab.icon && (
+                <span className="inline-flex items-center justify-center w-4 h-4">
+                  {tab.icon}
+                </span>
+              )}
+              <span
+                className={
+                  variant === "primary"
+                    ? "text-sm font-medium"
+                    : "text-sm font-medium"
+                }
+              >
+                {tab.label}
+              </span>
+              {tab.badge && <span className="ml-1">{tab.badge}</span>}
+            </button>
+            {tab.dividerAfter && (
+              <div
+                aria-hidden="true"
+                className="my-2 w-px self-stretch bg-zinc-800"
+              />
+            )}
+          </React.Fragment>
         );
       })}
     </div>

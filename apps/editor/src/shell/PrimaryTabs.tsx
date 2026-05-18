@@ -155,6 +155,10 @@ export function PrimaryTabs({
         label: t.label,
         icon: t.icon,
         disabled: t.requiresProject && !hasProject,
+        // Visual category dividers (no labels):
+        //   [home, scene, prefabs, components] | [assets, scripts,
+        //   animation, imageLab, soundLab, uiBuilder] | [project]
+        dividerAfter: t.id === "components" || t.id === "uiBuilder",
       })),
     [hasProject],
   );
