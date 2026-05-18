@@ -23,13 +23,12 @@ import {
   importPackFromUrl,
 } from "../lib/importPack";
 
-// IMPORTANT: import primitives from specific files instead of
-// "../components/ui" (no /index). The legacy flat `ui.tsx` shadows
-// the new `ui/index.ts` barrel when the module specifier resolves to
-// "ui" — so `import { Card } from "../components/ui"` silently
-// returns the legacy Card (no `padded`, no Phase-1 props, no
-// EmptyState). Specific-path imports bypass the shadow and give us
-// the Phase-1 primitives.
+// Specific-path imports are kept here from the era when the legacy
+// `ui.tsx` shadowed the `ui/index.ts` barrel under Node-style
+// resolution. The legacy file has been deleted (see audit dispatch),
+// so these could equivalently be folded into a single
+// `import { ... } from "../components/ui"` line — left specific for
+// now to minimise diff churn.
 import { Button } from "../components/ui/Button";
 import {
   Card,
