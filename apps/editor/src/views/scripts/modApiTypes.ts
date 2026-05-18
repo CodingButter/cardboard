@@ -87,8 +87,33 @@ declare interface BuiltInComponents {
   Aim: Component<{ angle: number }>;
   Camera: Component<unknown>;
   MinimapMarker: Component<{ kind: string }>;
-  Weapon: Component<{ itemId: string; ammo: number }>;
-  Inventory: Component<unknown>;
+  /**
+   * Generic slot-based container — used by hotbar / backpack / chest
+   * entities. \`slots\` holds entity ids (or 0 for empty); \`capacity\`
+   * caps slot count. The previous \`bag\`/\`hotbar\`/\`equipment\`/
+   * \`activeHotbarIndex\` shape was retired by the entity-id
+   * containers refactor (2026-05). Pack-side helpers live in
+   * \`scripts/lib/inventory.js\`.
+   */
+  Inventory: Component<{ slots: number[]; capacity: number }>;
+  /** Points at hotbar + backpack container entity ids. */
+  Carrier: Component<{ hotbar?: number; backpack?: number }>;
+  /** Selected hotbar slot index for the carrier's hotbar. */
+  ActiveSlot: Component<{ index: number }>;
+  /** First-class item entity. Item ids resolve through
+   *  \`data/items.json\` (no longer \`manifest.items\`). */
+  Item: Component<{
+    itemId: string;
+    displayName?: string;
+    image?: string;
+    type?: string;
+    equipSlot?: string;
+    worldSpriteId?: string;
+  }>;
+  /** Stack count + per-stack max for an item entity. */
+  Stackable: Component<{ count: number; max: number }>;
+  /** Marks an item entity as equippable; \`slot\` matches an EquipSlot. */
+  Equippable: Component<{ slot?: string }>;
   Sprite: Component<{ id: string; size?: number }>;
   /** Frame-based sprite animation playback state. Attach alongside
    *  Sprite to drive named-animation playback through api.anim. */
@@ -217,19 +242,14 @@ declare interface EventsAPI {
   emit<T = unknown>(name: string, payload?: T): void;
 }
 
-declare interface InventoryAPI {
-  readonly BAG_SIZE: number;
-  readonly HOTBAR_SIZE: number;
-  readonly EQUIP_SLOTS: ReadonlyArray<string>;
-  emptyEquipment(): Record<string, unknown>;
-  seedInventory(manifest: unknown): unknown;
-  addItem(inv: unknown, itemId: string, qty?: number): boolean;
-  removeItem(inv: unknown, itemId: string, qty?: number): boolean;
-  countItem(inv: unknown, itemId: string): number;
-  getActiveItem(inv: unknown): { itemId: string; quantity: number } | null;
-  defaultStackMax(itemDef: unknown): number;
-  quickTransfer(inv: unknown, slot: string): void;
-}
+/**
+ * NOTE: \`api.inventory\` was retired alongside the entity-id container
+ * refactor (2026-05). Inventory is now a generic ECS container component
+ * — \`Inventory { slots: number[]; capacity: number }\` — with sizes
+ * authored per-entity in \`world.json\`. The default pack ships its own
+ * helpers under \`scripts/lib/inventory.js\`; reach for them via
+ * \`import\` from your pack scripts rather than \`api.inventory\`.
+ */
 
 declare interface RaycastAPI {
   castRayToWall(scene: unknown, origin: Vec2, angle: number): {
@@ -266,7 +286,6 @@ declare interface ModAPI {
   readonly config: unknown;
   readonly pack: unknown;
   readonly components: BuiltInComponents;
-  readonly inventory: InventoryAPI;
   readonly raycast: RaycastAPI;
   readonly itemImages: unknown;
   readonly input: InputAPI;
