@@ -166,25 +166,26 @@ export default DockPanelHeader;
  */
 function WorkspaceDragHandle(): React.JSX.Element {
   const ref = React.useRef<HTMLDivElement | null>(null);
+  // Orientation derived from the tab element's own dimensions so it
+  // self-heals on any DOM reshuffle. When the tab strip sits at the
+  // bottom of a vertical rail it's wide-and-short → horizontal grip;
+  // when it sits at the right of a horizontal rail it's tall-and-
+  // narrow → vertical grip. ResizeObserver fires whenever dockview
+  // re-lays-out the panel, including header-position flips and any
+  // size changes, so we don't have to chase ancestor class changes.
   const [horizontal, setHorizontal] = React.useState(true);
 
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const group = el.closest(".dv-groupview") as HTMLElement | null;
-    if (!group) return;
     const evaluate = () => {
-      const cls = group.className;
-      // tab strip at top/bottom of the rail = horizontal grip
-      const isHorizontalStrip =
-        cls.includes("dv-groupview-header-bottom") ||
-        cls.includes("dv-groupview-header-top");
-      setHorizontal(isHorizontalStrip);
+      const r = el.getBoundingClientRect();
+      setHorizontal(r.width >= r.height);
     };
     evaluate();
-    const mo = new MutationObserver(evaluate);
-    mo.observe(group, { attributes: true, attributeFilter: ["class"] });
-    return () => mo.disconnect();
+    const ro = new ResizeObserver(evaluate);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   const Grip = horizontal ? GripHorizontal : GripVertical;

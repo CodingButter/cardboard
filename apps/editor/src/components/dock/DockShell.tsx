@@ -359,7 +359,7 @@ export function DockShell({
       // dropped it (so the user is never stranded without their
       // layout-controls rail). The TopBar "Show Workspace" button is
       // the explicit user-facing escape hatch.
-      const WORKSPACE_DEFAULT_WIDTH = 48;
+      const WORKSPACE_DEFAULT_WIDTH = 40;
       const ensureWorkspace = () => {
         if (!panels.some((p) => p.id === WORKSPACE_PANEL_ID)) return;
         if (api.getPanel(WORKSPACE_PANEL_ID)) return;
@@ -395,28 +395,33 @@ export function DockShell({
         // ignore — first persist is best-effort
       }
 
-      // ── Workspace headerPosition auto-flip ──────────────────────────
+      // ── Workspace orientation sync ──────────────────────────────────
       //
-      // dockview-core exposes per-group header position via
-      // `group.api.setHeaderPosition(position)` /
-      // `group.api.getHeaderPosition()` (see
-      // node_modules/.bun/dockview-core@6.3.0/.../api/dockviewGroupPanelApi.d.ts
-      // lines 44-45). The position is one of 'top'|'bottom'|'left'|'right'.
+      // Whenever the workspace group's orientation flips (user drags it
+      // from a left/right edge to a top/bottom edge or vice versa), we
+      // update TWO things in tandem:
       //
-      // For the Workspace rail we want:
-      //   - vertical dock (left or right edge)   → header at 'bottom'
-      //     (icons stack vertically, tab strip is a horizontal drag
-      //     handle below them).
-      //   - horizontal dock (top or bottom edge) → header at 'right'
-      //     (icons stack horizontally, tab strip is a vertical drag
-      //     handle to the right of them).
+      //   1. Header position. dockview-core exposes
+      //      `group.api.setHeaderPosition()` / `getHeaderPosition()`
+      //      (see .../api/dockviewGroupPanelApi.d.ts lines 44-45).
+      //      We map orientation → header edge so the drag-handle tab
+      //      always sits "after" the icons:
+      //        - vertical dock (left/right edge) → header at 'bottom'
+      //        - horizontal dock (top/bottom edge) → header at 'right'
       //
-      // We detect orientation from the group's measured width vs
-      // height — there's no direct orientation API on the public
-      // surface; the gridview internals know it but don't surface it.
-      // width >= height → horizontal (landscape) → 'right'.
-      // width <  height → vertical   (portrait)  → 'bottom'.
-      const syncWorkspaceHeaderPosition = () => {
+      //   2. Size constraints. The rail is supposed to be a fixed 40px
+      //      strip — not resizable. We lock the size by setting both
+      //      min and max on the constrained axis to the same value:
+      //        - vertical rail → minWidth = maxWidth = 40 (also minH 40)
+      //        - horizontal rail → minH = maxH = 40 (also minW 40)
+      //      dockview's gridview respects these constraints; the
+      //      splitter rendered alongside the panel becomes inert
+      //      because there's no slack to redistribute.
+      //
+      // Orientation detection: there's no public orientation API on
+      // dockview's panel/group surface, so we infer from the measured
+      // width vs height of the group. width >= height → landscape.
+      const syncWorkspaceOrientation = () => {
         const panel = api.getPanel(WORKSPACE_PANEL_ID);
         if (!panel) return;
         const group = panel.group;
@@ -428,14 +433,40 @@ export function DockShell({
         const desired: "bottom" | "right" = isLandscape ? "right" : "bottom";
         try {
           const current = group.api.getHeaderPosition();
-          if (current === desired) return;
-          group.api.setHeaderPosition(desired);
+          if (current !== desired) group.api.setHeaderPosition(desired);
         } catch {
           // Older dockview build or transient state — ignore.
         }
+        try {
+          // Lock the rail to a 40px strip on the constrained axis.
+          // setConstraints only updates the min/max — it doesn't
+          // actively resize the panel. So we follow up with setSize
+          // to snap the current dimension to 40px, matching the new
+          // constraint. dockview's splitter then has no slack to drag.
+          panel.api.setConstraints(
+            isLandscape
+              ? {
+                  minimumHeight: WORKSPACE_DEFAULT_WIDTH,
+                  maximumHeight: WORKSPACE_DEFAULT_WIDTH,
+                  minimumWidth: WORKSPACE_DEFAULT_WIDTH,
+                }
+              : {
+                  minimumWidth: WORKSPACE_DEFAULT_WIDTH,
+                  maximumWidth: WORKSPACE_DEFAULT_WIDTH,
+                  minimumHeight: WORKSPACE_DEFAULT_WIDTH,
+                },
+          );
+          panel.api.setSize(
+            isLandscape
+              ? { height: WORKSPACE_DEFAULT_WIDTH }
+              : { width: WORKSPACE_DEFAULT_WIDTH },
+          );
+        } catch {
+          // ignore
+        }
       };
       // Initial sync after layout has settled.
-      syncWorkspaceHeaderPosition();
+      syncWorkspaceOrientation();
 
       // Persist on every layout change. Cheap enough that debouncing
       // isn't necessary — the JSON is tiny and writes are synchronous.
@@ -444,7 +475,7 @@ export function DockShell({
         // The workspace group's dimensions / location may have just
         // changed (resize, dock move). Re-sync the header position so
         // the tab strip lives on the correct edge.
-        syncWorkspaceHeaderPosition();
+        syncWorkspaceOrientation();
         if (onLayoutChange) {
           try {
             onLayoutChange(api.toJSON());
