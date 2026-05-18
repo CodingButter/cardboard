@@ -1,5 +1,5 @@
 import React from "react";
-import { Construction, MapIcon, SlidersHorizontal } from "lucide-react";
+import { Construction } from "lucide-react";
 import type { DockviewApi, SerializedDockview } from "dockview";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useTabContextSlot } from "../lib/tabContextSlot";
@@ -9,24 +9,40 @@ import {
   DockShell,
   type DockPanelDef,
 } from "../components/dock/DockShell";
-import { DockPanel } from "../components/dock/DockPanel";
 import { WorkspaceRail } from "../components/dock/WorkspacePanel";
+import {
+  ToolsPanel,
+  MANIFEST as TOOLS_MANIFEST,
+} from "./scene/panels/ToolsPanel";
+import {
+  MapCanvasPanel,
+  MANIFEST as MAP_CANVAS_MANIFEST,
+} from "./scene/panels/MapCanvasPanel";
+import {
+  PreviewPanel,
+  MANIFEST as PREVIEW_MANIFEST,
+} from "./scene/panels/PreviewPanel";
+import {
+  LayersPanel,
+  MANIFEST as LAYERS_MANIFEST,
+} from "./scene/panels/LayersPanel";
+import {
+  CellInspectorPanel,
+  MANIFEST as CELL_INSPECTOR_MANIFEST,
+} from "./scene/panels/CellInspectorPanel";
 
 /**
  * MapView — Scene page shell.
  *
- * Scene is the first editor page to opt into the dockview-driven
- * internal layout primitives (see
- * apps/editor/src/components/dock/DockShell.tsx). The shell hosts two
- * starter panels — Map (the eventual canvas) and Inspector — that the
- * user can drag, retile, or pop out into a separate window. The
- * layout JSON persists per-project under
- * `cardboard_editor_dock_layout_scene::<projectId>` so the next
- * session lands on the same layout.
+ * The Scene page opts into the dockview-driven internal layout
+ * primitives (see apps/editor/src/components/dock/DockShell.tsx). The
+ * shell hosts five Scene panels per `Editor Design/Map.png`: Tools,
+ * Map Canvas, 3D Preview, Layers, and Cell Inspector. Users can
+ * drag, retile, or pop out any panel; layout JSON persists per-
+ * project under `cardboard_workspace.dockLayouts[scene::<projectId>]`.
  *
- * Each panel renders an `EmptyState` for now; subsequent waves rebuild
- * them against `Editor Design/Map.png` (see
- * docs/EDITOR_DESIGN_INVENTORY.md §1.2).
+ * Each panel's bodies are stubs today (Wave 1). Wave 2 fills them
+ * with the real interactive content driven from `Editor Design/Map.png`.
  *
  * Tab-row contextual slot:
  *   MapView registers the Scene picker (`<SceneTabContextPicker/>`)
@@ -39,71 +55,35 @@ export interface MapViewProps {
   [key: string]: unknown;
 }
 
-function MapBody() {
-  return (
-    <DockPanel padded scroll={false}>
-      <div className="h-full w-full flex items-center justify-center">
-        {/* card-surface-elev wraps the EmptyState so it reads as a
-         *  raised inset against the darker panel content (per
-         *  Workspace v1.5 §H — three-tier surface hierarchy). */}
-        <div className="card-surface-elev p-4">
-          <EmptyState
-            icon={<MapIcon size={28} />}
-            title="Map canvas — coming soon"
-            description="The Scene canvas is being rebuilt. Drag this panel by its tab to reorganise, or pop it out into a new window."
-          />
-        </div>
-      </div>
-    </DockPanel>
-  );
-}
-
-function InspectorBody() {
-  return (
-    <DockPanel padded scroll>
-      <div className="flex flex-col gap-4 text-sm text-zinc-400">
-        <div className="card-surface-elev p-4">
-          <EmptyState
-            icon={<SlidersHorizontal size={24} />}
-            title="Inspector — coming soon"
-            description="Per-entity properties will live here. Drag this panel by its tab to reorganise, or pop it out into a new window."
-          />
-        </div>
-      </div>
-    </DockPanel>
-  );
-}
-
 /** Stable panel registry — declared at module scope so each MapView
  *  mount reuses the same component identities. dockview keys panels
  *  by their `contentComponent` string at layout-time, so flipping the
  *  identity of the component would force a full remount.
  *
- *  Each panel carries an optional `icon` rendered left of the title
- *  in the DockPanelHeader (matches the iconography in
- *  Editor Design/Entities.png). The `controls` slot is left empty
- *  here so the header paints a chevron placeholder — sub-pages will
- *  wire real controls later. */
+ *  Each panel's MANIFEST (id + title + icon) is co-located with its
+ *  component file so adding a new panel is a one-import operation
+ *  here. */
 const PANELS: readonly DockPanelDef[] = [
-  {
-    id: "map",
-    title: "Map",
-    component: MapBody,
-    icon: <MapIcon size={12} />,
-  },
-  {
-    id: "inspector",
-    title: "Inspector",
-    component: InspectorBody,
-    icon: <SlidersHorizontal size={12} />,
-  },
+  { ...TOOLS_MANIFEST, component: ToolsPanel },
+  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel },
+  { ...PREVIEW_MANIFEST, component: PreviewPanel },
+  { ...LAYERS_MANIFEST, component: LayersPanel },
+  { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
 ];
 
-/** Initial layout JSON — Map (60%) + Inspector (40%) side by side.
+/** Initial layout JSON — laid out per `Editor Design/Map.png`:
  *
- *  The Workspace rail is NOT a dockview panel anymore — it's a fixed
- *  40px aside rendered as a sibling of <DockShell/> (see the JSX
- *  below). Persisted via the workspace store under
+ *    [ Tools | [Map Canvas / Preview-Layers-Inspector stack] ]
+ *
+ *  Left column: Tools.
+ *  Centre: Map Canvas.
+ *  Right column (top→bottom): 3D Preview, Layers, Cell Inspector.
+ *
+ *  Sizes are relative weights normalised by dockview; the actual
+ *  pixel widths flex with the viewport. The user can drag any
+ *  splitter to rebalance.
+ *
+ *  Persisted via the workspace store under
  *  `cardboard_workspace.dockLayouts[scene::<projectId>]`. */
 function buildDefaultLayout(): SerializedDockview {
   return {
@@ -111,41 +91,84 @@ function buildDefaultLayout(): SerializedDockview {
       root: {
         type: "branch",
         data: [
+          // Left: Tools
           {
             type: "leaf",
             data: {
-              views: ["map"],
-              activeView: "map",
-              id: "map-group",
+              views: ["tools"],
+              activeView: "tools",
+              id: "tools-group",
             },
-            size: 600,
+            size: 220,
           },
+          // Centre: Map Canvas
           {
             type: "leaf",
             data: {
-              views: ["inspector"],
-              activeView: "inspector",
-              id: "inspector-group",
+              views: ["map-canvas"],
+              activeView: "map-canvas",
+              id: "map-canvas-group",
             },
-            size: 400,
+            size: 800,
+          },
+          // Right column: 3D Preview / Layers / Cell Inspector stacked
+          {
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["preview"],
+                  activeView: "preview",
+                  id: "preview-group",
+                },
+                size: 240,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["layers"],
+                  activeView: "layers",
+                  id: "layers-group",
+                },
+                size: 200,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["cell-inspector"],
+                  activeView: "cell-inspector",
+                  id: "cell-inspector-group",
+                },
+                size: 360,
+              },
+            ],
+            size: 340,
           },
         ],
-        size: 1000,
+        size: 1360,
       },
-      height: 1000,
-      width: 1000,
+      height: 800,
+      width: 1360,
       orientation: "HORIZONTAL",
     },
     panels: {
-      map: {
-        id: "map",
-        contentComponent: "map",
+      tools: { id: "tools", contentComponent: "tools", title: "Tools" },
+      "map-canvas": {
+        id: "map-canvas",
+        contentComponent: "map-canvas",
         title: "Map",
       },
-      inspector: {
-        id: "inspector",
-        contentComponent: "inspector",
-        title: "Inspector",
+      preview: {
+        id: "preview",
+        contentComponent: "preview",
+        title: "3D Preview",
+      },
+      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
+      "cell-inspector": {
+        id: "cell-inspector",
+        contentComponent: "cell-inspector",
+        title: "Cell Inspector",
       },
     },
   } as unknown as SerializedDockview;
