@@ -37,13 +37,30 @@
  * convention; if they drift, this block is the source of truth.
  */
 @theme {
-  /* Surface ramp */
+  /* Surface ramp
+   *
+   * Editor visual hierarchy (matches `Editor Design/*.png` mockups):
+   *   --color-bg-app    : darkest, near-black — TopBar + outer shell.
+   *   --color-bg-tabs   : mid-gray (~zinc-800) — tabs row, toolbars.
+   *   --color-bg-panel  : same mid-gray — panel cards in rails.
+   *   --color-bg-card   : a step darker than panel — inset content,
+   *                       inspector cards.
+   *   --color-bg-card-elev : the elevated chip used for dropdowns +
+   *                       log containers; reads above panel.
+   *
+   * Bumping --color-bg-panel from the previous near-black 0.18/.7
+   * to a solid ~zinc-800 separates the tabs row + panel surfaces
+   * from the TopBar so the hierarchy reads correctly. --color-bg-tabs
+   * is an alias on the same value — exposed as a distinct token so
+   * the tabs row + panels can later diverge without retuning panel
+   * call sites. */
   --color-bg-app: #08090b;
-  --color-bg-panel: oklch(0.18 0 0 / 0.7);
-  --color-bg-card: oklch(0.14 0 0 / 0.7);
-  --color-bg-card-elev: #101114;
+  --color-bg-tabs: #272727;
+  --color-bg-panel: #272727;
+  --color-bg-card: oklch(0.22 0 0);
+  --color-bg-card-elev: #2f2f2f;
   --color-bg-active: oklch(0.74 0.18 65 / 0.1);
-  --color-bg-hover: oklch(0.20 0 0);
+  --color-bg-hover: oklch(0.32 0 0);
 
   /* Border ramp */
   --color-border: oklch(0.27 0 0 / 0.8);
