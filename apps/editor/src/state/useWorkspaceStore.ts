@@ -50,6 +50,13 @@ export interface WorkspacePreset {
 export interface WorkspaceState {
   presets: Record<string, WorkspacePreset[]>;
   dockLayouts: Record<string, DockLayoutJSON | null>;
+  /**
+   * Tracks the id of the layout (predefined OR user preset) that was
+   * most recently applied per `pageId`. Used by the Layouts modal to
+   * (a) highlight the active card and (b) enable the "Resave current
+   * layout" button when a user preset is active.
+   */
+  lastAppliedPresetId: Record<string, string | null>;
   savePreset: (
     pageId: string,
     name: string,
@@ -57,10 +64,18 @@ export interface WorkspaceState {
   ) => WorkspacePreset;
   renamePreset: (pageId: string, id: string, name: string) => void;
   deletePreset: (pageId: string, id: string) => void;
+  /** Overwrite an existing user preset's layout in place — used by the
+   *  Layouts modal "Resave current layout" action. */
+  resavePreset: (
+    pageId: string,
+    id: string,
+    layout: DockLayoutJSON,
+  ) => void;
   setDockLayout: (
     storageKey: string,
     layout: DockLayoutJSON | null,
   ) => void;
+  setLastAppliedPresetId: (pageId: string, id: string | null) => void;
 }
 
 const STORAGE_NAME = "cardboard_workspace";
@@ -137,6 +152,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     (set, get) => ({
       presets: {},
       dockLayouts: {},
+      lastAppliedPresetId: {},
       savePreset: (pageId, name, layout) => {
         const preset: WorkspacePreset = {
           id: genId(),
@@ -163,10 +179,27 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const current = get().presets[pageId] ?? [];
         const next = current.filter((p) => p.id !== id);
         set((s) => ({ presets: { ...s.presets, [pageId]: next } }));
+        // Clear the active marker if the deleted preset was active.
+        const last = get().lastAppliedPresetId[pageId] ?? null;
+        if (last === id) {
+          set((s) => ({
+            lastAppliedPresetId: { ...s.lastAppliedPresetId, [pageId]: null },
+          }));
+        }
+      },
+      resavePreset: (pageId, id, layout) => {
+        const current = get().presets[pageId] ?? [];
+        const next = current.map((p) => (p.id === id ? { ...p, layout } : p));
+        set((s) => ({ presets: { ...s.presets, [pageId]: next } }));
       },
       setDockLayout: (storageKey, layout) => {
         set((s) => ({
           dockLayouts: { ...s.dockLayouts, [storageKey]: layout },
+        }));
+      },
+      setLastAppliedPresetId: (pageId, id) => {
+        set((s) => ({
+          lastAppliedPresetId: { ...s.lastAppliedPresetId, [pageId]: id },
         }));
       },
     }),
@@ -180,6 +213,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       partialize: (state) => ({
         presets: state.presets,
         dockLayouts: state.dockLayouts,
+        lastAppliedPresetId: state.lastAppliedPresetId,
       }),
       // Merge any legacy `cardboard_editor_dock_layout_*` entries
       // into the hydrated state. Runs once per page load — after

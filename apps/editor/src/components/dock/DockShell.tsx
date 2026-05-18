@@ -353,12 +353,12 @@ export function DockShell({
 
       // ── Workspace safety net ──────────────────────────────────────
       //
-      // The Workspace rail is pinned — the user cannot close it and
-      // saved layouts always include it. But determined dev-tools
-      // users (or bad serialisations) could land us in a state where
-      // the workspace id is missing. Force-add it on the left edge if
-      // it's gone, so the user is never stranded without a way back
-      // to layout controls.
+      // Workspace v1.5: the rail is a regular dockview panel — it can
+      // be closed, popped out, and dragged like any other. This safety
+      // net only re-adds the panel if a saved layout legitimately
+      // dropped it (so the user is never stranded without their
+      // layout-controls rail). The TopBar "Show Workspace" button is
+      // the explicit user-facing escape hatch.
       const WORKSPACE_DEFAULT_WIDTH = 48;
       const ensureWorkspace = () => {
         if (!panels.some((p) => p.id === WORKSPACE_PANEL_ID)) return;
@@ -373,15 +373,11 @@ export function DockShell({
               storageKey,
             },
             position: { direction: "left" },
+            // Rail starts narrow but the user can drag the splitter
+            // wider/narrower (dockview enforces a minimum based on
+            // the panel content's intrinsic measure, typically ~40px).
             initialWidth: WORKSPACE_DEFAULT_WIDTH,
-            // Lock the rail at 48px. dockview's gridview enforces a
-            // minimum of 100px by default; without these constraints
-            // the rail snaps to 100 even though we asked for 48. The
-            // user can still re-dock the workspace to a different
-            // edge (those use `minimumHeight`), but along the
-            // current axis it stays at exactly 48.
-            minimumWidth: WORKSPACE_DEFAULT_WIDTH,
-            maximumWidth: WORKSPACE_DEFAULT_WIDTH,
+            minimumWidth: 40,
           });
         } catch {
           // Adding the panel failed — surface nothing to the user;
@@ -399,10 +395,56 @@ export function DockShell({
         // ignore — first persist is best-effort
       }
 
+      // ── Workspace headerPosition auto-flip ──────────────────────────
+      //
+      // dockview-core exposes per-group header position via
+      // `group.api.setHeaderPosition(position)` /
+      // `group.api.getHeaderPosition()` (see
+      // node_modules/.bun/dockview-core@6.3.0/.../api/dockviewGroupPanelApi.d.ts
+      // lines 44-45). The position is one of 'top'|'bottom'|'left'|'right'.
+      //
+      // For the Workspace rail we want:
+      //   - vertical dock (left or right edge)   → header at 'bottom'
+      //     (icons stack vertically, tab strip is a horizontal drag
+      //     handle below them).
+      //   - horizontal dock (top or bottom edge) → header at 'right'
+      //     (icons stack horizontally, tab strip is a vertical drag
+      //     handle to the right of them).
+      //
+      // We detect orientation from the group's measured width vs
+      // height — there's no direct orientation API on the public
+      // surface; the gridview internals know it but don't surface it.
+      // width >= height → horizontal (landscape) → 'right'.
+      // width <  height → vertical   (portrait)  → 'bottom'.
+      const syncWorkspaceHeaderPosition = () => {
+        const panel = api.getPanel(WORKSPACE_PANEL_ID);
+        if (!panel) return;
+        const group = panel.group;
+        if (!group) return;
+        const w = group.api.width;
+        const h = group.api.height;
+        if (typeof w !== "number" || typeof h !== "number") return;
+        const isLandscape = w >= h;
+        const desired: "bottom" | "right" = isLandscape ? "right" : "bottom";
+        try {
+          const current = group.api.getHeaderPosition();
+          if (current === desired) return;
+          group.api.setHeaderPosition(desired);
+        } catch {
+          // Older dockview build or transient state — ignore.
+        }
+      };
+      // Initial sync after layout has settled.
+      syncWorkspaceHeaderPosition();
+
       // Persist on every layout change. Cheap enough that debouncing
       // isn't necessary — the JSON is tiny and writes are synchronous.
       const layoutSub = api.onDidLayoutChange(() => {
         save(api);
+        // The workspace group's dimensions / location may have just
+        // changed (resize, dock move). Re-sync the header position so
+        // the tab strip lives on the correct edge.
+        syncWorkspaceHeaderPosition();
         if (onLayoutChange) {
           try {
             onLayoutChange(api.toJSON());
@@ -655,51 +697,29 @@ export function DockShell({
       };
 
       const willDragPanelSub = api.onWillDragPanel((e) => {
-        // Workspace is pinned — drag-off-viewport on the workspace
-        // panel must NOT spawn a popout. We don't try to suppress
-        // dockview's own drag (the user has no header to grab in
-        // the first place because DockPanelHeader returns null for
-        // workspace), but if some other code path triggers a panel
-        // drag for the workspace id, we silently drop it.
-        if (e.panel.id === WORKSPACE_PANEL_ID) {
-          pendingDrag = null;
-          return;
-        }
+        // Workspace v1.5: workspace is a regular panel — no popout
+        // guard. Any panel (including workspace) can be dragged
+        // off-viewport into a floating window.
         pendingDrag = { kind: "panel", panel: e.panel };
-        // Capture pointerId from the underlying DragEvent's target
-        // pointer when available. HTML5 drag events don't have a
-        // pointerId, so we trust the first pointerup we see.
         activePointerId = null;
         startTracking();
       });
       const willDragGroupSub = api.onWillDragGroup((e) => {
-        // Skip popout for any group whose only panel is the
-        // workspace rail. Multi-panel groups (the user could
-        // theoretically drag a non-workspace panel into the
-        // workspace group, though we don't expect that) still
-        // pop out.
-        const panels = e.group.panels;
-        if (
-          panels.length === 1 &&
-          panels[0]?.id === WORKSPACE_PANEL_ID
-        ) {
-          pendingDrag = null;
-          return;
-        }
         pendingDrag = { kind: "group", group: e.group };
         activePointerId = null;
         startTracking();
       });
 
-      // ── External-drag drop handler (Panel Packer chips) ──────────
+      // ── External-drag drop handler (Docks modal cards) ───────────
       //
-      // PanelPacker chips carry `dataTransfer["dockview/panel-id"]`
+      // DocksModal cards carry `dataTransfer["dockview/panel-id"]`
       // payloads. dockview fires `onDidDrop` only for drops it could
       // NOT handle itself — which includes external drags from
       // outside the dockview tree (our case). When the payload
       // matches a registered panel id, we mount it into the target
       // group (within = same tab strip) or fall back to right-edge
-      // placement if no group is provided.
+      // placement if no group is provided. On success we emit
+      // `cardboard:panel-added` so the DocksModal can auto-dismiss.
       const onDidDropSub = api.onDidDrop((event) => {
         try {
           const id = event.nativeEvent.dataTransfer?.getData(
@@ -726,6 +746,11 @@ export function DockShell({
               position: { direction: "right" },
             });
           }
+          // Tell modals (DocksModal) the drop landed so they can
+          // dismiss themselves automatically.
+          window.dispatchEvent(
+            new CustomEvent("cardboard:panel-added", { detail: { id } }),
+          );
         } catch {
           // dockview rejected the drop — non-fatal.
         }

@@ -47,11 +47,16 @@ function MapBody() {
   return (
     <DockPanel padded scroll={false}>
       <div className="h-full w-full flex items-center justify-center">
-        <EmptyState
-          icon={<MapIcon size={28} />}
-          title="Map canvas — coming soon"
-          description="The Scene canvas is being rebuilt. Drag this panel by its tab to reorganise, or pop it out into a new window."
-        />
+        {/* card-surface-elev wraps the EmptyState so it reads as a
+         *  raised inset against the darker panel content (per
+         *  Workspace v1.5 §H — three-tier surface hierarchy). */}
+        <div className="card-surface-elev p-4">
+          <EmptyState
+            icon={<MapIcon size={28} />}
+            title="Map canvas — coming soon"
+            description="The Scene canvas is being rebuilt. Drag this panel by its tab to reorganise, or pop it out into a new window."
+          />
+        </div>
       </div>
     </DockPanel>
   );
@@ -61,11 +66,13 @@ function InspectorBody() {
   return (
     <DockPanel padded scroll>
       <div className="flex flex-col gap-4 text-sm text-zinc-400">
-        <EmptyState
-          icon={<SlidersHorizontal size={24} />}
-          title="Inspector — coming soon"
-          description="Per-entity properties will live here. Drag this panel by its tab to reorganise, or pop it out into a new window."
-        />
+        <div className="card-surface-elev p-4">
+          <EmptyState
+            icon={<SlidersHorizontal size={24} />}
+            title="Inspector — coming soon"
+            description="Per-entity properties will live here. Drag this panel by its tab to reorganise, or pop it out into a new window."
+          />
+        </div>
       </div>
     </DockPanel>
   );

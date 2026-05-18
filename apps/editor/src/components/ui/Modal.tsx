@@ -22,7 +22,7 @@ import { cn } from "../../lib/cn";
  * should reach for this primitive instead.
  */
 
-export type ModalWidth = "sm" | "md" | "lg" | "xl";
+export type ModalWidth = "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
 
 export interface ModalProps {
   open: boolean;
@@ -50,6 +50,8 @@ const WIDTH_CLASS: Record<ModalWidth, string> = {
   md: "max-w-md",
   lg: "max-w-lg",
   xl: "max-w-2xl",
+  "2xl": "max-w-4xl",
+  "3xl": "max-w-6xl",
 };
 
 export function Modal({
