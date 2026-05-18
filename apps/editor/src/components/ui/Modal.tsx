@@ -95,11 +95,13 @@ export function Modal({
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="panel-header">
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-zinc-800">
           <div className="flex flex-col min-w-0">
-            <span className="truncate">{title}</span>
+            <h2 className="text-xl font-bold text-white truncate leading-tight">
+              {title}
+            </h2>
             {description ? (
-              <span className="text-[11px] font-normal normal-case tracking-normal text-zinc-500 mt-0.5 truncate">
+              <span className="text-xs font-normal text-zinc-400 mt-1 truncate">
                 {description}
               </span>
             ) : null}
