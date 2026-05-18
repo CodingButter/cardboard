@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, GripHorizontal, GripVertical } from "lucide-react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { cn } from "../../lib/cn";
 
@@ -84,11 +84,16 @@ export function DockPanelHeader(
     return () => sub.dispose();
   }, [api]);
 
-  // Workspace v1.5: the workspace panel is a regular dockview panel
-  // and uses the SAME custom tab renderer as everyone else (icon +
-  // uppercase title + chevron). The legacy workspace-id sentinel that
-  // collapsed the tab strip has been removed — dockview-native chrome
-  // is now visible for workspace too.
+  // The workspace panel renders a minimal grip-only handle instead of
+  // the full icon + title + chevron chrome. The rail itself IS the
+  // workspace's content; the tab area just needs to be a grabbable
+  // strip the user drags to relocate the rail. We pick the grip
+  // orientation based on the tab strip's current edge (bottom = horiz
+  // grip; right = vertical grip) by sniffing the parent group's
+  // header-position class.
+  if (api.id === "workspace") {
+    return <WorkspaceDragHandle />;
+  }
 
   const params = (props.params ?? {}) as DockPanelHeaderParams;
   const ornaments = React.useContext(DockPanelHeaderOrnamentsContext);
@@ -143,3 +148,60 @@ export function DockPanelHeader(
 }
 
 export default DockPanelHeader;
+
+/**
+ * WorkspaceDragHandle — minimal grip-only tab content for the workspace
+ * panel. No icon, no title, no chevron — just a centred grip glyph
+ * that reads as "grab me to move the rail". The surrounding tab
+ * element is still a full dockview tab so native drag-to-relocate
+ * works; we're only replacing what's painted inside.
+ *
+ * Orientation: dockview sets `dv-groupview-header-bottom` /
+ * `-right` / `-top` / `-left` on the ancestor `.dv-groupview`. We
+ * inspect the rendered tab element's ancestor on mount to pick a
+ * horizontal grip (when the tab strip is at the top or bottom of the
+ * rail) or a vertical grip (when at left or right). A MutationObserver
+ * watches for headerPosition changes so the glyph flips along with
+ * the live layout.
+ */
+function WorkspaceDragHandle(): React.JSX.Element {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const [horizontal, setHorizontal] = React.useState(true);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const group = el.closest(".dv-groupview") as HTMLElement | null;
+    if (!group) return;
+    const evaluate = () => {
+      const cls = group.className;
+      // tab strip at top/bottom of the rail = horizontal grip
+      const isHorizontalStrip =
+        cls.includes("dv-groupview-header-bottom") ||
+        cls.includes("dv-groupview-header-top");
+      setHorizontal(isHorizontalStrip);
+    };
+    evaluate();
+    const mo = new MutationObserver(evaluate);
+    mo.observe(group, { attributes: true, attributeFilter: ["class"] });
+    return () => mo.disconnect();
+  }, []);
+
+  const Grip = horizontal ? GripHorizontal : GripVertical;
+  return (
+    <div
+      ref={ref}
+      data-dock-panel-header
+      data-panel-id="workspace"
+      className={cn(
+        "flex h-full w-full items-center justify-center",
+        "text-(--color-fg-muted) hover:text-(--color-fg-primary)",
+        "cursor-grab active:cursor-grabbing",
+        "select-none",
+      )}
+      title="Drag to move workspace"
+    >
+      <Grip size={14} aria-hidden />
+    </div>
+  );
+}
