@@ -18,6 +18,7 @@ import { ProjectTabView } from "../views/project/ProjectTabView";
 import { AssetsView } from "../views/AssetsView";
 import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
 import { ScriptsView } from "../views/ScriptsView";
+import { ComponentsView } from "../views/ComponentsView";
 import { EditorSettingsModal } from "../views/EditorSettingsModal";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatusBarProvider } from "./StatusBarContext";
@@ -591,6 +592,20 @@ function ShellBody({
     return (
       <div className="h-full overflow-hidden">
         <ScriptsView key={`scripts::${projectId}`} projectId={projectId} />
+      </div>
+    );
+  }
+
+  // Components tab — the Component Builder where users author
+  // manifest.components[] schemas. Stubbed for now; see
+  // docs/EDITOR_DESIGN_INVENTORY.md §1 (Component Builder).
+  if (tab === "components") {
+    return (
+      <div className="h-full overflow-hidden">
+        <ComponentsView
+          key={`components::${projectId}`}
+          projectId={projectId}
+        />
       </div>
     );
   }

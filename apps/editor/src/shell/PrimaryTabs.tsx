@@ -3,6 +3,7 @@ import {
   Home,
   Grid3x3,
   Boxes,
+  Blocks,
   Image as ImageIcon,
   Code2,
   Film,
@@ -14,12 +15,14 @@ import {
 import { TabStrip, type TabDescriptor } from "../components/ui/TabStrip";
 
 /**
- * PrimaryTabs — the 10-tab horizontal strip below the TopBar.
+ * PrimaryTabs — the 11-tab horizontal strip below the TopBar.
  *
- * Tab list: Home / Scene / Prefabs / Assets / Scripts / Animation /
- * Image Lab / Sound Lab / UI Builder / Project. (Scene = the legacy
- * "Map" tab renamed; Prefabs = the legacy "Entities" tab renamed —
- * see EDITOR_REDESIGN.md §6.3 + §12 Q4.)
+ * Tab list: Home / Scene / Prefabs / Components / Assets / Scripts /
+ * Animation / Image Lab / Sound Lab / UI Builder / Project. (Scene =
+ * the legacy "Map" tab renamed; Prefabs = the legacy "Entities" tab
+ * renamed — see EDITOR_REDESIGN.md §6.3 + §12 Q4. Components is the
+ * sister-to-Prefabs Component Builder — see
+ * docs/EDITOR_DESIGN_INVENTORY.md §1.)
  *
  * The active tab is persisted to localStorage under `editor.workflowMode`
  * so a tab reload lands the user back where they were. Keys are
@@ -38,6 +41,7 @@ export type PrimaryTabId =
   | "home"
   | "scene"
   | "prefabs"
+  | "components"
   | "assets"
   | "scripts"
   | "animation"
@@ -50,6 +54,7 @@ export const PRIMARY_TAB_ORDER: ReadonlyArray<PrimaryTabId> = [
   "home",
   "scene",
   "prefabs",
+  "components",
   "assets",
   "scripts",
   "animation",
@@ -77,6 +82,7 @@ export const PRIMARY_TABS: ReadonlyArray<{
   { id: "home", label: "Home", icon: <Home size={16} />, requiresProject: false },
   { id: "scene", label: "Scene", icon: <Grid3x3 size={16} />, requiresProject: true },
   { id: "prefabs", label: "Prefabs", icon: <Boxes size={16} />, requiresProject: true },
+  { id: "components", label: "Components", icon: <Blocks size={16} />, requiresProject: true },
   { id: "assets", label: "Assets", icon: <ImageIcon size={16} />, requiresProject: true },
   { id: "scripts", label: "Scripts", icon: <Code2 size={16} />, requiresProject: true },
   { id: "animation", label: "Animation", icon: <Film size={16} />, requiresProject: true },
