@@ -7,6 +7,11 @@ import {
   type SerializedDockview,
 } from "dockview";
 import { useDockLayoutPersistence } from "./useDockLayoutPersistence";
+import {
+  DockPanelHeader,
+  DockPanelHeaderOrnamentsContext,
+  type DockPanelHeaderOrnaments,
+} from "./DockPanelHeader";
 
 /**
  * DockShell — the editor's React wrapper around `<DockviewReact/>`.
@@ -73,6 +78,15 @@ export interface DockPanelDef {
   readonly title: string;
   /** React component rendered as the panel body. */
   readonly component: React.FunctionComponent<IDockviewPanelProps>;
+  /** Optional icon rendered left of the title in the
+   *  `DockPanelHeader` renderer. Passed through dockview as a
+   *  panel param (`params.icon`). */
+  readonly icon?: React.ReactNode;
+  /** Optional React node rendered right of the title for inline
+   *  controls (filter chips, dropdown buttons, etc.). Passed
+   *  through dockview as `params.controls`. When omitted the
+   *  header paints a muted chevron placeholder instead. */
+  readonly controls?: React.ReactNode;
 }
 
 export interface DockShellProps {
@@ -239,6 +253,46 @@ function cloneStylesheetsIntoPopout(targetWindow: Window): void {
   }
 }
 
+/**
+ * Strip non-serialisable React-element junk from a saved layout's
+ * panel params. The shape we look for is the standard React element
+ * tuple — `{type, key, props, _owner, _store}` — which is what a
+ * React element looks like after JSON.stringify drops its methods.
+ * If we leave it in `params`, dockview will hand it to the panel /
+ * tab as `props.params` and React tries to render it as a child, at
+ * which point React throws "Objects are not valid as a React child".
+ *
+ * We don't try to map it back to a live element — there's no
+ * reliable way to do that without the original component identity.
+ * Instead we drop those fields entirely; `<DockShell/>` supplies
+ * fresh ornaments via the React context layer.
+ */
+function sanitizeLayout(layout: SerializedDockview): SerializedDockview {
+  const looksLikeReactElement = (v: unknown): boolean => {
+    if (v === null || typeof v !== "object") return false;
+    const obj = v as Record<string, unknown>;
+    // React element-shaped object: has `type` + (`props` or `key`)
+    // and lost its `$$typeof` symbol via JSON serialization.
+    return "type" in obj && ("props" in obj || "key" in obj || "_owner" in obj);
+  };
+  // Shallow clone — we mutate only the `params` of each panel.
+  const next: SerializedDockview = { ...layout, panels: { ...layout.panels } };
+  for (const id of Object.keys(next.panels)) {
+    const panel = { ...next.panels[id]! };
+    const params = panel.params;
+    if (params && typeof params === "object") {
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (looksLikeReactElement(v)) continue;
+        cleaned[k] = v;
+      }
+      panel.params = cleaned;
+    }
+    next.panels[id] = panel;
+  }
+  return next;
+}
+
 export function DockShell({
   storageKey,
   panels,
@@ -269,7 +323,16 @@ export function DockShell({
       apiRef.current = api;
 
       // Restore saved layout, or fall back to the default.
-      const layoutToLoad = initial ?? defaultLayout;
+      //
+      // Sanitize any pre-existing snapshot — older builds of this
+      // shell put React-element ornaments (icon/controls) into panel
+      // params; those round-trip through localStorage as plain
+      // objects shaped like `{type, key, props, _owner, _store}` and
+      // get rendered as children of a `<span>`, which React rejects
+      // with "Objects are not valid as a React child". Strip those
+      // entries so legacy snapshots load cleanly.
+      const sanitized = initial ? sanitizeLayout(initial) : null;
+      const layoutToLoad = sanitized ?? defaultLayout;
       try {
         api.fromJSON(layoutToLoad);
       } catch {
@@ -296,6 +359,16 @@ export function DockShell({
           }
         }
       });
+
+      // NOTE: icon/controls are NOT stored on the dockview panel
+      // params (those get JSON-serialised into the saved layout
+      // snapshot — and React nodes are not JSON-safe; round-tripping
+      // them produces objects with a `type/key/props/_owner/_store`
+      // shape that React refuses to render). Instead, the
+      // `DockPanelHeader` renderer reads icon/controls from a React
+      // context (`DockPanelHeaderOrnamentsContext`) keyed by panel
+      // id; that context is supplied by `<DockShell/>`'s JSX wrapper
+      // and never participates in dockview's serialisation.
 
       // Popout token-injection. See the file header comment for the
       // full rationale. dockview does NOT expose a global "popout
@@ -365,31 +438,242 @@ export function DockShell({
       // recreated by `fromJSON` before our subscription was wired).
       for (const g of api.groups) watchGroup(g);
 
+      // ── Drag-off-viewport → popout gesture layer ──────────────────
+      //
+      // What this intercepts:
+      //   dockview's `onWillDragPanel` / `onWillDragGroup` fire when
+      //   the user starts dragging a panel tab (resp. an entire
+      //   group's titlebar). The native HTML5 drag has already begun
+      //   at this point — dockview hands us the in-flight DragEvent
+      //   plus a reference to the panel/group being dragged.
+      //
+      // What coordinates it tracks:
+      //   We mount a `pointermove` listener on `window` to track the
+      //   pointer's clientX/clientY for the duration of the drag. On
+      //   `pointerup` we compare against the viewport bounds. The
+      //   tolerance (POPOUT_EDGE_TOLERANCE) is the number of pixels
+      //   *outside* the viewport we require before treating it as an
+      //   intentional popout gesture — without it, a near-edge drop
+      //   would spawn a popout window unexpectedly.
+      //
+      // Why we need this:
+      //   dockview's default behaviour for an outside-the-grid drop
+      //   is to cancel the move (the panel snaps back to its origin
+      //   group). The expected editor UX is "drag a panel beyond the
+      //   viewport edge → it pops out into a new window at the
+      //   release point". We layer that on by detecting the off-
+      //   viewport pointerup ourselves and calling
+      //   `api.addPopoutGroup(panel, { position: { left, top, width,
+      //   height }, popoutUrl: '/popout.html' })` ourselves.
+      //
+      // Notes on coupling:
+      //   - We don't try to suppress dockview's native drop logic —
+      //     when the pointer is outside the viewport there's no
+      //     dockview drop target to fight with, so the drag naturally
+      //     ends with a no-op snap-back. Our popout call schedules on
+      //     `pointerup` and runs after dockview's drag-end cleanup
+      //     completes (queueMicrotask), so addPopoutGroup sees the
+      //     panel/group in its original location and can pop it
+      //     cleanly.
+      //   - For TabDragEvent the source is a single panel; we pop
+      //     just that panel. For GroupDragEvent the source is a
+      //     whole group; we pop the entire group. dockview's
+      //     `addPopoutGroup` accepts either.
+      //   - Position: width/height inherit from the source panel's
+      //     bounding rect (read via panel.api.width/height which the
+      //     gridview keeps current); left/top derive from the
+      //     release-point so the popout window opens roughly where
+      //     the user dropped it. We bias left/top so the cursor
+      //     lands near the top-left of the popout, not its origin.
+      const POPOUT_EDGE_TOLERANCE = 30;
+      type PendingDrag =
+        | { kind: "panel"; panel: import("dockview").IDockviewPanel }
+        | {
+            kind: "group";
+            group: import("dockview").DockviewGroupPanel;
+          };
+      let pendingDrag: PendingDrag | null = null;
+      let lastPointer: { x: number; y: number } | null = null;
+      let activePointerId: number | null = null;
+
+      const onPointerMove = (ev: PointerEvent) => {
+        lastPointer = { x: ev.clientX, y: ev.clientY };
+      };
+
+      const isOutsideViewport = (x: number, y: number): boolean => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        return (
+          x < -POPOUT_EDGE_TOLERANCE ||
+          y < -POPOUT_EDGE_TOLERANCE ||
+          x > w + POPOUT_EDGE_TOLERANCE ||
+          y > h + POPOUT_EDGE_TOLERANCE
+        );
+      };
+
+      const finishDrag = (releaseX: number, releaseY: number) => {
+        const drag = pendingDrag;
+        pendingDrag = null;
+        window.removeEventListener("pointermove", onPointerMove, true);
+        window.removeEventListener("pointerup", onPointerUp, true);
+        window.removeEventListener("dragend", onDragEnd, true);
+        activePointerId = null;
+        if (!drag) return;
+        if (!isOutsideViewport(releaseX, releaseY)) return;
+
+        // Inherit size from the source panel/group. Both expose
+        // .width / .height via their api.
+        let width = 480;
+        let height = 320;
+        let item: import("dockview").IDockviewPanel | import("dockview").DockviewGroupPanel;
+        if (drag.kind === "panel") {
+          item = drag.panel;
+          const w = drag.panel.api.width;
+          const h = drag.panel.api.height;
+          if (typeof w === "number" && w > 0) width = w;
+          if (typeof h === "number" && h > 0) height = h;
+        } else {
+          item = drag.group;
+          const w = drag.group.api.width;
+          const h = drag.group.api.height;
+          if (typeof w === "number" && w > 0) width = w;
+          if (typeof h === "number" && h > 0) height = h;
+        }
+
+        // Convert client (viewport) coords to screen coords for the
+        // popout window's position. window.screenX/Y account for
+        // browser chrome + monitor placement; clientX/Y are relative
+        // to the editor viewport.
+        const screenLeft =
+          (window.screenX ?? 0) + releaseX - Math.round(width * 0.1);
+        const screenTop =
+          (window.screenY ?? 0) + releaseY - 16;
+
+        // Defer so dockview's drag-end cleanup runs first; calling
+        // addPopoutGroup mid-drag races the native dragend handler.
+        queueMicrotask(() => {
+          try {
+            void api.addPopoutGroup(item, {
+              popoutUrl: "/popout.html",
+              position: {
+                left: screenLeft,
+                top: screenTop,
+                width,
+                height,
+              },
+            });
+          } catch {
+            // Popout failed (popup blocked, addPopoutGroup rejected,
+            // etc.) — the panel stays in the main window, which is
+            // an acceptable fallback.
+          }
+        });
+      };
+
+      const onPointerUp = (ev: PointerEvent) => {
+        if (
+          activePointerId !== null &&
+          ev.pointerId !== activePointerId
+        ) {
+          return;
+        }
+        const x = ev.clientX;
+        const y = ev.clientY;
+        finishDrag(x, y);
+      };
+
+      // HTML5 dragend fires when the OS drag completes; we use it as
+      // a backup signal in case the pointerup is swallowed (e.g.
+      // released over a window that captured pointer events).
+      const onDragEnd = (ev: DragEvent) => {
+        const x = ev.clientX;
+        const y = ev.clientY;
+        // Prefer the last live pointermove if dragend's coords are 0
+        // (some browsers report 0,0 on drag cancel).
+        const px = x === 0 && y === 0 && lastPointer ? lastPointer.x : x;
+        const py = x === 0 && y === 0 && lastPointer ? lastPointer.y : y;
+        finishDrag(px, py);
+      };
+
+      const startTracking = () => {
+        lastPointer = null;
+        window.addEventListener("pointermove", onPointerMove, true);
+        window.addEventListener("pointerup", onPointerUp, true);
+        window.addEventListener("dragend", onDragEnd, true);
+      };
+
+      const willDragPanelSub = api.onWillDragPanel((e) => {
+        pendingDrag = { kind: "panel", panel: e.panel };
+        // Capture pointerId from the underlying DragEvent's target
+        // pointer when available. HTML5 drag events don't have a
+        // pointerId, so we trust the first pointerup we see.
+        activePointerId = null;
+        startTracking();
+      });
+      const willDragGroupSub = api.onWillDragGroup((e) => {
+        pendingDrag = { kind: "group", group: e.group };
+        activePointerId = null;
+        startTracking();
+      });
+
       // Clean up on unmount.
       return () => {
         layoutSub.dispose();
         addGroupSub.dispose();
         removeGroupSub.dispose();
+        willDragPanelSub.dispose();
+        willDragGroupSub.dispose();
+        window.removeEventListener("pointermove", onPointerMove, true);
+        window.removeEventListener("pointerup", onPointerUp, true);
+        window.removeEventListener("dragend", onDragEnd, true);
         for (const c of groupCleanups.values()) c();
         groupCleanups.clear();
       };
     },
-    [defaultLayout, initial, onLayoutChange, save],
+    [defaultLayout, initial, onLayoutChange, panels, save],
+  );
+
+  // Build the icon/controls map for `DockPanelHeader` to read from
+  // context. This is the source of truth for ornaments — separate
+  // from dockview's serialisable params layer.
+  const ornaments = React.useMemo<Record<string, DockPanelHeaderOrnaments>>(
+    () => {
+      const map: Record<string, DockPanelHeaderOrnaments> = {};
+      for (const p of panels) {
+        map[p.id] = { icon: p.icon, controls: p.controls };
+      }
+      return map;
+    },
+    [panels],
   );
 
   return (
     <div
       className={`dockview-theme-cardboard h-full w-full min-h-0 ${className ?? ""}`}
     >
-      <DockviewReact
-        components={components}
-        onReady={handleReady}
-        // Keep dockview's default tab close button hidden by default —
-        // editor panels are part of the page layout, not user-spawned
-        // documents the user is meant to dismiss. Pages can opt into
-        // closability per-panel by overriding this in their layout JSON.
-        disableDnd={false}
-      />
+      <DockPanelHeaderOrnamentsContext.Provider value={ornaments}>
+        <DockviewReact
+          components={components}
+          onReady={handleReady}
+          // When a group contains exactly one panel, render its tab
+          // strip full-width — combined with our custom
+          // `defaultTabComponent`, that single tab reads as a panel
+          // header bar (see Editor Design/Entities.png). Multi-panel
+          // groups revert to the narrow-tab look automatically.
+          singleTabMode="fullwidth"
+          // Every panel uses our `DockPanelHeader` renderer for its
+          // tab unless it explicitly specifies a different
+          // `tabComponent`. We pass the component directly (not a
+          // string id) because dockview-react accepts a React function
+          // component for `defaultTabComponent`.
+          defaultTabComponent={DockPanelHeader}
+          // Keep dockview's default tab close button hidden by default —
+          // editor panels are part of the page layout, not user-spawned
+          // documents the user is meant to dismiss. Pages can opt into
+          // closability per-panel by overriding this in their layout JSON.
+          disableDnd={false}
+        />
+      </DockPanelHeaderOrnamentsContext.Provider>
     </div>
   );
 }
@@ -416,6 +700,13 @@ export function buildSideBySideLayout(
   }
   const panelMap: SerializedDockview["panels"] = {};
   for (const p of panels) {
+    // NOTE: icon/controls are NOT placed in the JSON params here.
+    // They're React nodes — not JSON-serialisable — and the saved
+    // layout snapshot in localStorage would lose them on reload.
+    // DockShell re-injects them via `onDidAddPanel` →
+    // `panel.api.updateParameters(...)` at runtime using the
+    // registry as the source of truth. The JSON snapshot only
+    // tracks id / title / contentComponent / structural layout.
     panelMap[p.id] = {
       id: p.id,
       contentComponent: p.id,

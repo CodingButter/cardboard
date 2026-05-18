@@ -69,10 +69,26 @@ function InspectorBody() {
 /** Stable panel registry — declared at module scope so each MapView
  *  mount reuses the same component identities. dockview keys panels
  *  by their `contentComponent` string at layout-time, so flipping the
- *  identity of the component would force a full remount. */
+ *  identity of the component would force a full remount.
+ *
+ *  Each panel carries an optional `icon` rendered left of the title
+ *  in the DockPanelHeader (matches the iconography in
+ *  Editor Design/Entities.png). The `controls` slot is left empty
+ *  here so the header paints a chevron placeholder — sub-pages will
+ *  wire real controls later. */
 const PANELS: readonly DockPanelDef[] = [
-  { id: "map", title: "Map", component: MapBody },
-  { id: "inspector", title: "Inspector", component: InspectorBody },
+  {
+    id: "map",
+    title: "Map",
+    component: MapBody,
+    icon: <MapIcon size={12} />,
+  },
+  {
+    id: "inspector",
+    title: "Inspector",
+    component: InspectorBody,
+    icon: <SlidersHorizontal size={12} />,
+  },
 ];
 
 /** Initial layout JSON — Map on the left (60%), Inspector on the

@@ -679,3 +679,91 @@
 .dv-popout-window {
   background: var(--color-bg-panel);
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Panel-header bar mode (custom defaultTabComponent + singleTabMode)
+ *
+ * When dockview's group contains a single panel and singleTabMode is
+ * 'fullwidth' it adds the class `dv-full-width-single-tab` to the
+ * `.dv-tabs-and-actions-container`. The internal `.dv-tabs-container`
+ * stretches its lone `.dv-tab` to flex-grow:1 so the tab DOM spans
+ * the full width — which is exactly what we want: that tab IS the
+ * panel-header bar.
+ *
+ * The styles below:
+ *   - Make the tab strip render at h-9 (36px) to match the
+ *     panel-header geometry in Editor Design/Entities.png. dockview
+ *     reads `--dv-tabs-and-actions-container-height` so we only
+ *     bump that token.
+ *   - Strip the amber active-tab underline when the tab is in
+ *     fullwidth mode (the header bar already has its own bottom
+ *     border via our React renderer). Without this override the
+ *     `.dockview-theme-cardboard .dv-tab.dv-active-tab` rule above
+ *     would paint a 2px amber line under the header — visible only
+ *     in single-panel groups but distracting against the design.
+ *   - Remove the right-side void container's left border so the
+ *     fullwidth tab visually owns the entire row.
+ *   - Hide the auto-rendered tab close icon — our header doesn't
+ *     show a close affordance, panels are part of the page layout.
+ *   - Tighten the inner padding so our React renderer (which paints
+ *     its own px-4) controls the spacing.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab {
+  /* h-9 / 36px to match the panel-header geometry. The token
+   * cascades; we don't fight specificity. */
+  --dv-tabs-and-actions-container-height: 36px;
+}
+
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab
+  .dv-tabs-container
+  > .dv-tab {
+  /* Let our React renderer paint padding + bg; dockview's default
+   * tab padding would inset our header. */
+  padding: 0;
+}
+
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab
+  .dv-tab.dv-active-tab {
+  /* Drop the amber underline in header-bar mode — the React
+   * renderer paints its own `border-b` already. */
+  box-shadow: none;
+}
+
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab
+  .dv-void-container {
+  /* Void container = the gap right of the tabs row. In fullwidth
+   * mode the tab already consumed all horizontal space, so this
+   * shouldn't be visible at all; force its width to zero so its
+   * background doesn't bleed past the header bar. */
+  flex: 0;
+  width: 0;
+  min-width: 0;
+}
+
+/* Hide the dockview-rendered close icon inside header-bar mode —
+ * our React header does not show a close affordance. */
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab
+  .dv-default-tab-action {
+  display: none;
+}
+
+/* When the tab strip is NOT in fullwidth mode (a multi-panel group),
+ * we still want our React renderer to look like a proper tab — give
+ * narrow-mode tabs some horizontal padding even though our custom
+ * renderer paints its own px-4 (which we want to keep at full-width
+ * scale). Constrain the inner padding to match the design narrow-tab
+ * size when multiple are present. */
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container:not(.dv-single-tab)
+  .dv-tab
+  .dock-panel-header {
+  /* Narrow tab needs a tighter horizontal pad; our renderer's px-4
+   * (1rem) is too generous for a tab competing with siblings. */
+  padding-inline: 0.75rem;
+}
