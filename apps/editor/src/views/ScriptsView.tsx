@@ -1,6 +1,5 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 
 /**
@@ -23,15 +22,13 @@ export interface ScriptsViewProps {
 
 export function ScriptsView(_props: ScriptsViewProps): React.JSX.Element {
   return (
-    <div className="h-full w-full p-6">
-      <Card padded className="h-full w-full flex items-center justify-center">
+    <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState
           icon={<Construction size={28} />}
           title="Scripts — coming soon"
           description="This page is being rebuilt. Mockup: Editor Design/Scripting.png · Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1.6"
         />
-      </Card>
-    </div>
+      </div>
   );
 }
 

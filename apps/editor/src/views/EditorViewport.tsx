@@ -1,6 +1,5 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 
 /**
@@ -20,15 +19,13 @@ export function EditorViewport(
   _props: EditorViewportProps = {},
 ): React.JSX.Element {
   return (
-    <div className="h-full w-full p-6">
-      <Card padded className="h-full w-full flex items-center justify-center">
+    <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState
           icon={<Construction size={28} />}
           title="Viewport — coming soon"
           description="The iframe game-runner host is being rebuilt as part of the Scene page."
         />
-      </Card>
-    </div>
+      </div>
   );
 }
 

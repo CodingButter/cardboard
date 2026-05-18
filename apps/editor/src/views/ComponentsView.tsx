@@ -1,6 +1,5 @@
 import React from "react";
 import { Blocks } from "lucide-react";
-import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 
 /**
@@ -22,15 +21,13 @@ export interface ComponentsViewProps {
 
 export function ComponentsView(_props: ComponentsViewProps): React.JSX.Element {
   return (
-    <div className="h-full w-full p-6">
-      <Card padded className="h-full w-full flex items-center justify-center">
+    <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState
           icon={<Blocks size={28} />}
           title="Components — coming soon"
           description="Mockup: Editor Design/Components.png · Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1 (Component Builder)"
         />
-      </Card>
-    </div>
+      </div>
   );
 }
 

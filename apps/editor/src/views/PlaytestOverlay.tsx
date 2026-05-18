@@ -1,6 +1,5 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 
 /**
@@ -23,15 +22,13 @@ export function PlaytestOverlay(
   _props: PlaytestOverlayProps = {},
 ): React.JSX.Element {
   return (
-    <div className="h-full w-full p-6">
-      <Card padded className="h-full w-full flex items-center justify-center">
+    <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState
           icon={<Construction size={28} />}
           title="Playtest — coming soon"
           description="This page is being rebuilt. Mockup: Editor Design/GamePreview.png · Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1.10"
         />
-      </Card>
-    </div>
+      </div>
   );
 }
 
