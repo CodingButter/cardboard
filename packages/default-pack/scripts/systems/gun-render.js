@@ -7,21 +7,23 @@
  * has elapsed). Reload START lives in `player-input.js` — once it's
  * begun, this system commits it.
  *
- * Render phase: looks up the active hotbar item, fetches the held
- * variant from the shared `api.itemImages` cache, and composites the
- * viewmodel PNG over the world. Bob + recoil are derived from the
- * weapon's stats with fallbacks to `api.config.gun.*`.
+ * The "active weapon" is now an entity reference: read
+ * `Carrier.hotbar → ActiveSlot.index → Inventory.slots[idx]`. That
+ * entity carries the `Weapon` component with all fire-rate + reload
+ * + mag state. The Player itself no longer carries `Weapon`.
  *
+ * Render phase: composites the held viewmodel PNG over the world.
  * Registered on the `after-world` render phase so the gun sits over
- * the world pass but under the HUD overlays — same layering as the
- * engine's pre-R3 version.
+ * the world pass but under the HUD overlays.
  */
+import {
+  getActiveItemEntity,
+  countItemId,
+  removeItemId,
+} from "../lib/inventory.js";
+
 export default (api) => {
   const C = api.components;
-  const inv = api.inventory;
-  const itemRegistry = api.singleton("ItemRegistry");
-
-  const itemDef = (id) => itemRegistry.byId?.[id] ?? null;
 
   const isMoving = (input) =>
     api.input.isBindingPressed(input.bindings.forward) ||
@@ -36,40 +38,46 @@ export default (api) => {
     const cfg = api.config;
 
     world.each(
-      C.PlayerInput, C.Weapon, C.Inventory,
-      (entity, input, weapon, inventory) => {
-        const active = inv.getActiveItem(inventory);
-        const def = active ? itemDef(active.itemId) : null;
-        const isWeapon = def?.type === "weapon";
-        const stats = isWeapon ? def.weapon : undefined;
-        const swayFreq = stats?.swayFrequency ?? cfg.gun.swayFrequency;
+      C.PlayerInput, C.Carrier,
+      (entity, input, _carrier) => {
+        const activeEntity = getActiveItemEntity(world, entity, C);
+        const weapon = activeEntity !== null ? C.Weapon.get(activeEntity) : null;
+        const item = activeEntity !== null ? C.Item.get(activeEntity) : null;
+        const isWeapon = !!weapon && item?.type === "weapon";
+        const swayFreq = cfg.gun.swayFrequency;
 
-        if (isMoving(input)) {
-          weapon.walkPhase += deltaTime * swayFreq;
-          if (weapon.walkPhase > Math.PI * 2) weapon.walkPhase -= Math.PI * 2;
+        if (weapon) {
+          if (isMoving(input)) {
+            weapon.walkPhase += deltaTime * swayFreq;
+            if (weapon.walkPhase > Math.PI * 2) weapon.walkPhase -= Math.PI * 2;
+          }
         }
 
         // Reload completion.
-        if (active && isWeapon && Number.isFinite(weapon.reloadStart)) {
-          const reloadTime = stats?.reloadTime ?? 1.5;
+        if (isWeapon && Number.isFinite(weapon.reloadStart) && weapon.reloadStart >= 0) {
+          const reloadTime = weapon.reloadTime ?? 1.5;
           if (now - weapon.reloadStart >= reloadTime) {
-            const magSize = stats?.magazineSize ?? 0;
-            const ammoItem = stats?.ammoItem;
+            const magSize = weapon.magazineSize ?? 0;
+            const ammoItem = weapon.ammoItem;
             if (magSize > 0 && ammoItem) {
-              const needed = magSize - (active.mag ?? 0);
-              const taken = inv.removeItem(inventory, ammoItem, needed);
-              active.mag = (active.mag ?? 0) + taken;
+              const needed = magSize - (weapon.mag ?? 0);
+              const taken = removeItemId(world, entity, ammoItem, needed, C);
+              weapon.mag = (weapon.mag ?? 0) + taken;
             }
-            weapon.reloadStart = -Infinity;
+            weapon.reloadStart = -1;
           }
         }
 
         // Fire — semi-auto if fireRate==0 (edge-triggered),
         // full-auto otherwise (rate-limited).
-        if (active && isWeapon && firingNow && !Number.isFinite(weapon.reloadStart)) {
-          const fireRate = stats?.fireRate ?? 0;
-          const magSize = stats?.magazineSize ?? 0;
-          const hasMag = magSize === 0 || (active.mag ?? 0) > 0;
+        if (
+          isWeapon &&
+          firingNow &&
+          (!Number.isFinite(weapon.reloadStart) || weapon.reloadStart < 0)
+        ) {
+          const fireRate = weapon.fireRate ?? 0;
+          const magSize = weapon.magazineSize ?? 0;
+          const hasMag = magSize === 0 || (weapon.mag ?? 0) > 0;
           let shouldFire = false;
           if (fireRate > 0) {
             shouldFire = hasMag && now - weapon.lastFireTime >= 1 / fireRate;
@@ -78,54 +86,43 @@ export default (api) => {
           }
           if (shouldFire) {
             weapon.lastFireTime = now;
-            if (magSize > 0) active.mag = (active.mag ?? 1) - 1;
-            // Au1 of AUDIO.md — placeholder gunshot. The default pack
-            // ships a synthesized stub; modders replace with real OGG.
+            if (magSize > 0) weapon.mag = (weapon.mag ?? 1) - 1;
             api.audio.play("gunshot");
-            // Ev1 of EVENTS.md §4.8 — fire-edge moment. Chain packs
-            // (camera-shake mods, recoil overlays, screen-flash
-            // effects) subscribe to react without monkey-patching the
-            // viewmodel pipeline. ammoLeft reflects the post-decrement
-            // value so subscribers see "how many remain" semantics.
             api.events.emit("weapon:fired", {
               player: entity,
-              weaponId: active.itemId,
-              ammoLeft: magSize > 0 ? (active.mag ?? 0) : -1,
+              weaponId: item?.itemId,
+              ammoLeft: magSize > 0 ? (weapon.mag ?? 0) : -1,
             });
           }
         }
-        weapon.wasFiring = firingNow;
+        if (weapon) weapon.wasFiring = firingNow;
       },
     );
   });
 
   // ─── Render — composite the viewmodel over the world ────────────────
-  // `after-world` runs after `drawWorld` and before sprites in
-  // `Game.render`. That's the slot the engine's pre-R3 gun was drawn at.
   api.registerRendererSystem((renderer, world) => {
-    const entity = world.first(C.PlayerInput, C.Weapon, C.Inventory);
+    const entity = world.first(C.PlayerInput, C.Carrier);
     if (entity === undefined) return;
-    const inventory = C.Inventory.getOrThrow(entity);
-    const active = inv.getActiveItem(inventory);
-    if (!active) return;
-    const def = itemDef(active.itemId);
-    if (def?.type !== "weapon") return;
-    const image = api.itemImages.get(active.itemId, "held");
+    const activeEntity = getActiveItemEntity(world, entity, C);
+    if (activeEntity === null) return;
+    const item = C.Item.get(activeEntity);
+    const weapon = C.Weapon.get(activeEntity);
+    if (!item || !weapon || item.type !== "weapon") return;
+    const image = api.itemImages.get(item.itemId, "held");
     if (!image) return;
 
-    const weapon = C.Weapon.getOrThrow(entity);
     const aim = C.Aim.get(entity);
     const aimY = aim?.screenY ?? 0;
 
-    const stats = def.weapon ?? {};
     const fallback = api.config.gun;
-    const heightFraction = stats.heightFraction ?? fallback.heightFraction;
-    const reticleGapFraction = stats.reticleGapFraction ?? fallback.reticleGapFraction;
-    const swayAmpFraction = stats.swayAmplitudeFraction ?? fallback.swayAmplitudeFraction;
-    const recoilDuration = stats.recoilDuration ?? fallback.recoilDuration;
-    const recoilHeightFraction = stats.recoilHeightFraction ?? fallback.recoilHeightFraction;
-    const recoilScale = stats.recoilScale ?? fallback.recoilScale;
-    const recoilSkew = stats.recoilSkew ?? fallback.recoilSkew;
+    const heightFraction = fallback.heightFraction;
+    const reticleGapFraction = fallback.reticleGapFraction;
+    const swayAmpFraction = fallback.swayAmplitudeFraction;
+    const recoilDuration = fallback.recoilDuration;
+    const recoilHeightFraction = fallback.recoilHeightFraction;
+    const recoilScale = fallback.recoilScale;
+    const recoilSkew = fallback.recoilSkew;
 
     const ctx = renderer.ctx;
     const now = performance.now() / 1000;
@@ -159,4 +156,8 @@ export default (api) => {
     ctx.drawImage(image, -size / 2, -size, size, size);
     ctx.restore();
   }, "after-world");
+
+  // Mark countItemId as referenced — used by the carry-system in
+  // future expansions (and prevents tree-shaking dead-imports).
+  void countItemId;
 };

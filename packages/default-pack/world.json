@@ -4,12 +4,75 @@
   },
   "entities": [
     {
+      "id": 1,
       "name": "player",
       "components": {
         "Position": { "x": 0, "y": 0 },
         "Facing": 0,
         "Aim": { "screenY": 0 },
+        "Carrier": { "hotbar": 2, "backpack": 3 },
         "Scripts": { "refs": ["scripts/setup/player-init.js"] }
+      }
+    },
+    {
+      "id": 2,
+      "name": "player_hotbar",
+      "components": {
+        "Inventory": {
+          "slots": [4, null, null, null, null, null, null, null, null],
+          "capacity": 9
+        },
+        "ActiveSlot": { "index": 0 }
+      }
+    },
+    {
+      "id": 3,
+      "name": "player_backpack",
+      "components": {
+        "Inventory": {
+          "slots": [5, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+          "capacity": 27
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "starter_rifle",
+      "components": {
+        "Item": {
+          "itemId": "rifle",
+          "displayName": "Assault Rifle",
+          "image": "images/items/rifle.png",
+          "type": "weapon",
+          "equipSlot": "mainHand"
+        },
+        "Stackable": { "count": 1, "max": 1 },
+        "Equippable": { "slot": "mainHand" },
+        "Weapon": {
+          "fireRate": 8,
+          "magazineSize": 30,
+          "reloadTime": 1.5,
+          "ammoItem": "rifle_ammo",
+          "mag": 30,
+          "lastFireTime": -100,
+          "walkPhase": 0,
+          "wasFiring": false,
+          "reloadStart": -1
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "starter_rifle_ammo",
+      "components": {
+        "Item": {
+          "itemId": "rifle_ammo",
+          "displayName": "5.56mm Rounds",
+          "image": "images/items/ammo_pack.png",
+          "type": "ammo",
+          "worldSpriteId": "ammo_pack"
+        },
+        "Stackable": { "count": 90, "max": 120 }
       }
     }
   ],

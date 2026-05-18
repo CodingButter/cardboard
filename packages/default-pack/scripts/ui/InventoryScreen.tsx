@@ -1,78 +1,83 @@
 /* @jsxImportSource preact */
 import { useEffect, useRef, useState } from "preact/hooks";
-import type {
-  EquipSlot,
-  InventoryAPI,
-  InventoryShape,
-  ItemDef,
-  ItemImagesAPI,
-  ItemStack,
-} from "@two_5_d/engine";
+import type { ItemImagesAPI } from "@two_5_d/engine";
 
 /**
- * Drag-drop inventory modal.
+ * Inventory modal (entity-ref model).
  *
- * Pack-side after R4. The component is identical to the engine-side
- * original (same UX, same Tailwind classes) — the only change is that
- * the helpers it used to import from `Libs/Inventory` now arrive via
- * the `inv` (InventoryAPI) prop. The pack-builder erases the type-only
- * `@two_5_d/engine` imports above at build time; nothing engine-side
- * ships in the compiled `.js` that lands in the .apg.
+ * The carry-system stores items as ENTITIES — slots are
+ * `(entityId | null)[]` and each item entity has `Item` + `Stackable`
+ * (+ optional `Weapon`) components. This screen renders those slots and
+ * supports drag-pick-up / drop / merge between the player's hotbar and
+ * backpack containers.
  *
- * `items` is the pack-defined item catalog — loaded by
- * `scripts/setup/load-items.js` into `api.singleton("ItemRegistry").byId`.
- * Replaces the pre-cleanup `manifest` prop, since items moved out of
- * `manifest.json` into `data/items.json`.
+ * To keep the engine boundary tight the screen receives `world` + `C`
+ * (component handles) live-prop refs and reads + writes through them
+ * directly. No engine-side helpers are pulled in.
  */
 
-export type ItemRegistryById = Readonly<Record<string, ItemDef>>;
+type Slot = number | null;
 
 export interface InventoryScreenProps {
-  inventory: InventoryShape;
-  items: ItemRegistryById;
+  world: any;
+  C: any;
   icons: ItemImagesAPI;
-  inv: InventoryAPI;
+  hotbarSlots: Slot[];
+  hotbarCapacity: number;
+  backpackSlots: Slot[];
+  backpackCapacity: number;
+  activeIndex: number;
   onClose: () => void;
 }
 
 type SlotRef =
-  | { kind: "bag"; index: number }
   | { kind: "hotbar"; index: number }
-  | { kind: "equipment"; slot: EquipSlot };
+  | { kind: "backpack"; index: number };
 
-function readSlot(inv: InventoryShape, ref: SlotRef): ItemStack | null {
-  switch (ref.kind) {
-    case "bag":
-      return inv.bag[ref.index] ?? null;
-    case "hotbar":
-      return inv.hotbar[ref.index] ?? null;
-    case "equipment":
-      return inv.equipment[ref.slot] ?? null;
-  }
+function readArray(props: InventoryScreenProps, ref: SlotRef): Slot[] {
+  return ref.kind === "hotbar" ? props.hotbarSlots : props.backpackSlots;
 }
 
-function writeSlot(inv: InventoryShape, ref: SlotRef, stack: ItemStack | null): void {
-  switch (ref.kind) {
-    case "bag":
-      inv.bag[ref.index] = stack;
-      return;
-    case "hotbar":
-      inv.hotbar[ref.index] = stack;
-      return;
-    case "equipment":
-      inv.equipment[ref.slot] = stack;
-      return;
-  }
+function readSlot(props: InventoryScreenProps, ref: SlotRef): Slot {
+  return readArray(props, ref)[ref.index] ?? null;
 }
 
-function slotAccepts(ref: SlotRef, stack: ItemStack, items: ItemRegistryById): boolean {
-  if (ref.kind !== "equipment") return true;
-  const def = items[stack.itemId];
-  return def?.equipSlot === ref.slot;
+function writeSlot(props: InventoryScreenProps, ref: SlotRef, value: Slot): void {
+  readArray(props, ref)[ref.index] = value;
 }
 
-export function InventoryScreen({ inventory, items, icons, inv, onClose }: InventoryScreenProps) {
-  const [cursor, setCursor] = useState<ItemStack | null>(null);
+interface ItemView {
+  itemId: string;
+  displayName: string | undefined;
+  type: string | undefined;
+  count: number;
+  max: number;
+  isWeapon: boolean;
+  mag: number | undefined;
+  magazineSize: number | undefined;
+}
+
+function describe(entityId: number | null, world: any, C: any): ItemView | null {
+  if (entityId === null) return null;
+  const item = C.Item.get(entityId);
+  const stack = C.Stackable.get(entityId);
+  const weapon = C.Weapon.get(entityId);
+  if (!item) return null;
+  return {
+    itemId: item.itemId,
+    displayName: item.displayName,
+    type: item.type,
+    count: stack?.count ?? 1,
+    max: stack?.max ?? 1,
+    isWeapon: !!weapon,
+    mag: weapon?.mag,
+    magazineSize: weapon?.magazineSize,
+  };
+}
+
+export function InventoryScreen(props: InventoryScreenProps) {
+  const { world, C, icons, onClose } = props;
+  const [cursor, setCursor] = useState<number | null>(null);
   const [cursorSource, setCursorSource] = useState<SlotRef | null>(null);
   const [version, setVersion] = useState(0);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
@@ -98,137 +103,51 @@ export function InventoryScreen({ inventory, items, icons, inv, onClose }: Inven
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
-  const handleSlotClick = (ref: SlotRef, e: MouseEvent) => {
-    if (e.shiftKey && cursor === null) {
-      const kind = ref.kind;
-      const key = kind === "equipment" ? ref.slot : ref.index;
-      inv.quickTransfer(inventory, items, kind, key);
-      bump();
-      return;
+  const tryMerge = (intoEntity: number, fromEntity: number): boolean => {
+    const a = C.Item.get(intoEntity);
+    const b = C.Item.get(fromEntity);
+    const sa = C.Stackable.get(intoEntity);
+    const sb = C.Stackable.get(fromEntity);
+    if (!a || !b || !sa || !sb) return false;
+    if (a.itemId !== b.itemId) return false;
+    if (C.Weapon.has(intoEntity) || C.Weapon.has(fromEntity)) return false;
+    const room = sa.max - sa.count;
+    if (room <= 0) return false;
+    const take = Math.min(room, sb.count);
+    sa.count += take;
+    sb.count -= take;
+    if (sb.count === 0) {
+      world.despawn(fromEntity);
+      return true;
     }
+    return false;
+  };
 
-    if (e.ctrlKey || e.metaKey) {
-      const here = readSlot(inventory, ref);
-      if (cursor === null) {
-        if (!here) return;
-        const def = items[here.itemId];
-        if (def?.type === "weapon" || here.count <= 1) {
-          setCursor(here);
-          setCursorSource(ref);
-          writeSlot(inventory, ref, null);
-        } else {
-          const half = Math.ceil(here.count / 2);
-          const taken: ItemStack = { itemId: here.itemId, count: half };
-          if (here.mag !== undefined) taken.mag = here.mag;
-          here.count -= half;
-          setCursor(taken);
-          setCursorSource(ref);
-        }
-        bump();
-        return;
-      }
-      if (!slotAccepts(ref, cursor, items)) return;
-      if (here === null) {
-        const placed: ItemStack = { itemId: cursor.itemId, count: 1 };
-        if (cursor.mag !== undefined) placed.mag = cursor.mag;
-        writeSlot(inventory, ref, placed);
-        cursor.count -= 1;
-        if (cursor.count === 0) {
-          setCursor(null);
-          setCursorSource(null);
-        } else setCursor({ ...cursor });
-      } else if (here.itemId === cursor.itemId) {
-        const def = items[here.itemId];
-        const stackMax = def ? inv.defaultStackMax(def) : 1;
-        if (def?.type !== "weapon" && here.count < stackMax) {
-          here.count += 1;
-          cursor.count -= 1;
-          if (cursor.count === 0) {
-            setCursor(null);
-            setCursorSource(null);
-          } else setCursor({ ...cursor });
-        }
-      }
-      bump();
-      return;
-    }
-
-    const here = readSlot(inventory, ref);
+  const handleSlotClick = (ref: SlotRef) => {
+    const here = readSlot(props, ref);
     if (cursor === null) {
       if (here === null) return;
       setCursor(here);
       setCursorSource(ref);
-      writeSlot(inventory, ref, null);
-    } else {
-      if (!slotAccepts(ref, cursor, items)) return;
-      if (here === null) {
-        writeSlot(inventory, ref, cursor);
-        setCursor(null);
-        setCursorSource(null);
-      } else if (here.itemId === cursor.itemId) {
-        const def = items[here.itemId];
-        const stackMax = def ? inv.defaultStackMax(def) : 1;
-        const room = stackMax - here.count;
-        if (room <= 0 || def?.type === "weapon") {
-          writeSlot(inventory, ref, cursor);
-          setCursor(here);
-          setCursorSource(ref);
-        } else {
-          const take = Math.min(room, cursor.count);
-          here.count += take;
-          cursor.count -= take;
-          if (cursor.count === 0) {
-            setCursor(null);
-            setCursorSource(null);
-          } else setCursor({ ...cursor });
-        }
-      } else {
-        if (ref.kind === "equipment" && !slotAccepts(ref, cursor, items)) return;
-        writeSlot(inventory, ref, cursor);
-        setCursor(here);
-        setCursorSource(ref);
-      }
+      writeSlot(props, ref, null);
+      bump();
+      return;
     }
-    bump();
-  };
-
-  const handleModalWheel = (e: WheelEvent) => {
-    if (!cursor || !cursorSource) return;
-    if (e.deltaY === 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const dir = Math.sign(e.deltaY);
-    const source = readSlot(inventory, cursorSource);
-    if (dir > 0) {
-      if (source === null) {
-        if (slotAccepts(cursorSource, cursor, items)) {
-          const placed: ItemStack = { itemId: cursor.itemId, count: 1 };
-          if (cursor.mag !== undefined) placed.mag = cursor.mag;
-          writeSlot(inventory, cursorSource, placed);
-          cursor.count -= 1;
-        }
-      } else if (source.itemId === cursor.itemId) {
-        const def = items[source.itemId];
-        const stackMax = def ? inv.defaultStackMax(def) : 1;
-        if (def?.type !== "weapon" && source.count < stackMax) {
-          source.count += 1;
-          cursor.count -= 1;
-        }
-      }
-    } else {
-      if (source && source.itemId === cursor.itemId && source.count > 0) {
-        const def = items[source.itemId];
-        if (def?.type !== "weapon") {
-          source.count -= 1;
-          cursor.count += 1;
-          if (source.count === 0) writeSlot(inventory, cursorSource, null);
-        }
-      }
-    }
-    if (cursor.count <= 0) {
+    // Cursor → slot
+    if (here === null) {
+      writeSlot(props, ref, cursor);
       setCursor(null);
       setCursorSource(null);
-    } else setCursor({ ...cursor });
+    } else if (tryMerge(here, cursor)) {
+      // merged; cursor entity may already be despawned
+      setCursor(null);
+      setCursorSource(null);
+    } else {
+      // Swap
+      writeSlot(props, ref, cursor);
+      setCursor(here);
+      setCursorSource(ref);
+    }
     bump();
   };
 
@@ -238,271 +157,187 @@ export function InventoryScreen({ inventory, items, icons, inv, onClose }: Inven
       class="fixed inset-0 z-30 flex items-center justify-center bg-black/70"
       data-inventory-version={version}
       onClick={(e) => {
-        if (e.target === rootRef.current) onClose();
+        if (e.target === rootRef.current) {
+          // If we have a cursor item, drop it back into its source slot
+          // before closing so it doesn't disappear into the void.
+          if (cursor !== null && cursorSource !== null) {
+            writeSlot(props, cursorSource, cursor);
+          }
+          onClose();
+        }
       }}
-      onWheel={handleModalWheel}
     >
       <div class="cardboard-scroll flex max-h-[90vh] max-w-[90vw] flex-col gap-3 overflow-y-auto rounded-lg border border-amber-700/60 bg-zinc-900/95 p-5 shadow-2xl">
-        <div class="flex items-start gap-5">
-          <CharacterPanel
-            inventory={inventory}
-            items={items}
-            icons={icons}
-            inv={inv}
-            onSlotClick={handleSlotClick}
-          />
-          <BagGrid
-            inventory={inventory}
-            items={items}
-            icons={icons}
-            onSlotClick={handleSlotClick}
-          />
-        </div>
-        <HotbarRow
-          inventory={inventory}
-          items={items}
+        <SlotGrid
+          title="Backpack"
+          cols={9}
+          capacity={props.backpackCapacity}
+          slots={props.backpackSlots}
           icons={icons}
-          onSlotClick={handleSlotClick}
+          world={world}
+          C={C}
+          onSlotClick={(i) => handleSlotClick({ kind: "backpack", index: i })}
+        />
+        <SlotGrid
+          title="Hotbar"
+          cols={Math.max(1, props.hotbarCapacity)}
+          capacity={props.hotbarCapacity}
+          slots={props.hotbarSlots}
+          icons={icons}
+          world={world}
+          C={C}
+          highlightIndex={props.activeIndex}
+          onSlotClick={(i) => handleSlotClick({ kind: "hotbar", index: i })}
         />
         <div class="text-center text-xs text-zinc-400">
-          E/Esc close · click pick-up · shift+click quick-transfer ·
-          ctrl+click grab half / place one · scroll while holding to split
+          E/Esc close · click pick-up · click again to drop / merge
         </div>
       </div>
 
-      {cursor && (
-        <FloatingStack stack={cursor} items={items} icons={icons} x={mouse.x} y={mouse.y} />
+      {cursor !== null && (
+        <FloatingStack
+          entityId={cursor}
+          world={world}
+          C={C}
+          icons={icons}
+          x={mouse.x}
+          y={mouse.y}
+        />
       )}
     </div>
   );
 }
 
-interface SlotProps {
-  stack: ItemStack | null;
-  def: ItemDef | undefined;
+function SlotGrid({
+  title,
+  cols,
+  capacity,
+  slots,
+  icons,
+  world,
+  C,
+  highlightIndex,
+  onSlotClick,
+}: {
+  title: string;
+  cols: number;
+  capacity: number;
+  slots: Slot[];
   icons: ItemImagesAPI;
-  onClick: (e: MouseEvent) => void;
-  placeholder?: string;
-  accentEmpty?: string;
+  world: any;
+  C: any;
+  highlightIndex?: number;
+  onSlotClick: (i: number) => void;
+}) {
+  const cells: any[] = [];
+  for (let i = 0; i < capacity; i++) {
+    const id = slots[i] ?? null;
+    const view = describe(id, world, C);
+    const isActive = highlightIndex !== undefined && i === highlightIndex;
+    cells.push(
+      <Slot
+        key={i}
+        view={view}
+        icons={icons}
+        accent={isActive}
+        onClick={() => onSlotClick(i)}
+      />,
+    );
+  }
+  return (
+    <div>
+      <div class="mb-2 text-xs uppercase tracking-wider text-zinc-400">{title}</div>
+      <div
+        class="grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+      >
+        {cells}
+      </div>
+    </div>
+  );
 }
 
-function Slot({ stack, def, icons, onClick, placeholder, accentEmpty }: SlotProps) {
-  const img = stack ? icons.get(stack.itemId) : null;
-  const title = stack
-    ? `${def?.name ?? stack.itemId}${stack.count > 1 ? ` ×${stack.count}` : ""}`
-    : placeholder ?? "";
+function Slot({
+  view,
+  icons,
+  accent,
+  onClick,
+}: {
+  view: ItemView | null;
+  icons: ItemImagesAPI;
+  accent?: boolean;
+  onClick: () => void;
+}) {
+  const img = view ? icons.get(view.itemId) : null;
+  const title = view
+    ? `${view.displayName ?? view.itemId}${view.count > 1 ? ` ×${view.count}` : ""}`
+    : "";
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
-      class={`relative h-12 w-12 rounded border border-zinc-700 ${
-        stack ? "bg-zinc-800 hover:border-amber-400" : "bg-zinc-950 hover:border-zinc-500"
+      class={`relative h-12 w-12 rounded border ${
+        accent ? "border-amber-400" : "border-zinc-700"
+      } ${
+        view ? "bg-zinc-800 hover:border-amber-400" : "bg-zinc-950 hover:border-zinc-500"
       } transition-colors`}
-      style={accentEmpty && !stack ? { background: accentEmpty } : undefined}
     >
       {img ? (
-        <img src={img.src} alt="" class="absolute inset-1 h-[calc(100%-0.5rem)] w-[calc(100%-0.5rem)] object-contain" />
-      ) : placeholder ? (
-        <span class="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-zinc-500">
-          {placeholder}
+        <img
+          src={img.src}
+          alt=""
+          class="absolute inset-1 h-[calc(100%-0.5rem)] w-[calc(100%-0.5rem)] object-contain"
+        />
+      ) : null}
+      {view && view.count > 1 && (
+        <span class="absolute bottom-0 right-1 text-xs font-bold text-white drop-shadow">
+          {view.count}
+        </span>
+      )}
+      {view && view.isWeapon && view.magazineSize ? (
+        <span class="absolute bottom-0 left-1 text-[10px] font-bold text-amber-300 drop-shadow">
+          {view.mag ?? 0}
         </span>
       ) : null}
-      {stack && stack.count > 1 && (
-        <span class="absolute bottom-0 right-1 text-xs font-bold text-white drop-shadow">
-          {stack.count}
-        </span>
-      )}
-      {stack && def?.type === "weapon" && def.weapon?.magazineSize && (
-        <span class="absolute bottom-0 left-1 text-[10px] font-bold text-amber-300 drop-shadow">
-          {stack.mag ?? 0}
-        </span>
-      )}
     </button>
   );
 }
 
-function BagGrid({
-  inventory,
-  items,
-  icons,
-  onSlotClick,
-}: {
-  inventory: InventoryShape;
-  items: ItemRegistryById;
-  icons: ItemImagesAPI;
-  onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
-}) {
-  return (
-    <div>
-      <div class="mb-2 text-xs uppercase tracking-wider text-zinc-400">Backpack</div>
-      <div class="grid grid-cols-9 gap-1">
-        {inventory.bag.map((stack, i) => (
-          <Slot
-            key={i}
-            stack={stack}
-            def={stack ? items[stack.itemId] : undefined}
-            icons={icons}
-            onClick={(e) => onSlotClick({ kind: "bag", index: i }, e)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HotbarRow({
-  inventory,
-  items,
-  icons,
-  onSlotClick,
-}: {
-  inventory: InventoryShape;
-  items: ItemRegistryById;
-  icons: ItemImagesAPI;
-  onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
-}) {
-  return (
-    <div>
-      <div class="mb-2 text-xs uppercase tracking-wider text-zinc-400">Hotbar</div>
-      <div class="flex gap-1">
-        {inventory.hotbar.map((stack, i) => {
-          const isActive = i === inventory.activeHotbarIndex;
-          return (
-            <div key={i} class="relative">
-              <Slot
-                stack={stack}
-                def={stack ? items[stack.itemId] : undefined}
-                icons={icons}
-                onClick={(e) => onSlotClick({ kind: "hotbar", index: i }, e)}
-              />
-              <span
-                class={`pointer-events-none absolute -top-1 left-1 text-[10px] font-bold ${
-                  isActive ? "text-amber-300" : "text-zinc-500"
-                }`}
-              >
-                {i + 1}
-              </span>
-              {isActive && (
-                <div class="pointer-events-none absolute inset-0 rounded border-2 border-amber-400" />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CharacterPanel({
-  inventory,
-  items,
-  icons,
-  inv,
-  onSlotClick,
-}: {
-  inventory: InventoryShape;
-  items: ItemRegistryById;
-  icons: ItemImagesAPI;
-  inv: InventoryAPI;
-  onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
-}) {
-  const slot = (s: EquipSlot, placeholder: string) => {
-    const stack = inventory.equipment[s] ?? null;
-    return (
-      <Slot
-        stack={stack}
-        def={stack ? items[stack.itemId] : undefined}
-        icons={icons}
-        onClick={(e) => onSlotClick({ kind: "equipment", slot: s }, e)}
-        placeholder={placeholder}
-      />
-    );
-  };
-
-  return (
-    <div>
-      <div class="mb-2 text-xs uppercase tracking-wider text-zinc-400">Equipment</div>
-      <div class="flex items-start gap-2">
-        <div class="flex flex-col gap-1">
-          {slot("helmet", "Head")}
-          {slot("chest", "Chest")}
-          {slot("gloves", "Gloves")}
-          {slot("legs", "Legs")}
-          {slot("feet", "Feet")}
-        </div>
-        <div class="flex flex-col items-center gap-1 rounded border border-zinc-800 bg-zinc-950/50 px-3 py-2">
-          <CharacterSilhouette />
-          {slot("amulet", "Amulet")}
-          <div class="flex gap-1">
-            {slot("ring1", "Ring")}
-            {slot("ring2", "Ring")}
-          </div>
-        </div>
-        <div class="flex flex-col gap-1">
-          {slot("mainHand", "Main")}
-          {slot("offHand", "Off")}
-        </div>
-      </div>
-      <div class="mt-1 text-[10px] text-zinc-500">{inv.EQUIP_SLOTS.length} slots</div>
-    </div>
-  );
-}
-
-function CharacterSilhouette() {
-  return (
-    <svg
-      viewBox="0 0 40 64"
-      class="h-32 w-16 text-zinc-500"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <circle cx="20" cy="9" r="6" />
-      <rect x="18" y="14" width="4" height="3" />
-      <path d="M11 18 Q11 17 12 17 L28 17 Q29 17 29 18 L29 36 Q29 37 28 37 L12 37 Q11 37 11 36 Z" />
-      <rect x="6" y="19" width="4" height="18" rx="1.5" />
-      <rect x="30" y="19" width="4" height="18" rx="1.5" />
-      <circle cx="8" cy="40" r="2.5" />
-      <circle cx="32" cy="40" r="2.5" />
-      <rect x="13" y="38" width="6" height="22" rx="1.5" />
-      <rect x="21" y="38" width="6" height="22" rx="1.5" />
-      <ellipse cx="16" cy="62" rx="4" ry="1.5" />
-      <ellipse cx="24" cy="62" rx="4" ry="1.5" />
-    </svg>
-  );
-}
-
 function FloatingStack({
-  stack,
-  items,
+  entityId,
+  world,
+  C,
   icons,
   x,
   y,
 }: {
-  stack: ItemStack;
-  items: ItemRegistryById;
+  entityId: number;
+  world: any;
+  C: any;
   icons: ItemImagesAPI;
   x: number;
   y: number;
 }) {
-  const img = icons.get(stack.itemId);
-  const def = items[stack.itemId];
+  const view = describe(entityId, world, C);
+  if (!view) return null;
+  const img = icons.get(view.itemId);
   return (
     <div
       class="pointer-events-none fixed z-40 h-12 w-12 -translate-x-1/2 -translate-y-1/2"
       style={{ left: `${x}px`, top: `${y}px` }}
     >
       {img && <img src={img.src} alt="" class="h-full w-full object-contain drop-shadow-lg" />}
-      {stack.count > 1 && (
+      {view.count > 1 && (
         <span class="absolute bottom-0 right-1 text-xs font-bold text-white drop-shadow">
-          {stack.count}
+          {view.count}
         </span>
       )}
-      {def?.type === "weapon" && def.weapon?.magazineSize && (
+      {view.isWeapon && view.magazineSize ? (
         <span class="absolute bottom-0 left-1 text-[10px] font-bold text-amber-300 drop-shadow">
-          {stack.mag ?? 0}
+          {view.mag ?? 0}
         </span>
-      )}
+      ) : null}
     </div>
   );
 }

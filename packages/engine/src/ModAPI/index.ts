@@ -15,7 +15,6 @@ export type {
   ModalsAPI,
   RenderPhase,
   RendererSystemFn,
-  InventoryAPI,
   RaycastAPI,
   ItemImagesAPI,
   UIAPI,

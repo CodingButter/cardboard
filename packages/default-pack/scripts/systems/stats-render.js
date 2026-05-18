@@ -8,19 +8,16 @@
  * `runFrame` on `!modals.any()` but render systems always run). The
  * toggle is also polled here for the same reason.
  */
+import { countItemId, getActiveItemEntity } from "../lib/inventory.js";
+
 export default (api) => {
   const C = api.components;
-  const inv = api.inventory;
-  const itemRegistry = api.singleton("ItemRegistry");
 
   let visible = false;
   const dtHistory = new Float32Array(60);
   let dtIndex = 0;
   let dtCount = 0;
   let wasComboHeld = false;
-  // Render systems don't receive a per-frame deltaTime baseline the
-  // same way update systems do; we measure it from `performance.now()`
-  // here so the FPS counter is independent of the engine's clock.
   let lastNow = performance.now();
 
   const styleNow = () => {
@@ -50,7 +47,6 @@ export default (api) => {
   };
 
   api.registerRendererSystem((renderer, world) => {
-    // Sample frame time.
     const now = performance.now();
     const dt = (now - lastNow) / 1000;
     lastNow = now;
@@ -58,7 +54,6 @@ export default (api) => {
     dtIndex = (dtIndex + 1) % dtHistory.length;
     if (dtCount < dtHistory.length) dtCount++;
 
-    // Edge-triggered Ctrl+` toggle.
     const kb = api.input.keyboard;
     const ctrl = kb.isAnyKeyPressed(["ControlLeft", "ControlRight"]);
     const tick = kb.isKeyPressed("Backquote");
@@ -82,19 +77,24 @@ export default (api) => {
       posStr = `${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}`;
       facingStr = `${((facing * 180) / Math.PI).toFixed(0)}°`;
 
-      const inventory = C.Inventory.get(player);
-      if (inventory) {
-        const active = inv.getActiveItem(inventory);
-        if (active) {
-          const def = itemRegistry.byId?.[active.itemId];
-          weaponStr = `${def?.name ?? active.itemId} (slot ${inventory.activeHotbarIndex + 1})`;
-          if (def?.type === "weapon" && def.weapon?.magazineSize && def.weapon.ammoItem) {
-            const reserve = inv.countItem(inventory, def.weapon.ammoItem);
-            const weapon = C.Weapon.get(player);
-            const reloading = weapon ? Number.isFinite(weapon.reloadStart) : false;
-            const mag = active.mag ?? 0;
+      const carrier = C.Carrier.get(player);
+      const activeItem = getActiveItemEntity(world, player, C);
+      if (carrier && activeItem !== null) {
+        const item = C.Item.get(activeItem);
+        const weapon = C.Weapon.get(activeItem);
+        const activeSlot = typeof carrier.hotbar === "number"
+          ? C.ActiveSlot.get(carrier.hotbar)
+          : null;
+        if (item) {
+          weaponStr = `${item.displayName ?? item.itemId} (slot ${(activeSlot?.index ?? 0) + 1})`;
+          if (weapon && item.type === "weapon" && (weapon.magazineSize ?? 0) > 0 && weapon.ammoItem) {
+            const reserve =
+              countItemId(world, carrier.backpack, weapon.ammoItem, C) +
+              countItemId(world, carrier.hotbar, weapon.ammoItem, C);
+            const reloading = Number.isFinite(weapon.reloadStart) && weapon.reloadStart >= 0;
+            const mag = weapon.mag ?? 0;
             ammoStr = reloading ? `${mag} / ${reserve} (reloading…)` : `${mag} / ${reserve}`;
-          } else if (def?.type === "weapon") {
+          } else if (weapon && item.type === "weapon") {
             ammoStr = "∞";
           }
         }

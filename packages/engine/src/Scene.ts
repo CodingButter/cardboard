@@ -198,6 +198,15 @@ export interface SceneControllerJSON {
  * `_prefabSourceHash`, etc.) — engine ignores them entirely.
  */
 export interface SceneEntityJSON {
+  /**
+   * Optional authored entity id. When supplied, the scene-load /
+   * world-spawn path will materialise this entity at exactly that id
+   * (via `World.spawn(id)`), giving pack authors a stable handle so one
+   * entity can reference another by id (e.g. a `Carrier { hotbar: 2 }`
+   * pointing at the container entity authored with `id: 2`). When
+   * omitted the engine allocates the next free id.
+   */
+  id?: number;
   /** Optional human-readable name — round-trips; surface in editor UI. */
   name?: string;
   /** componentName → componentData. */

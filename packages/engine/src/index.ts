@@ -95,17 +95,11 @@ export type {
 // `Component<T>` instances in the `PackComponents` augmentation
 // without reaching past the engine's public surface.
 export { Component } from "./ECS";
-// Inventory types — pack-side modal UIs (InventoryScreen) need
-// `InventoryShape` so they can type the inventory component they
-// receive as a prop. The helper functions stay engine-internal; pack
-// scripts reach them through `api.inventory`.
-export type { InventoryShape } from "./Libs/Inventory";
 
 // ModAPI types — pack-side `.tsx` scripts need the public-API type
 // names so their compiled output typechecks against `@two_5_d/engine`.
 export type {
   ModAPI,
-  InventoryAPI,
   ItemImagesAPI,
   UIAPI,
   SettingsAPI,

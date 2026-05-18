@@ -71,6 +71,14 @@ export interface GameState {
 export interface WorldJson {
   singletons?: Record<string, Record<string, unknown>>;
   entities?: Array<{
+    /**
+     * Optional authored entity id — materialises this entity at exactly
+     * that id via `World.spawn(id)`. Pack-author handle so other entity
+     * records can reference this one by id (e.g. a `Carrier` component
+     * referencing container entity ids). When omitted, the engine
+     * allocates the next free id.
+     */
+    id?: number;
     name?: string;
     components?: Record<string, unknown>;
     [editorOnly: `_${string}`]: unknown;
@@ -464,6 +472,7 @@ export class Game {
    */
   private async spawnWorldEntities(
     records: ReadonlyArray<{
+      id?: number;
       name?: string;
       components?: Record<string, unknown>;
     }>,
@@ -471,7 +480,18 @@ export class Game {
     for (const record of records) {
       const components = record?.components;
       if (!components || typeof components !== "object") continue;
-      const entity = this.world.spawn();
+      let entity: Entity;
+      try {
+        entity = record.id !== undefined
+          ? this.world.spawn(record.id)
+          : this.world.spawn();
+      } catch (err) {
+        console.error(
+          `[world-entity] failed to spawn record (id=${record.id}, name=${record.name}) —`,
+          err,
+        );
+        continue;
+      }
       this.persistentEntities.add(entity);
       if (record.name) this.world.setName(entity, record.name);
       // Attach declared components first. The Scripts component
@@ -630,7 +650,18 @@ export class Game {
     for (const record of records) {
       const components = record.components;
       if (!components || typeof components !== "object") continue;
-      const entity = this.world.spawn();
+      let entity: Entity;
+      try {
+        entity = record.id !== undefined
+          ? this.world.spawn(record.id)
+          : this.world.spawn();
+      } catch (err) {
+        console.error(
+          `[scene-entity] failed to spawn record (id=${record.id}, name=${record.name}) —`,
+          err,
+        );
+        continue;
+      }
       if (record.name) this.world.setName(entity, record.name);
       for (const [name, rawValue] of Object.entries(components)) {
         if (name.startsWith("_")) continue;
