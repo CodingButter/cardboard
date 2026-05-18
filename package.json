@@ -7,9 +7,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "bun run dev:editor & bun run dev:game & wait",
+    "dev": "bun run game:watch & bun run dev:editor & bun run dev:game & wait",
     "dev:game": "cd apps/game && bun run dev",
     "dev:editor": "cd apps/editor && bun run dev",
+    "game:watch": "cd apps/game && bun run build:watch",
     "docs:dev": "cd apps/docs && bun run dev",
     "docs:build": "cd apps/docs && bun run build",
     "build:game-for-docs": "bun scripts/build-game-for-docs.ts",
