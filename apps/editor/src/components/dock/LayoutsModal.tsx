@@ -377,6 +377,38 @@ export function LayoutsModal({
     [presets, lastAppliedPresetId],
   );
 
+  // ── Matched-preset tracking ────────────────────────────────────────
+  //
+  // Whenever the user adjusts the live dockview layout (drags a panel,
+  // resizes a splitter, opens a popout, etc.), we re-compare the
+  // current api.toJSON() against every preset's stored layout and
+  // record which preset (if any) the current layout exactly matches.
+  //
+  //   - matchedPresetId === <some id>  → highlight that card, disable
+  //     "Save Current as New" (no point creating a duplicate of an
+  //     existing layout).
+  //   - matchedPresetId === null       → no card highlighted (the
+  //     user deviated from every saved layout), and "Save Current as
+  //     New" is enabled.
+  //
+  //   - "Resave Current" stays bound to `lastAppliedPresetId` (sticky
+  //     — doesn't change on edits) AND is only enabled when the
+  //     current layout differs from that preset's stored form, i.e.
+  //     when the user has actually made changes worth resaving.
+  //
+  // The hook subscribes to api.onDidLayoutChange so changes update
+  // the highlight live (even while the modal is open).
+  const matchedPresetId = useMatchedPresetId(
+    apiRef,
+    open,
+    predefined,
+    presets,
+  );
+
+  const activeUserPresetDirty =
+    activeUserPreset != null &&
+    matchedPresetId !== activeUserPreset.id;
+
   // Tracks which user preset card should mount in inline-rename mode.
   // Set on "Save current as new" so the freshly-created card focuses
   // its name input with the placeholder selected — the user can
@@ -431,9 +463,25 @@ export function LayoutsModal({
       width="3xl"
     >
       <div className="flex flex-col gap-4">
-        {/* Header band — save / resave actions */}
+        {/* Header band — save / resave actions.
+         *
+         *   - "Save Current as New" disables when the live layout
+         *     exactly matches some saved layout (predefined or user).
+         *     No point creating a duplicate.
+         *   - "Resave Current" enables only when there's an applied
+         *     user preset AND the live layout differs from it. */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="primary" size="sm" onClick={onSaveAsNew}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onSaveAsNew}
+            disabled={matchedPresetId !== null}
+            title={
+              matchedPresetId !== null
+                ? "Current layout already matches a saved layout"
+                : "Save the current layout as a new preset"
+            }
+          >
             <Plus size={14} className="mr-1" />
             Save current as new
           </Button>
@@ -441,11 +489,13 @@ export function LayoutsModal({
             variant="secondary"
             size="sm"
             onClick={onResave}
-            disabled={!activeUserPreset}
+            disabled={!activeUserPresetDirty}
             title={
-              activeUserPreset
-                ? `Overwrite "${activeUserPreset.name}" with the current layout`
-                : "Apply a saved layout first to enable resave"
+              activeUserPreset == null
+                ? "Apply a saved layout first to enable resave"
+                : !activeUserPresetDirty
+                  ? `"${activeUserPreset.name}" already matches the current layout`
+                  : `Overwrite "${activeUserPreset.name}" with the current layout`
             }
           >
             <Save size={14} className="mr-1" />
@@ -466,7 +516,7 @@ export function LayoutsModal({
               id={p.id}
               name={p.name}
               layout={p.layout}
-              active={lastAppliedPresetId === p.id}
+              active={matchedPresetId === p.id}
               builtIn
               onClick={() => applyLayout(p.id, p.layout)}
             />
@@ -493,7 +543,7 @@ export function LayoutsModal({
                   id={p.id}
                   name={p.name}
                   layout={p.layout}
-                  active={lastAppliedPresetId === p.id}
+                  active={matchedPresetId === p.id}
                   autoEdit={editingPresetId === p.id}
                   onEditEnd={() => setEditingPresetId(null)}
                   onClick={() => applyLayout(p.id, p.layout)}
@@ -510,5 +560,83 @@ export function LayoutsModal({
 }
 
 const EMPTY_USER_PRESETS: WorkspacePreset[] = [];
+
+/**
+ * Strip runtime-only fields from a dockview layout snapshot so two
+ * snapshots can be compared structurally without false positives from
+ * fields that change without the user changing the layout (e.g.
+ * floating-group positions, active-panel tracking).
+ *
+ * We keep: grid root + panel registry. We drop: popoutGroups,
+ * floatingGroups, activeGroup. The result is JSON-serialised for
+ * cheap structural comparison via string equality.
+ */
+function fingerprintLayout(layout: SerializedDockview | null): string {
+  if (!layout) return "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyLayout = layout as any;
+  const minimal = {
+    grid: anyLayout.grid ?? null,
+    panels: anyLayout.panels ?? {},
+  };
+  return JSON.stringify(minimal);
+}
+
+/**
+ * Watches the live dockview layout and returns the id of the preset
+ * (predefined or user) whose layout exactly matches the current state,
+ * or null if the current layout doesn't match any.
+ *
+ * Re-evaluates on every api.onDidLayoutChange while the modal is open
+ * (and once on open) so the highlight + button states stay live as
+ * the user drags panels around. When the modal is closed we skip the
+ * subscription — no need to update state nothing's reading.
+ */
+function useMatchedPresetId(
+  apiRef: React.MutableRefObject<DockviewApi | null>,
+  open: boolean,
+  predefined: readonly { id: string; layout: SerializedDockview }[],
+  presets: readonly WorkspacePreset[],
+): string | null {
+  const [matched, setMatched] = React.useState<string | null>(null);
+
+  // Compute fingerprints once per preset list change — comparing
+  // string equality is O(n) per evaluate(), cheap enough that we
+  // don't memoize harder.
+  const presetFingerprints = React.useMemo(() => {
+    const out: Array<{ id: string; fp: string }> = [];
+    for (const p of predefined) out.push({ id: p.id, fp: fingerprintLayout(p.layout) });
+    for (const p of presets) out.push({ id: p.id, fp: fingerprintLayout(p.layout) });
+    return out;
+  }, [predefined, presets]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const api = apiRef.current;
+    if (!api) return;
+    const evaluate = () => {
+      let live: SerializedDockview | null = null;
+      try {
+        live = api.toJSON();
+      } catch {
+        live = null;
+      }
+      const liveFp = fingerprintLayout(live);
+      let hit: string | null = null;
+      for (const { id, fp } of presetFingerprints) {
+        if (fp === liveFp) {
+          hit = id;
+          break;
+        }
+      }
+      setMatched(hit);
+    };
+    evaluate();
+    const sub = api.onDidLayoutChange(evaluate);
+    return () => sub.dispose();
+  }, [open, apiRef, presetFingerprints]);
+
+  return matched;
+}
 
 export default LayoutsModal;
