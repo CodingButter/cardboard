@@ -483,24 +483,55 @@ export function DockShell({
                   minimumHeight: WORKSPACE_DEFAULT_WIDTH,
                 },
           );
-          // setSize gets deferred to the next animation frame.
-          // Calling it synchronously right after a drag-drop landed
-          // the panel in its new orientation doesn't snap reliably
-          // — dockview's gridview is still settling the splitter
-          // weights from the drop and silently drops the size
-          // request. Waiting one rAF lets the gridview finalise its
-          // post-drop layout, then our setSize forcibly snaps the
-          // constrained axis to 40px.
+          // The snap to 40px is layered across three attempts because
+          // dockview's gridview ignores size changes in several
+          // post-drag-drop states:
+          //   - synchronous call: gridview is still settling splitter
+          //     weights → setSize silently dropped
+          //   - panel.api.setSize: scoped to the panel inside its
+          //     group; sometimes ignored when the group's slot in the
+          //     parent split is what actually needs resizing
+          //   - group.api.setSize: addresses the group's grid cell
+          //     directly, which is what the splitter clamps when the
+          //     user nudges it (the click-to-snap behaviour user sees)
+          // We call both APIs across two rAF frames, then force a
+          // full re-layout to make dockview apply the new constraints.
           requestAnimationFrame(() => {
             try {
-              panel.api.setSize(
-                isLandscape
-                  ? { height: WORKSPACE_DEFAULT_WIDTH }
-                  : { width: WORKSPACE_DEFAULT_WIDTH },
-              );
+              const size = isLandscape
+                ? { height: WORKSPACE_DEFAULT_WIDTH }
+                : { width: WORKSPACE_DEFAULT_WIDTH };
+              panel.api.setSize(size);
+              try {
+                panel.group?.api.setSize(size);
+              } catch {
+                // ignore — group api shape can shift between versions
+              }
+              // Forcibly re-evaluate the entire dock's layout so the
+              // new constraints clamp the panel without waiting for
+              // user interaction with the splitter.
+              try {
+                api.layout(api.width, api.height, true);
+              } catch {
+                // ignore
+              }
             } catch {
               // ignore — panel may have been removed
             }
+            // Belt-and-braces — second rAF in case the first ran while
+            // gridview was still settling.
+            requestAnimationFrame(() => {
+              try {
+                panel.api.setSize(
+                  isLandscape
+                    ? { height: WORKSPACE_DEFAULT_WIDTH }
+                    : { width: WORKSPACE_DEFAULT_WIDTH },
+                );
+                api.layout(api.width, api.height, true);
+              } catch {
+                // ignore
+              }
+            });
           });
         } catch {
           // ignore
