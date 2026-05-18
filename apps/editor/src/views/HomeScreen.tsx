@@ -396,14 +396,9 @@ export function HomeScreen({
               Everything lives in your browser — nothing is uploaded.
             </p>
           </div>
-          <Button
-            variant="primary"
-            onClick={() => setCreateOpen(true)}
-            disabled={busy !== null}
-            leadingIcon={<Plus size={14} />}
-          >
-            New project
-          </Button>
+          {/* Header CTA removed — the right-rail "Create or import" panel
+              now owns the New Project / Open URL primary actions. Avoids a
+              redundant duplicate at the top of the main column. */}
         </header>
 
         {error ? (
@@ -429,29 +424,8 @@ export function HomeScreen({
             <EmptyState
               icon={<FolderOpen size={24} />}
               title="No projects yet"
-              description="Start a fresh project or import an existing pack to begin authoring."
+              description="Use the panel on the right to create your first project or import a pack."
               tutorial="home-intro"
-              action={
-                <>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setCreateOpen(true)}
-                    disabled={busy !== null}
-                    leadingIcon={<Plus size={14} />}
-                  >
-                    New project
-                  </Button>
-                  <FilePicker
-                    mode="button"
-                    accept=".apg,application/zip"
-                    onFiles={(files) => files[0] && handleImportFile(files[0])}
-                    disabled={busy !== null}
-                  >
-                    Import .apg
-                  </FilePicker>
-                </>
-              }
             />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-2">
@@ -483,15 +457,30 @@ export function HomeScreen({
             <CardTitle>Create or import</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button
-              variant="primary"
-              block
-              onClick={() => setCreateOpen(true)}
-              disabled={busy !== null}
-              leadingIcon={<Plus size={14} />}
-            >
-              New project
-            </Button>
+            {/* Side-by-side primary actions. The two buttons share the
+                row equally via `flex-1` so the layout reads as a pair of
+                co-equal entry points (Create vs Open) rather than a
+                primary + afterthought. */}
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                className="flex-1"
+                onClick={() => setCreateOpen(true)}
+                disabled={busy !== null}
+                leadingIcon={<Plus size={14} />}
+              >
+                New project
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setUrlOpen(true)}
+                disabled={busy !== null}
+                leadingIcon={<LinkIcon size={14} />}
+              >
+                Open URL
+              </Button>
+            </div>
             <FilePicker
               mode="dropzone"
               accept=".apg,application/zip"
@@ -509,15 +498,6 @@ export function HomeScreen({
                 or click to browse
               </div>
             </FilePicker>
-            <Button
-              variant="secondary"
-              block
-              onClick={() => setUrlOpen(true)}
-              disabled={busy !== null}
-              leadingIcon={<LinkIcon size={14} />}
-            >
-              Open URL pack
-            </Button>
           </CardContent>
         </Card>
 
