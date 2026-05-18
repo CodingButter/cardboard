@@ -25,11 +25,18 @@ export function SceneTabContextPicker(): React.JSX.Element {
   const { activeScene, setActiveScene, scenes, fallbackScene } =
     useActiveScene();
   const resolvedScene = activeScene ?? fallbackScene;
-  const sceneName = resolvedScene
-    ? resolvedScene.replace(/^scenes\//, "")
-    : "";
-  const currentSceneId =
-    scenes.find((s) => s.path === resolvedScene)?.path ?? "";
+  // Display the resolved label (scene.json's `name` field or
+  // title-cased filename) rather than the raw `scenes/foo.json` path.
+  // If `resolvedScene` isn't in the scenes list (e.g. a fallback path
+  // that doesn't match an asset), fall back to the path itself with
+  // the directory prefix stripped.
+  const sceneOption = scenes.find((s) => s.path === resolvedScene) ?? null;
+  const sceneName = sceneOption
+    ? sceneOption.label
+    : resolvedScene
+      ? resolvedScene.replace(/^scenes\//, "")
+      : "";
+  const currentSceneId = sceneOption?.path ?? "";
   const disabled = scenes.length === 0;
 
   return (
