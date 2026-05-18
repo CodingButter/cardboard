@@ -1,0 +1,537 @@
+/*
+ * Editor design system — semantic class library (Phase 0).
+ *
+ * Single source of truth for composed surface classes used by editor
+ * pages and primitives. Pages reference named classes
+ * (`.panel-surface`, `.button-primary`, `.tab-strip-item--active`,
+ * `.scroll-amber`, etc.) instead of repeating long Tailwind utility
+ * chains. Retune here once → propagates everywhere.
+ *
+ * Sources:
+ *  - docs/plans/EDITOR_REDESIGN.md §3 (colour palette, spacing, radius,
+ *    typography) + §5 (Tailwind token additions).
+ *  - Editor Design/*.png mockups (Map, Entities, GamePreview, Animation,
+ *    ImageLab, Scripting, UIDeisgner, ProjectSettings, ProjectManagement,
+ *    SoundLab).
+ *
+ * Token vocabulary is declared in `apps/editor/index.css` under the
+ * Tailwind v4 `@theme` block — see --color-bg-panel, --color-accent,
+ * --color-fg-muted, --rail-left, --radius-card, etc. This file does
+ * NOT redeclare those tokens; it composes Tailwind utilities (which
+ * resolve to those tokens) into semantic class names.
+ *
+ * Phase 0 scope: tokens + classes only. Components in
+ * `apps/editor/src/components/ui/` keep their current utility chains
+ * for now; Phase 1 will migrate them to reference these classes.
+ *
+ * Layout classes (`.panel-surface`, `.card-surface`) are intentionally
+ * NEUTRAL — they declare only background + border + radius. Callers
+ * compose flex/grid/padding themselves so a panel can be a column
+ * stack, a row, or a scrollable container without fighting the class.
+ */
+
+/* ───────────────────────────────────────────────────────────────────
+ * App / surfaces
+ * ─────────────────────────────────────────────────────────────────── */
+
+.app-surface {
+  @apply bg-zinc-950 text-zinc-100;
+}
+
+/*
+ * `.panel-surface` already exists as a Tailwind v4 `@utility` in
+ * `apps/editor/index.css` (background + border, no radius). The
+ * semantic variants below build on that grammar — same vocabulary
+ * for sidebars, headers, and floating cards.
+ */
+.panel-surface-rounded {
+  @apply bg-(--color-bg-panel) border border-(--color-border) rounded-lg;
+}
+
+.panel-surface-flush {
+  @apply bg-(--color-bg-panel) border-b border-(--color-border);
+}
+
+.panel-elevated {
+  @apply bg-(--color-bg-card-elev) border border-(--color-border) rounded-lg shadow-[var(--shadow-panel)];
+}
+
+/*
+ * `.card-surface` exists as a `@utility` in index.css. `.card-surface-elev`
+ * is the elevated variant used by dropdown panels, log containers,
+ * tile-preset headers — anywhere a card needs to read above the
+ * surrounding panel.
+ */
+.card-surface-elev {
+  @apply bg-(--color-bg-card-elev) border border-(--color-border) rounded-lg;
+}
+
+.inspector-card {
+  @apply bg-(--color-bg-card) border border-(--color-border) rounded-lg p-4;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Headers + section eyebrows
+ * ─────────────────────────────────────────────────────────────────── */
+
+.panel-header {
+  @apply flex items-center justify-between gap-3 h-10 px-4
+         border-b border-zinc-800
+         text-xs uppercase tracking-wider text-zinc-400 font-semibold;
+}
+
+.panel-header-sm {
+  @apply flex items-center justify-between gap-3 h-8 px-3
+         border-b border-zinc-800
+         text-[10px] uppercase tracking-wider text-zinc-400 font-semibold;
+}
+
+.section-eyebrow {
+  @apply text-[10px] uppercase tracking-wider text-zinc-500 font-semibold;
+}
+
+/* CardHeader pattern from Entities + Scripting mockups */
+.card-header {
+  @apply flex items-center justify-between gap-3 px-5 pt-5 pb-3;
+}
+
+.card-title {
+  @apply text-base font-semibold text-zinc-100;
+}
+
+.card-description {
+  @apply text-xs text-zinc-500 mt-0.5;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Buttons
+ *   Sized to 32px (h-8) to match the dense topbar/action-row rhythm
+ *   visible in every mockup. Long-form buttons (Export, Save) get
+ *   .button-primary; secondary actions get .button-secondary; toolbar
+ *   chrome gets .button-ghost; destructive (Stop, Delete) gets
+ *   .button-danger; .icon-button is the square 28x28 chip used in
+ *   toolbars + list rows.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.button-primary {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md
+         bg-amber-500 hover:bg-amber-400 active:bg-amber-500
+         text-zinc-950 text-xs font-semibold
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.button-secondary {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md
+         bg-zinc-800 hover:bg-zinc-700
+         border border-zinc-700
+         text-zinc-200 text-xs font-medium
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.button-ghost {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md
+         hover:bg-zinc-800
+         text-zinc-400 hover:text-zinc-100 text-xs font-medium
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400
+         disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.button-danger {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md
+         bg-red-500/10 hover:bg-red-500/20
+         border border-red-500/40
+         text-red-300 text-xs font-medium
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.button-success {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md
+         bg-emerald-500 hover:bg-emerald-400
+         text-zinc-950 text-xs font-semibold
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.icon-button {
+  @apply inline-flex items-center justify-center w-7 h-7 rounded-md
+         text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400
+         disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.icon-button--active {
+  @apply text-amber-300 bg-amber-500/10;
+}
+
+/* Top-bar pill — Editor/Playtest mode toggle in TopBar. */
+.toggle-pill {
+  @apply inline-flex items-center h-8 rounded-full bg-zinc-900 border border-zinc-800 p-0.5;
+}
+.toggle-pill__item {
+  @apply inline-flex items-center gap-1.5 h-7 px-3 rounded-full
+         text-xs font-medium text-zinc-400 hover:text-zinc-100
+         transition-colors duration-150;
+}
+.toggle-pill__item--active {
+  @apply bg-amber-500 text-zinc-950;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Tab strips
+ *   Two flavours from §4.10: primary (icon + label, 48px) and
+ *   secondary (label-only, 36px). The primary strip is the global
+ *   PrimaryTabs in the shell; secondary appears inside modals
+ *   (ProjectSettings) and the StatusConsole.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.tab-strip-primary {
+  @apply flex items-stretch h-12 border-b border-zinc-800 bg-zinc-950/40;
+}
+
+.tab-strip-secondary {
+  @apply flex items-stretch h-9 border-b border-zinc-800;
+}
+
+.tab-strip-item {
+  @apply relative inline-flex items-center gap-2 px-4 -mb-px
+         text-sm font-medium text-zinc-400 hover:text-zinc-100
+         border-b-2 border-transparent
+         transition-colors duration-150
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-inset
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.tab-strip-item--active {
+  @apply text-amber-300 bg-amber-500/10 border-amber-400;
+}
+
+/* Compact variant — used inside the secondary tab strip where the
+ * accent reads as a thin underline only, no background fill. */
+.tab-strip-item--secondary-active {
+  @apply text-amber-300 border-amber-400;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Inputs
+ *   Sized to 32px (h-8) to align with buttons. Mono variant is for
+ *   numeric / position / hex inputs in the inspector.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.input-text {
+  @apply h-8 w-full px-2.5 rounded-md
+         bg-zinc-950 border border-zinc-800
+         text-sm text-zinc-100 placeholder:text-zinc-600
+         transition-colors duration-150
+         focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.input-number {
+  @apply h-8 w-full px-2.5 rounded-md
+         bg-zinc-950 border border-zinc-800
+         text-xs text-zinc-100 font-mono text-right
+         transition-colors duration-150
+         focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.input-search {
+  @apply h-8 w-full pl-8 pr-2.5 rounded-md
+         bg-zinc-950 border border-zinc-800
+         text-sm text-zinc-100 placeholder:text-zinc-600
+         transition-colors duration-150
+         focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40;
+}
+
+.input-textarea {
+  @apply w-full px-2.5 py-2 rounded-md
+         bg-zinc-950 border border-zinc-800
+         text-sm text-zinc-100 placeholder:text-zinc-600
+         transition-colors duration-150
+         focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.input-select {
+  @apply h-8 w-full px-2.5 pr-7 rounded-md appearance-none
+         bg-zinc-950 border border-zinc-800
+         text-sm text-zinc-100
+         transition-colors duration-150
+         focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Chips + badges
+ *   `.chip` is the small neutral pill (e.g. tag, type label, key
+ *   binding hint). Variant modifiers tint with the standard intent
+ *   palette. Use `.status-pill` for the larger leading-dot variant
+ *   seen on TopBar ("All changes saved", "Live").
+ * ─────────────────────────────────────────────────────────────────── */
+
+.chip {
+  @apply inline-flex items-center gap-1 px-2 h-5 rounded
+         bg-zinc-800 text-[11px] font-medium text-zinc-300 leading-none;
+}
+.chip--pill { @apply rounded-full; }
+.chip--accent  { @apply bg-amber-500/15 text-amber-300; }
+.chip--success { @apply bg-emerald-500/15 text-emerald-300; }
+.chip--info    { @apply bg-sky-500/15 text-sky-300; }
+.chip--warn    { @apply bg-yellow-500/15 text-yellow-200; }
+.chip--danger  { @apply bg-red-500/15 text-red-300; }
+.chip--special { @apply bg-purple-500/15 text-purple-300; }
+
+.status-pill {
+  @apply inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full
+         bg-zinc-900 border border-zinc-800
+         text-xs font-medium text-zinc-300;
+}
+.status-pill__dot {
+  @apply inline-block w-1.5 h-1.5 rounded-full bg-zinc-500;
+}
+.status-pill--ok    .status-pill__dot { @apply bg-emerald-500; }
+.status-pill--warn  .status-pill__dot { @apply bg-yellow-400; }
+.status-pill--error .status-pill__dot { @apply bg-red-500; }
+.status-pill--info  .status-pill__dot { @apply bg-sky-400; }
+
+/* Live indicator (GamePreview / Playtest top bar). */
+.live-indicator {
+  @apply inline-flex items-center gap-1.5 px-2 h-6 rounded
+         bg-emerald-500/15 border border-emerald-500/40
+         text-[11px] font-semibold uppercase tracking-wider text-emerald-300;
+}
+.live-indicator__dot {
+  @apply inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * List rows + property rows
+ *   List row patterns: prefab list (Entities), file tree (Scripts),
+ *   layer list (Map), log entries (StatusConsole). Property row is
+ *   the workhorse "label : control" used by every inspector.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.list-row {
+  @apply flex items-center gap-2 px-3 py-2
+         text-sm text-zinc-300
+         border-b border-zinc-800/60
+         hover:bg-zinc-800/50
+         transition-colors duration-150
+         cursor-pointer;
+}
+.list-row--active {
+  @apply bg-amber-500/10 text-amber-300 border-l-2 border-l-amber-400;
+}
+.list-row--compact {
+  @apply px-3 py-1.5 text-xs;
+}
+
+.property-row {
+  @apply flex items-center gap-3 py-2 text-sm text-zinc-300;
+}
+.property-row__label {
+  @apply text-xs uppercase tracking-wider text-zinc-500 font-medium min-w-[6rem];
+}
+.property-row__control {
+  @apply flex-1 min-w-0 flex items-center gap-2;
+}
+.property-row__unit {
+  @apply text-xs text-zinc-500 font-mono shrink-0;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Slider + value chip
+ *   Amber thumb on a dark track. The value chip is the inline pill
+ *   that appears to the right of the track (e.g. "90°", "16 × 16").
+ * ─────────────────────────────────────────────────────────────────── */
+
+.slider-track {
+  @apply relative h-1 w-full rounded-full bg-zinc-800;
+}
+.slider-track__fill {
+  @apply absolute top-0 left-0 h-1 rounded-full bg-amber-500;
+}
+.slider-thumb {
+  @apply absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full
+         bg-amber-500 ring-2 ring-amber-300/30
+         shadow-sm cursor-pointer;
+}
+.slider-value {
+  @apply inline-flex items-center justify-center min-w-12 h-6 px-2 rounded
+         bg-zinc-900 border border-zinc-700
+         text-xs font-mono text-zinc-200 tabular-nums;
+}
+.slider-value--solid {
+  @apply bg-amber-500/10 border-amber-500/40 text-amber-300;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Toggle switch
+ *   Matches §4.2. Two sizes — md (default, 36×20) and sm (28×16).
+ * ─────────────────────────────────────────────────────────────────── */
+
+.toggle-switch {
+  @apply relative inline-flex items-center w-9 h-5 rounded-full
+         bg-zinc-700 transition-colors duration-150
+         focus-within:ring-2 focus-within:ring-amber-400
+         cursor-pointer;
+}
+.toggle-switch--checked { @apply bg-amber-500; }
+.toggle-switch--sm      { @apply w-7 h-4; }
+.toggle-switch__thumb {
+  @apply absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-zinc-100
+         transition-transform duration-150;
+}
+.toggle-switch--checked .toggle-switch__thumb { @apply translate-x-4; }
+.toggle-switch--sm      .toggle-switch__thumb { @apply w-3 h-3; }
+.toggle-switch--sm.toggle-switch--checked .toggle-switch__thumb { @apply translate-x-3; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Dividers
+ * ─────────────────────────────────────────────────────────────────── */
+
+.divider-h { @apply h-px w-full bg-zinc-800; }
+.divider-v { @apply w-px h-full bg-zinc-800; }
+.divider-h--strong { @apply h-px w-full bg-zinc-700; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Scrollbars
+ *   The editor-wide selector in index.css (`* { ... }`) already
+ *   applies the amber-on-zinc treatment globally. `.scroll-amber`
+ *   exists as an explicit class so a component can opt back in on
+ *   a surface that resets scrollbar styling (e.g. iframe content,
+ *   Monaco). Same visual contract as `.cardboard-scroll` in
+ *   apps/game/index.css.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.scroll-amber {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(180, 83, 9, 0.7) transparent;
+}
+.scroll-amber::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-amber::-webkit-scrollbar-track { background: transparent; }
+.scroll-amber::-webkit-scrollbar-thumb {
+  background-color: rgba(180, 83, 9, 0.7);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.scroll-amber::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(217, 119, 6, 0.9);
+}
+.scroll-amber::-webkit-scrollbar-corner { background: transparent; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Asset thumbnails + previews
+ *   Used by Map tile-preset rail, Assets browser, ImageLab, Animation
+ *   sprite-sheet rail.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.asset-thumb {
+  @apply relative overflow-hidden rounded-md
+         bg-zinc-950 border border-zinc-800
+         transition-colors duration-150
+         cursor-pointer;
+}
+.asset-thumb:hover { @apply border-zinc-700; }
+.asset-thumb--active { @apply border-amber-400 ring-2 ring-amber-400/30; }
+
+.asset-thumb__label {
+  @apply absolute inset-x-0 bottom-0 px-2 py-1
+         bg-gradient-to-t from-black/80 to-transparent
+         text-[10px] font-medium text-zinc-200 truncate;
+}
+
+/* Preview frame (Map "3D Preview", Entities live preview, Scripts
+ * "Live Test"). Slight inner shadow + amber-tinted border accent
+ * when active. */
+.preview-frame {
+  @apply relative overflow-hidden rounded-lg
+         bg-black border border-zinc-800
+         shadow-inner;
+}
+.preview-frame--live { @apply border-emerald-500/50; }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Key-binding chip
+ *   Used in tooltips, menu shortcuts, log lines.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.kbd {
+  @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded
+         bg-zinc-800 border border-zinc-700
+         text-[10px] font-mono text-zinc-300 leading-none;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Monaco container
+ *   Wrapper around the Monaco editor in Scripts view. Owns the
+ *   border + radius; Monaco's own dark theme handles the interior.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.monaco-container {
+  @apply relative overflow-hidden rounded-lg
+         bg-zinc-950 border border-zinc-800;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Empty / placeholder state
+ * ─────────────────────────────────────────────────────────────────── */
+
+.empty-state {
+  @apply flex flex-col items-center justify-center gap-2 p-8
+         text-center text-sm text-zinc-500;
+}
+.empty-state__title {
+  @apply text-base font-medium text-zinc-300;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Status bar (bottom strip of the shell)
+ * ─────────────────────────────────────────────────────────────────── */
+
+.status-bar {
+  @apply flex items-center gap-4 h-7 px-3
+         bg-zinc-950 border-t border-zinc-800
+         text-[11px] font-medium text-zinc-500;
+}
+.status-bar__item {
+  @apply inline-flex items-center gap-1.5;
+}
+.status-bar__label {
+  @apply text-zinc-600 uppercase tracking-wider;
+}
+.status-bar__value {
+  @apply text-zinc-300 font-mono tabular-nums;
+}
+
+/* ───────────────────────────────────────────────────────────────────
+ * Toolbar (action row above a canvas/list)
+ *   Observed on Map ("Brush / Tile / Erase / ..."), Animation ("Create
+ *   Animation / Onion Skin / Auto-Slice"), ImageLab top bar.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  @apply flex items-center gap-2 h-10 px-3 border-b border-zinc-800 bg-zinc-950/40;
+}
+.toolbar__group {
+  @apply inline-flex items-center gap-1
+         bg-zinc-900 border border-zinc-800 rounded-md p-0.5;
+}
+.toolbar__item {
+  @apply inline-flex items-center justify-center w-7 h-7 rounded
+         text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800
+         transition-colors duration-150;
+}
+.toolbar__item--active {
+  @apply bg-amber-500/10 text-amber-300;
+}
