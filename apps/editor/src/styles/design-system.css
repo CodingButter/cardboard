@@ -802,13 +802,19 @@
  * 'right' (horizontal dock) via `group.api.setHeaderPosition` in
  * DockShell.tsx — there are no tab-strip-collapse rules anymore.
  *
- * `.workspace-rail` declares `container-type: size` so the inner
- * stack can flip from column (portrait) to row (landscape) via a
- * `@container` query — fully CSS-driven, no ResizeObserver.
+ * `.workspace-rail` declares `container-type: inline-size` so the
+ * inner stack can flip from column (portrait) to row (landscape).
+ * `inline-size` works inside flex children where `size` fails —
+ * flex items can't always resolve an intrinsic block-size, which
+ * causes `size`-based container queries to never match. We trigger
+ * the flip on width instead: < 120px stays column, >= 120px flips
+ * to row. The vertical rail is locked to 40px and any horizontal
+ * dock spans the full page width (>> 120px), so the threshold
+ * cleanly separates the two states.
  * ─────────────────────────────────────────────────────────────────── */
 
 .workspace-rail {
-  container-type: size;
+  container-type: inline-size;
   container-name: workspace;
 }
 
@@ -821,15 +827,17 @@
   gap: 4px;
   padding: 6px 6px;
   height: 100%;
+  width: 100%;
 }
 
 /* Landscape — rail docked top or bottom; flip to a row. */
-@container workspace (orientation: landscape) {
+@container workspace (min-width: 120px) {
   .workspace-rail-stack {
     flex-direction: row !important;
-    width: 100%;
+    width: 100% !important;
     height: 100% !important;
     align-items: center !important;
+    padding: 0 6px !important;
   }
 }
 
