@@ -142,6 +142,18 @@ body {
 }
 
 /*
+ * Shell body background. The view body region (everything below the
+ * TopBar + PrimaryTabs row) inherits the panel-row brightness so any
+ * gap between rendered surface and the viewport edge reads as the
+ * intended mid-gray rather than falling through to the near-black
+ * --color-bg-app token used by the outer shell + TopBar.
+ */
+body {
+  background: var(--color-bg-panel);
+  color: var(--color-fg-primary);
+}
+
+/*
  * Editor-wide scrollbar consistency. Applies to ALL scrollable
  * surfaces (sidebars, lists, inspectors, textareas, JSON previews)
  * so the editor looks cohesive instead of inheriting whatever the
