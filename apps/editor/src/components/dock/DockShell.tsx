@@ -441,8 +441,12 @@ export function DockShell({
           // Lock the rail to a 40px strip on the constrained axis.
           // setConstraints only updates the min/max — it doesn't
           // actively resize the panel. So we follow up with setSize
-          // to snap the current dimension to 40px, matching the new
-          // constraint. dockview's splitter then has no slack to drag.
+          // to snap the current dimension to 40px IFF it's not
+          // already there. Skipping the redundant write is critical:
+          // every setSize call fires onDidLayoutChange, which calls
+          // back into syncWorkspaceOrientation — without the guard
+          // the show-workspace event (and any other call into this
+          // function) feedback-loops into a frozen page.
           panel.api.setConstraints(
             isLandscape
               ? {
@@ -456,11 +460,14 @@ export function DockShell({
                   minimumHeight: WORKSPACE_DEFAULT_WIDTH,
                 },
           );
-          panel.api.setSize(
-            isLandscape
-              ? { height: WORKSPACE_DEFAULT_WIDTH }
-              : { width: WORKSPACE_DEFAULT_WIDTH },
-          );
+          const currentSize = isLandscape ? h : w;
+          if (currentSize !== WORKSPACE_DEFAULT_WIDTH) {
+            panel.api.setSize(
+              isLandscape
+                ? { height: WORKSPACE_DEFAULT_WIDTH }
+                : { width: WORKSPACE_DEFAULT_WIDTH },
+            );
+          }
         } catch {
           // ignore
         }

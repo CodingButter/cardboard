@@ -51,6 +51,14 @@ interface CardBaseProps {
   layout: SerializedDockview;
   active: boolean;
   builtIn?: boolean;
+  /** When true, the card mounts in inline-rename mode with the name
+   *  input focused and its value selected so the user can immediately
+   *  start typing to replace the default. Triggered by the parent
+   *  whenever a new preset has just been created. */
+  autoEdit?: boolean;
+  /** Called when the parent should clear the auto-edit flag (commit /
+   *  cancel from the inline editor). */
+  onEditEnd?: () => void;
   onClick: () => void;
   onRename?: (next: string) => void;
   onDelete?: () => void;
@@ -64,6 +72,8 @@ function LayoutCard({
   layout,
   active,
   builtIn,
+  autoEdit = false,
+  onEditEnd,
   onClick,
   onRename,
   onDelete,
@@ -71,12 +81,33 @@ function LayoutCard({
   const [menu, setMenu] = React.useState<
     | { kind: "closed" }
     | { kind: "open"; x: number; y: number }
-    | { kind: "rename" }
     | { kind: "confirm-delete" }
   >({ kind: "closed" });
+  const [editing, setEditing] = React.useState<boolean>(autoEdit);
   const [renameValue, setRenameValue] = React.useState(name);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // Mirror the auto-edit prop on transition false→true so a preset
+  // re-edited from the parent (e.g. Rename via kebab) lands in edit
+  // mode without re-mounting the card.
+  React.useEffect(() => {
+    if (autoEdit) {
+      setEditing(true);
+      setRenameValue(name);
+    }
+  }, [autoEdit, name]);
 
   React.useEffect(() => setRenameValue(name), [name]);
+
+  // Auto-focus + select-all when entering edit mode so the user can
+  // immediately start typing to replace the placeholder.
+  React.useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
 
   const menuOpen = menu.kind !== "closed";
 
@@ -113,8 +144,24 @@ function LayoutCard({
   };
 
   const commitRename = () => {
-    onRename?.(renameValue);
+    const next = renameValue.trim();
+    if (next && next !== name) {
+      onRename?.(next);
+    }
+    setEditing(false);
+    onEditEnd?.();
+  };
+
+  const cancelRename = () => {
+    setRenameValue(name);
+    setEditing(false);
+    onEditEnd?.();
+  };
+
+  const startInlineRename = () => {
     setMenu({ kind: "closed" });
+    setRenameValue(name);
+    setEditing(true);
   };
 
   return (
@@ -123,7 +170,7 @@ function LayoutCard({
         type="button"
         data-layouts-card={id}
         data-active={active ? "true" : "false"}
-        onClick={onClick}
+        onClick={editing ? undefined : onClick}
         onContextMenu={onContextMenu}
         className={cn(
           "group relative flex flex-col gap-2 rounded-md border p-2 text-left",
@@ -143,18 +190,47 @@ function LayoutCard({
         >
           <LayoutSkeleton layout={layout} />
         </div>
-        {/* Footer row: name + badges */}
+        {/* Footer row: name + badges. When `editing` is true the name
+            cell flips to an inline input with autoFocus + select-all;
+            commits on Enter or blur, cancels on Escape. */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <span
-            className={cn(
-              "flex-1 truncate text-[12px]",
-              active
-                ? "text-(--color-fg-primary) font-medium"
-                : "text-(--color-fg-secondary)",
-            )}
-          >
-            {name}
-          </span>
+          {editing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelRename();
+                }
+              }}
+              onBlur={commitRename}
+              className={cn(
+                "flex-1 min-w-0 px-1.5 py-0.5 text-[12px] rounded outline-none",
+                "bg-(--color-bg-card-elev) border border-(--color-accent)",
+                "text-(--color-fg-primary)",
+              )}
+            />
+          ) : (
+            <span
+              className={cn(
+                "flex-1 truncate text-[12px]",
+                active
+                  ? "text-(--color-fg-primary) font-medium"
+                  : "text-(--color-fg-secondary)",
+              )}
+            >
+              {name}
+            </span>
+          )}
           {builtIn ? (
             <Lock
               size={11}
@@ -190,52 +266,6 @@ function LayoutCard({
           ) : null}
         </div>
       </button>
-
-      {menu.kind === "rename"
-        ? createPortal(
-            <div
-              data-layouts-card-menu
-              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50"
-              onClick={() => {
-                setRenameValue(name);
-                setMenu({ kind: "closed" });
-              }}
-            >
-              <div
-                className={cn(
-                  "card-surface-elev px-4 py-3 rounded border",
-                  "border-(--color-border-strong) flex items-center gap-2",
-                  "bg-(--color-bg-card-elev)",
-                )}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  autoFocus
-                  type="text"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") {
-                      setRenameValue(name);
-                      setMenu({ kind: "closed" });
-                    }
-                  }}
-                  className={cn(
-                    "px-2 py-1 text-sm rounded outline-none",
-                    "bg-(--color-bg-card) border border-(--color-border)",
-                    "focus:border-(--color-accent)",
-                    "text-(--color-fg-primary)",
-                  )}
-                />
-                <Button variant="primary" size="sm" onClick={commitRename}>
-                  Save
-                </Button>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
 
       {menu.kind === "confirm-delete"
         ? createPortal(
@@ -298,7 +328,7 @@ function LayoutCard({
               <button
                 type="button"
                 className="w-full text-left px-3 py-1.5 text-[12px] text-(--color-fg-primary) hover:bg-(--color-bg-hover)"
-                onClick={() => setMenu({ kind: "rename" })}
+                onClick={startInlineRename}
               >
                 Rename
               </button>
@@ -347,6 +377,14 @@ export function LayoutsModal({
     [presets, lastAppliedPresetId],
   );
 
+  // Tracks which user preset card should mount in inline-rename mode.
+  // Set on "Save current as new" so the freshly-created card focuses
+  // its name input with the placeholder selected — the user can
+  // immediately type to rename or commit the default with Enter / blur.
+  const [editingPresetId, setEditingPresetId] = React.useState<string | null>(
+    null,
+  );
+
   const applyLayout = (id: string, layout: SerializedDockview) => {
     const api = apiRef.current;
     if (!api) return;
@@ -359,15 +397,23 @@ export function LayoutsModal({
     onClose();
   };
 
+  const defaultPresetName = () => {
+    // Auto-numbered default that avoids collisions with existing
+    // user presets so the placeholder is never visually duplicated.
+    const base = "New layout";
+    const names = new Set(presets.map((p) => p.name));
+    if (!names.has(base)) return base;
+    let n = 2;
+    while (names.has(`${base} ${n}`)) n += 1;
+    return `${base} ${n}`;
+  };
+
   const onSaveAsNew = () => {
     const api = apiRef.current;
     if (!api) return;
-    const name = window.prompt("Name this layout:", "New layout");
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const preset = savePreset(pageId, trimmed, api.toJSON());
+    const preset = savePreset(pageId, defaultPresetName(), api.toJSON());
     setLastAppliedPresetId(pageId, preset.id);
+    setEditingPresetId(preset.id);
   };
 
   const onResave = () => {
@@ -448,6 +494,8 @@ export function LayoutsModal({
                   name={p.name}
                   layout={p.layout}
                   active={lastAppliedPresetId === p.id}
+                  autoEdit={editingPresetId === p.id}
+                  onEditEnd={() => setEditingPresetId(null)}
                   onClick={() => applyLayout(p.id, p.layout)}
                   onRename={(next) => renamePreset(pageId, p.id, next)}
                   onDelete={() => deletePreset(pageId, p.id)}
