@@ -2,7 +2,7 @@
 
 A plan for adding a proper audio surface to the engine. Source of
 truth for `api.audio.*`, the Web Audio backend that powers it, the
-`manifest.sounds` registry packs use to declare playable assets,
+`manifest.audio` registry packs use to declare playable assets,
 and the live-settings volume controls that let players mix the
 game in real time.
 
@@ -507,7 +507,7 @@ satisfies the autoplay policy and the queue is empty.
 
 At pack-load time, after the manifest is parsed:
 
-1. Walk `manifest.sounds`, partition by `preload` (default `true`
+1. Walk `manifest.audio`, partition by `preload` (default `true`
    for `sfx` + `voice`, `false` for `music` + `ambient`).
 2. For each eager sound, fetch the bytes via
    `pack.binaryBlob(soundDef.file)` (new `AssetPack` method —
@@ -670,7 +670,7 @@ mypack.apg
 └── ...
 ```
 
-Sounds can live anywhere in the pack — `manifest.sounds.<id>.file`
+Sounds can live anywhere in the pack — `manifest.audio.<id>.file`
 is the source of truth. The `audio/` convention is purely for
 human authors; the pack-builder doesn't enforce it.
 
@@ -701,7 +701,7 @@ files into the zip. Adding audio support requires:
 
 1. **File discovery.** Walk `audio/**/*.{ogg,mp3,wav,opus,m4a}`
    in the pack source dir; include each in the zip verbatim.
-2. **Validation.** Every id in `manifest.sounds` must resolve to
+2. **Validation.** Every id in `manifest.audio` must resolve to
    an actual file. Missing files → warning + skip (same severity
    as missing texture paths today).
 3. **Cumulative size report.** Print total audio bytes added to
@@ -886,7 +886,7 @@ inspector forms. Audio will surface there as a future task.
 Minimum useful Editor surface (deferred to **Au3**):
 
 - **Asset sidebar entry.** "Sounds" group in Assets mode listing
-  every `manifest.sounds` id with its file path + group + volume.
+  every `manifest.audio` id with its file path + group + volume.
 - **Preview / audition.** Click a sound → inspector shows a play
   button + a waveform thumbnail. Plays through the engine's
   AudioBackend so the user hears the result of the per-sound
@@ -896,7 +896,7 @@ Minimum useful Editor surface (deferred to **Au3**):
   the user can rename.
 - **Per-id inspector form.** Editable group dropdown, volume
   slider, loop checkbox, preload toggle. Writes back to
-  `manifest.sounds` in IDB; the running engine picks up the
+  `manifest.audio` in IDB; the running engine picks up the
   changes on next preload.
 - **Scene-level audio metadata.** A scene's `metadata.ambience`
   string + a "drop a sound here" target for the default
@@ -913,7 +913,7 @@ edit `manifest.json` by hand).
 
 | Phase | Scope | Where it lives | State |
 |---|---|---|---|
-| **Au1** | **Core surface.** `manifest.sounds` schema + `SoundDef`. `api.audio.play` / `playLoop` / `playReplace` / `stop` / `stopAll`. Web Audio gain graph (master + 5 groups). Lazy AudioContext bootstrap with one-shot user-gesture resume. `GameConfig.audio` + Settings sliders (live). Default-pack ships 2 sample sounds (gunshot + pickup chime) wired into the existing gun-render + pickup systems. | engine/src/ModAPI/AudioRegistry.ts (Au1 shipped surface — see §12), engine/src/ModAPI/types.ts, engine/src/GameConfig.ts, engine/src/AssetPack/types.ts, default-pack/audio/, default-pack/scripts/systems/gun-render.js + pickup.js | ✅ Shipped (commit `52d8e27`). Surface landed in `packages/engine/src/ModAPI/AudioRegistry.ts` rather than a standalone `engine/src/Audio/` directory; §12 implementation summary describes the as-shipped layout. |
+| **Au1** | **Core surface.** `manifest.audio` schema + `SoundDef`. `api.audio.play` / `playLoop` / `playReplace` / `stop` / `stopAll`. Web Audio gain graph (master + 5 groups). Lazy AudioContext bootstrap with one-shot user-gesture resume. `GameConfig.audio` + Settings sliders (live). Default-pack ships 2 sample sounds (gunshot + pickup chime) wired into the existing gun-render + pickup systems. | engine/src/ModAPI/AudioRegistry.ts (Au1 shipped surface — see §12), engine/src/ModAPI/types.ts, engine/src/GameConfig.ts, engine/src/AssetPack/types.ts, default-pack/audio/, default-pack/scripts/systems/gun-render.js + pickup.js | ✅ Shipped (commit `52d8e27`). Surface landed in `packages/engine/src/ModAPI/AudioRegistry.ts` rather than a standalone `engine/src/Audio/` directory; §12 implementation summary describes the as-shipped layout. |
 | **Au2** | **Spatial audio + music.** `playPositional` with PannerNode + HRTF. Listener auto-tracking. `crossfadeMusic`. Modal-open ducking via `api.modals.any()` driving `masterGain × CONFIG.audio.modalDuck`. Default-pack adds an ambient bed + theme music + battle music. | packages/engine/src/ModAPI/AudioRegistry.ts (PannerNode path), AudioSystem (listener tracking + ducking), packages/default-pack/audio/{music,ambient}/ | Designed. Depends on Au1. |
 | **Au3** | **Editor authoring.** Assets-mode sidebar entry for sounds. Preview + audition. Drag-to-import `.ogg` files. Per-sound inspector form. Manifest writes round-trip through IDB. | apps/editor/src/components/AssetsMode/Sounds*, apps/editor/src/lib/audioPreview.ts | Designed. Depends on Au1 + [EDITOR.md](./EDITOR.md) E5. |
 | **Au4** | **Advanced mixing.** Per-scene convolution reverb (a "room ambience" tag drives an impulse-response file). Dynamic per-handle EQ. Optional `pack-builder --audio-transcode` ffmpeg pass for loudness normalization. Future-proofing for procedural / DSP graphs. | engine/src/Audio/Reverb.ts, apps/pack-builder/src/audio-transcode.ts | Designed at high level; spec to come once Au1–Au3 ship. |
@@ -1047,7 +1047,7 @@ Files touched / added:
   "Audio" tab with five sliders + modal-duck slider.
 - `apps/pack-builder/src/build-packs.ts` — include
   `audio/**/*.{ogg,mp3,wav,opus,m4a}` in the zip; validate that
-  every `manifest.sounds.<id>.file` resolves; size report.
+  every `manifest.audio.<id>.file` resolves; size report.
 
 No new ModAPI methods beyond the `audio` namespace. Canvas2d +
 WebGL2 backends both work without modification (audio is

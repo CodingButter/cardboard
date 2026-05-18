@@ -357,7 +357,8 @@ export class Game {
    *      Each entry's `Scripts` component fires at attach time with
    *      `(entityId, world, api)` — used by the default-pack player
    *      to assemble runtime-dependent components (Movement / Camera /
-   *      Inventory seeded from manifest.defaultInventory).
+   *      Inventory seeded from `api.singleton("DefaultInventoryRecipe").entries`,
+   *      itself populated by the first world-script `scripts/setup/load-items.js`).
    *   4. Run `world.json.scripts[]` (default-export `(api) => …`).
    *      These register per-frame systems, event subscriptions, modal
    *      screens. They fire ONCE per Game lifetime, BEFORE the first

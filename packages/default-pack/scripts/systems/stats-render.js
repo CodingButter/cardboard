@@ -11,6 +11,7 @@
 export default (api) => {
   const C = api.components;
   const inv = api.inventory;
+  const itemRegistry = api.singleton("ItemRegistry");
 
   let visible = false;
   const dtHistory = new Float32Array(60);
@@ -85,7 +86,7 @@ export default (api) => {
       if (inventory) {
         const active = inv.getActiveItem(inventory);
         if (active) {
-          const def = api.pack.manifest.items?.[active.itemId];
+          const def = itemRegistry.byId?.[active.itemId];
           weaponStr = `${def?.name ?? active.itemId} (slot ${inventory.activeHotbarIndex + 1})`;
           if (def?.type === "weapon" && def.weapon?.magazineSize && def.weapon.ammoItem) {
             const reserve = inv.countItem(inventory, def.weapon.ammoItem);

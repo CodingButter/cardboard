@@ -1,5 +1,5 @@
 /* @jsxImportSource preact */
-import type { ModAPI } from "@two_5_d/engine";
+import type { ItemDef, ModAPI } from "@two_5_d/engine";
 import { InventoryScreen } from "../ui/InventoryScreen";
 
 /**
@@ -19,6 +19,8 @@ import { InventoryScreen } from "../ui/InventoryScreen";
  * poll for the close here.
  */
 export default (api: ModAPI) => {
+  const itemRegistry = api.singleton<{ byId: Record<string, ItemDef> }>("ItemRegistry");
+
   // Live-props resolver: invoked by the UI registry on every reconcile
   // so the modal always sees the current player's inventory component
   // (which is mutated in place — same object identity across frames).
@@ -32,7 +34,7 @@ export default (api: ModAPI) => {
       : { bag: [], hotbar: [], equipment: {}, activeHotbarIndex: 0 };
     return {
       inventory,
-      manifest: api.pack.manifest,
+      items: itemRegistry.byId ?? {},
       icons: api.itemImages,
       inv: api.inventory,
       onClose: () => {

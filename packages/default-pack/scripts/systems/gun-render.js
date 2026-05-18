@@ -19,8 +19,9 @@
 export default (api) => {
   const C = api.components;
   const inv = api.inventory;
+  const itemRegistry = api.singleton("ItemRegistry");
 
-  const itemDef = (id) => api.pack.manifest.items?.[id] ?? null;
+  const itemDef = (id) => itemRegistry.byId?.[id] ?? null;
 
   const isMoving = (input) =>
     api.input.isBindingPressed(input.bindings.forward) ||

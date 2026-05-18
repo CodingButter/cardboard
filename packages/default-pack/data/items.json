@@ -1,0 +1,23 @@
+{
+  "rifle": {
+    "name": "Assault Rifle",
+    "image": "images/items/rifle.png",
+    "type": "weapon",
+    "stackMax": 1,
+    "equipSlot": "mainHand",
+    "weapon": {
+      "fireRate": 8,
+      "magazineSize": 30,
+      "reloadTime": 1.5,
+      "startingMag": 30,
+      "ammoItem": "rifle_ammo"
+    }
+  },
+  "rifle_ammo": {
+    "name": "5.56mm Rounds",
+    "image": "images/items/ammo_pack.png",
+    "type": "ammo",
+    "stackMax": 120,
+    "worldSpriteId": "ammo_pack"
+  }
+}

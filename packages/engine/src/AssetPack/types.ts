@@ -136,7 +136,10 @@ export interface ItemStack {
 }
 
 /**
- * Seed entry for `manifest.defaultInventory`. A bare string is
+ * One entry of the default-inventory recipe — formerly
+ * `manifest.defaultInventory`, now packs ship this in pack data (e.g.
+ * `data/default-inventory.json`) and a setup script loads it into
+ * `api.singleton("DefaultInventoryRecipe").entries`. A bare string is
  * shorthand for `{ itemId: <string>, count: 1 }`.
  */
 export interface DefaultInventoryEntry {
@@ -290,7 +293,7 @@ export interface DeclarativePrefab {
 export type SoundGroup = "master" | "sfx" | "music" | "ambient" | "voice";
 
 /**
- * One playable sound declared in `manifest.sounds`. Pack scripts
+ * One playable sound declared in `manifest.audio`. Pack scripts
  * reference sounds by their manifest id via `api.audio.play(id)`. See
  * `docs/plans/AUDIO.md` §3.2.
  */
@@ -493,19 +496,6 @@ export interface PackManifest {
    */
   config?: string;
   /**
-   * Item catalog. Keys are item ids referenced by `defaultInventory`,
-   * `Pickup` components, and the inventory UI. Replaced the old
-   * `weapons` catalog — weapons are now `ItemDef` entries with
-   * `type: "weapon"`.
-   */
-  items?: Record<string, ItemDef>;
-  /**
-   * Items the player starts the session holding. Entries can be a
-   * bare item id (shorthand for `{ itemId, count: 1 }`) or a full
-   * `DefaultInventoryEntry` with count + optional slot placement.
-   */
-  defaultInventory?: ReadonlyArray<string | DefaultInventoryEntry>;
-  /**
    * Sprite catalog. Keys are the ids referenced by entities' `Sprite`
    * component. Renderers preload every image at boot so spawning is
    * a synchronous component-add.
@@ -557,14 +547,18 @@ export interface PackManifest {
     postPasses?: PostPassDef[];
   };
   /**
-   * Sound registry — Au1 of `docs/plans/AUDIO.md`. Keys are the ids
+   * Audio registry — Au1 of `docs/plans/AUDIO.md`. Keys are the ids
    * referenced by `api.audio.play(id)` et al. Files live anywhere in
    * the pack; convention is `audio/sfx/`, `audio/music/`,
-   * `audio/ambient/`. A pack with no `sounds` field skips the audio
+   * `audio/ambient/`. A pack with no `audio` field skips the audio
    * subsystem entirely (no `AudioContext` instantiation, byte-
    * identical to pre-Au1).
+   *
+   * Renamed from `sounds` for consistency: the folder is `audio/`, the
+   * runtime API is `api.audio.*`, the engine module is `AudioRegistry`
+   * — `sounds` was the odd one out.
    */
-  sounds?: Record<string, SoundDef>;
+  audio?: Record<string, SoundDef>;
   /**
    * Editor-authored declarative prefabs — see `DeclarativePrefab`.
    * Keys are the prefab ids passed to `api.spawn("id", opts)`. Walked

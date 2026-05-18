@@ -3,9 +3,20 @@ import type {
   EquipSlot,
   ItemDef,
   ItemStack,
-  PackManifest,
 } from "AssetPack";
 import { EQUIP_SLOTS } from "AssetPack";
+
+/**
+ * Item-definition lookup table. Keyed by item id, value is the full
+ * `ItemDef`. The pack-side `scripts/setup/load-items.js` populates
+ * `api.singleton("ItemRegistry").byId` with exactly this shape from
+ * `data/items.json`; the helpers below accept it as a parameter so the
+ * engine surface stays decoupled from "where the catalog lives".
+ *
+ * Pre-refactor this came from `manifest.items` — but per the
+ * engine/pack split items are pack data, not manifest data.
+ */
+export type ItemRegistryById = Readonly<Record<string, ItemDef>>;
 
 /**
  * Pure helpers for manipulating the player's `Inventory` component.
@@ -132,12 +143,12 @@ export function removeItem(inv: InventoryShape, itemId: string, count: number): 
  */
 export function addItem(
   inv: InventoryShape,
-  manifest: PackManifest,
+  items: ItemRegistryById,
   itemId: string,
   count: number,
   mag?: number,
 ): number {
-  const def = manifest.items?.[itemId];
+  const def = items[itemId];
   if (!def) {
     console.warn(`addItem: unknown item "${itemId}"`);
     return count;
@@ -184,22 +195,27 @@ export function emptyEquipment(): Record<EquipSlot, ItemStack | null> {
 }
 
 /**
- * Apply a pack's `defaultInventory` to a fresh inventory. Handles both
- * the bare-id shorthand and the structured-entry form; entries with
- * an explicit `slot` honor placement, otherwise items go through
+ * Apply a pack's default-inventory recipe to a fresh inventory. Handles
+ * both the bare-id shorthand and the structured-entry form; entries
+ * with an explicit `slot` honor placement, otherwise items go through
  * `addItem` for stacking + auto-fill.
+ *
+ * `items` is the `ItemRegistry.byId` map populated by the pack-side
+ * `scripts/setup/load-items.js` from `data/items.json`. The recipe
+ * itself comes from `data/default-inventory.json` (also loaded by that
+ * setup script and exposed via `api.singleton("DefaultInventoryRecipe").entries`).
  */
 export function seedInventory(
   inv: InventoryShape,
-  manifest: PackManifest,
+  items: ItemRegistryById,
   entries: ReadonlyArray<string | DefaultInventoryEntry>,
 ): void {
   for (const raw of entries) {
     const entry: DefaultInventoryEntry =
       typeof raw === "string" ? { itemId: raw, count: 1 } : raw;
-    const def = manifest.items?.[entry.itemId];
+    const def = items[entry.itemId];
     if (!def) {
-      console.warn(`defaultInventory: unknown item "${entry.itemId}" — skipping`);
+      console.warn(`seedInventory: unknown item "${entry.itemId}" — skipping`);
       continue;
     }
     const count = entry.count ?? 1;
@@ -209,7 +225,7 @@ export function seedInventory(
     if (entry.slot) {
       placeAtSlot(inv, entry.slot, { itemId: entry.itemId, count, ...(mag !== undefined ? { mag } : {}) });
     } else {
-      addItem(inv, manifest, entry.itemId, count, mag);
+      addItem(inv, items, entry.itemId, count, mag);
     }
   }
 }
@@ -225,7 +241,7 @@ export function seedInventory(
  */
 export function quickTransfer(
   inv: InventoryShape,
-  manifest: PackManifest,
+  items: ItemRegistryById,
   from: "bag" | "hotbar" | "equipment",
   fromIndex: number | EquipSlot,
 ): void {
@@ -245,7 +261,7 @@ export function quickTransfer(
     clearSource = () => (inv.equipment[s] = null);
   }
   if (!source) return;
-  const def = manifest.items?.[source.itemId];
+  const def = items[source.itemId];
   if (!def) return;
 
   // Default destination — opposite side for bag/hotbar; equipment

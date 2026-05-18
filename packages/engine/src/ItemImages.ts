@@ -1,4 +1,4 @@
-import type { AssetPack } from "AssetPack";
+import type { AssetPack, ItemDef } from "AssetPack";
 import { discoverItemVariants, ITEM_IMAGE_VARIANTS, type ItemImageVariant } from "AssetPack";
 
 export { ITEM_IMAGE_VARIANTS };
@@ -21,9 +21,9 @@ const FALLBACK_CHAIN: ReadonlyArray<ItemImageVariant | "bare"> = [
 type StorageKey = `${string}:${ItemImageVariant | "bare"}`;
 
 /**
- * Decoded `HTMLImageElement` per item id + variant, loaded once at
- * boot. Variant discovery follows the filename suffix convention
- * above so authors don't have to spell out every path in the manifest.
+ * Decoded `HTMLImageElement` per item id + variant. Variant discovery
+ * follows the filename suffix convention above so authors don't have
+ * to spell out every path in the manifest.
  *
  * `get(itemId)` defaults to the icon variant — that's what every
  * inventory call site wants. Pass `"held"` for the viewmodel or
@@ -33,25 +33,43 @@ type StorageKey = `${string}:${ItemImageVariant | "bare"}`;
  * Renderers that need their own resolution (sprite atlas in the world
  * renderers) preload from `manifest.sprites` directly; this class is
  * for HUD-style 2D blits.
+ *
+ * Items are no longer declared in `manifest.items` — they're loaded by
+ * the pack-side `scripts/setup/load-items.js` from `data/items.json`.
+ * That script calls `api.itemImages.loadFromRegistry(items)` once per
+ * pack boot to populate the cache with the new catalog. Decoded
+ * `<img>` elements remain reachable across reloads — calling
+ * `loadFromRegistry` again is additive (new ids get added, existing
+ * ids re-resolve their variant paths).
  */
 export default class ItemImages {
   private readonly images: Map<StorageKey, HTMLImageElement> = new Map();
   /**
-   * Per-item resolved file paths, discovered synchronously at boot.
-   * Exposed so other systems can introspect (e.g. the world-sprite
-   * registrar can ask "does this item have a world variant?").
+   * Per-item resolved file paths, discovered when
+   * `loadFromRegistry(items)` runs. Exposed so other systems can
+   * introspect (e.g. the world-sprite registrar can ask "does this
+   * item have a world variant?").
    */
   private readonly paths: Map<string, Partial<Record<ItemImageVariant | "bare", string>>> = new Map();
 
-  constructor(private readonly pack: AssetPack) {
-    const items = pack.manifest.items ?? {};
-    const has = (p: string): boolean => pack.has(p);
+  constructor(private readonly pack: AssetPack) {}
+
+  /**
+   * Populate the cache from a `{ itemId → ItemDef }` registry. Called
+   * by `scripts/setup/load-items.js` after `data/items.json` has been
+   * fetched + parsed; safe to call multiple times (additive). Each
+   * item runs through `discoverItemVariants` against `pack.has` to
+   * detect `<image>.icon|held|world.<ext>` siblings; explicit
+   * `weapon.viewmodelImage` still wins for the held slot.
+   */
+  loadFromRegistry(items: Readonly<Record<string, ItemDef>>): void {
+    const has = (p: string): boolean => this.pack.has(p);
     for (const [id, def] of Object.entries(items)) {
       const resolved = discoverItemVariants(has, def.image);
       // Explicit `weapon.viewmodelImage` wins over any auto-discovered
       // `.held` sibling — it's the legacy override hook.
       const viewmodelOverride = def.weapon?.viewmodelImage;
-      if (viewmodelOverride && pack.has(viewmodelOverride)) {
+      if (viewmodelOverride && this.pack.has(viewmodelOverride)) {
         resolved.held = viewmodelOverride;
       }
       this.paths.set(id, resolved);

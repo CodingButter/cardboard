@@ -410,14 +410,14 @@ function extOf(path: string): string {
 /**
  * Rewrite an in-zip path's extension. Used when a `.wav` audio file
  * is transcoded to `.mp3` — the new extension means the manifest
- * `sounds[].file` reference would no longer match, so callers should
+ * `audio[].file` reference would no longer match, so callers should
  * also remap the manifest entry. For now the build pipeline only
  * transcodes the existing audio if the manifest already accepts the
  * target ext, which is the common case (the default pack's
  * `gunshot` already points at `.mp3`).
  *
  * NOTE: when a `.wav` IS transcoded to `.mp3`, any
- * `manifest.sounds[].file` reference still pointing at the original
+ * `manifest.audio[].file` reference still pointing at the original
  * `.wav` path would 404 at runtime. The caller is responsible for
  * mirroring the rename into the in-zip manifest if needed.
  */

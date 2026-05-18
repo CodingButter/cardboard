@@ -7,7 +7,6 @@ import type {
   ItemDef,
   ItemImagesAPI,
   ItemStack,
-  PackManifest,
 } from "@two_5_d/engine";
 
 /**
@@ -19,11 +18,18 @@ import type {
  * the `inv` (InventoryAPI) prop. The pack-builder erases the type-only
  * `@two_5_d/engine` imports above at build time; nothing engine-side
  * ships in the compiled `.js` that lands in the .apg.
+ *
+ * `items` is the pack-defined item catalog — loaded by
+ * `scripts/setup/load-items.js` into `api.singleton("ItemRegistry").byId`.
+ * Replaces the pre-cleanup `manifest` prop, since items moved out of
+ * `manifest.json` into `data/items.json`.
  */
+
+export type ItemRegistryById = Readonly<Record<string, ItemDef>>;
 
 export interface InventoryScreenProps {
   inventory: InventoryShape;
-  manifest: PackManifest;
+  items: ItemRegistryById;
   icons: ItemImagesAPI;
   inv: InventoryAPI;
   onClose: () => void;
@@ -59,13 +65,13 @@ function writeSlot(inv: InventoryShape, ref: SlotRef, stack: ItemStack | null): 
   }
 }
 
-function slotAccepts(ref: SlotRef, stack: ItemStack, manifest: PackManifest): boolean {
+function slotAccepts(ref: SlotRef, stack: ItemStack, items: ItemRegistryById): boolean {
   if (ref.kind !== "equipment") return true;
-  const def = manifest.items?.[stack.itemId];
+  const def = items[stack.itemId];
   return def?.equipSlot === ref.slot;
 }
 
-export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: InventoryScreenProps) {
+export function InventoryScreen({ inventory, items, icons, inv, onClose }: InventoryScreenProps) {
   const [cursor, setCursor] = useState<ItemStack | null>(null);
   const [cursorSource, setCursorSource] = useState<SlotRef | null>(null);
   const [version, setVersion] = useState(0);
@@ -96,7 +102,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
     if (e.shiftKey && cursor === null) {
       const kind = ref.kind;
       const key = kind === "equipment" ? ref.slot : ref.index;
-      inv.quickTransfer(inventory, manifest, kind, key);
+      inv.quickTransfer(inventory, items, kind, key);
       bump();
       return;
     }
@@ -105,7 +111,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
       const here = readSlot(inventory, ref);
       if (cursor === null) {
         if (!here) return;
-        const def = manifest.items?.[here.itemId];
+        const def = items[here.itemId];
         if (def?.type === "weapon" || here.count <= 1) {
           setCursor(here);
           setCursorSource(ref);
@@ -121,7 +127,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
         bump();
         return;
       }
-      if (!slotAccepts(ref, cursor, manifest)) return;
+      if (!slotAccepts(ref, cursor, items)) return;
       if (here === null) {
         const placed: ItemStack = { itemId: cursor.itemId, count: 1 };
         if (cursor.mag !== undefined) placed.mag = cursor.mag;
@@ -132,7 +138,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
           setCursorSource(null);
         } else setCursor({ ...cursor });
       } else if (here.itemId === cursor.itemId) {
-        const def = manifest.items?.[here.itemId];
+        const def = items[here.itemId];
         const stackMax = def ? inv.defaultStackMax(def) : 1;
         if (def?.type !== "weapon" && here.count < stackMax) {
           here.count += 1;
@@ -154,13 +160,13 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
       setCursorSource(ref);
       writeSlot(inventory, ref, null);
     } else {
-      if (!slotAccepts(ref, cursor, manifest)) return;
+      if (!slotAccepts(ref, cursor, items)) return;
       if (here === null) {
         writeSlot(inventory, ref, cursor);
         setCursor(null);
         setCursorSource(null);
       } else if (here.itemId === cursor.itemId) {
-        const def = manifest.items?.[here.itemId];
+        const def = items[here.itemId];
         const stackMax = def ? inv.defaultStackMax(def) : 1;
         const room = stackMax - here.count;
         if (room <= 0 || def?.type === "weapon") {
@@ -177,7 +183,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
           } else setCursor({ ...cursor });
         }
       } else {
-        if (ref.kind === "equipment" && !slotAccepts(ref, cursor, manifest)) return;
+        if (ref.kind === "equipment" && !slotAccepts(ref, cursor, items)) return;
         writeSlot(inventory, ref, cursor);
         setCursor(here);
         setCursorSource(ref);
@@ -195,14 +201,14 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
     const source = readSlot(inventory, cursorSource);
     if (dir > 0) {
       if (source === null) {
-        if (slotAccepts(cursorSource, cursor, manifest)) {
+        if (slotAccepts(cursorSource, cursor, items)) {
           const placed: ItemStack = { itemId: cursor.itemId, count: 1 };
           if (cursor.mag !== undefined) placed.mag = cursor.mag;
           writeSlot(inventory, cursorSource, placed);
           cursor.count -= 1;
         }
       } else if (source.itemId === cursor.itemId) {
-        const def = manifest.items?.[source.itemId];
+        const def = items[source.itemId];
         const stackMax = def ? inv.defaultStackMax(def) : 1;
         if (def?.type !== "weapon" && source.count < stackMax) {
           source.count += 1;
@@ -211,7 +217,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
       }
     } else {
       if (source && source.itemId === cursor.itemId && source.count > 0) {
-        const def = manifest.items?.[source.itemId];
+        const def = items[source.itemId];
         if (def?.type !== "weapon") {
           source.count -= 1;
           cursor.count += 1;
@@ -240,21 +246,21 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
         <div class="flex items-start gap-5">
           <CharacterPanel
             inventory={inventory}
-            manifest={manifest}
+            items={items}
             icons={icons}
             inv={inv}
             onSlotClick={handleSlotClick}
           />
           <BagGrid
             inventory={inventory}
-            manifest={manifest}
+            items={items}
             icons={icons}
             onSlotClick={handleSlotClick}
           />
         </div>
         <HotbarRow
           inventory={inventory}
-          manifest={manifest}
+          items={items}
           icons={icons}
           onSlotClick={handleSlotClick}
         />
@@ -265,7 +271,7 @@ export function InventoryScreen({ inventory, manifest, icons, inv, onClose }: In
       </div>
 
       {cursor && (
-        <FloatingStack stack={cursor} manifest={manifest} icons={icons} x={mouse.x} y={mouse.y} />
+        <FloatingStack stack={cursor} items={items} icons={icons} x={mouse.x} y={mouse.y} />
       )}
     </div>
   );
@@ -318,12 +324,12 @@ function Slot({ stack, def, icons, onClick, placeholder, accentEmpty }: SlotProp
 
 function BagGrid({
   inventory,
-  manifest,
+  items,
   icons,
   onSlotClick,
 }: {
   inventory: InventoryShape;
-  manifest: PackManifest;
+  items: ItemRegistryById;
   icons: ItemImagesAPI;
   onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
 }) {
@@ -335,7 +341,7 @@ function BagGrid({
           <Slot
             key={i}
             stack={stack}
-            def={stack ? manifest.items?.[stack.itemId] : undefined}
+            def={stack ? items[stack.itemId] : undefined}
             icons={icons}
             onClick={(e) => onSlotClick({ kind: "bag", index: i }, e)}
           />
@@ -347,12 +353,12 @@ function BagGrid({
 
 function HotbarRow({
   inventory,
-  manifest,
+  items,
   icons,
   onSlotClick,
 }: {
   inventory: InventoryShape;
-  manifest: PackManifest;
+  items: ItemRegistryById;
   icons: ItemImagesAPI;
   onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
 }) {
@@ -366,7 +372,7 @@ function HotbarRow({
             <div key={i} class="relative">
               <Slot
                 stack={stack}
-                def={stack ? manifest.items?.[stack.itemId] : undefined}
+                def={stack ? items[stack.itemId] : undefined}
                 icons={icons}
                 onClick={(e) => onSlotClick({ kind: "hotbar", index: i }, e)}
               />
@@ -390,13 +396,13 @@ function HotbarRow({
 
 function CharacterPanel({
   inventory,
-  manifest,
+  items,
   icons,
   inv,
   onSlotClick,
 }: {
   inventory: InventoryShape;
-  manifest: PackManifest;
+  items: ItemRegistryById;
   icons: ItemImagesAPI;
   inv: InventoryAPI;
   onSlotClick: (ref: SlotRef, e: MouseEvent) => void;
@@ -406,7 +412,7 @@ function CharacterPanel({
     return (
       <Slot
         stack={stack}
-        def={stack ? manifest.items?.[stack.itemId] : undefined}
+        def={stack ? items[stack.itemId] : undefined}
         icons={icons}
         onClick={(e) => onSlotClick({ kind: "equipment", slot: s }, e)}
         placeholder={placeholder}
@@ -468,19 +474,19 @@ function CharacterSilhouette() {
 
 function FloatingStack({
   stack,
-  manifest,
+  items,
   icons,
   x,
   y,
 }: {
   stack: ItemStack;
-  manifest: PackManifest;
+  items: ItemRegistryById;
   icons: ItemImagesAPI;
   x: number;
   y: number;
 }) {
   const img = icons.get(stack.itemId);
-  const def = manifest.items?.[stack.itemId];
+  const def = items[stack.itemId];
   return (
     <div
       class="pointer-events-none fixed z-40 h-12 w-12 -translate-x-1/2 -translate-y-1/2"
