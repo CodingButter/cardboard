@@ -7,6 +7,7 @@ import {
 } from "../lib/EditorProjectStore";
 import { Button, Input } from "../components/ui";
 import { cn } from "../lib/cn";
+import { parseSceneText, stringifySceneRle } from "../lib/sceneSerde";
 import { EditorViewport, type ViewportMode } from "./EditorViewport";
 import type { MutableScene } from "./GridEditor";
 import { AnimationEditor } from "./AnimationEditor";
@@ -189,7 +190,10 @@ export function ProjectView({ projectId, onBackHome, workflowMode: controlledWor
       );
       if (cancelled || typeof body !== "string") return;
       try {
-        const parsed = JSON.parse(body) as MutableScene;
+        // `parseSceneText` runs `JSON.parse` + `normaliseGridField` so
+        // the GridEditor always sees nested-array layers, even when
+        // the on-disk scene ships in the RLE wire form.
+        const parsed = parseSceneText<MutableScene>(body);
         setEditScene(parsed);
         setEditScenePath(activeScenePath);
         setSceneDirty(false);
@@ -208,7 +212,11 @@ export function ProjectView({ projectId, onBackHome, workflowMode: controlledWor
     if (!sceneDirty && sceneSavedAt !== null) return;
     setSceneSaving(true);
     try {
-      const json = JSON.stringify(editScene, null, 2);
+      // `stringifySceneRle` re-encodes nested-array grid layers to
+      // the RLE wire form before serialising — keeps the on-disk
+      // shape compact across edits. Non-grid fields round-trip
+      // verbatim.
+      const json = stringifySceneRle(editScene);
       await EditorProjectStore.saveAsset(projectId, editScenePath, json);
       setSceneDirty(false);
       setSceneSavedAt(Date.now());
@@ -449,7 +457,10 @@ export function ProjectView({ projectId, onBackHome, workflowMode: controlledWor
                 );
                 if (typeof fresh !== "string") return;
                 try {
-                  setEditScene(JSON.parse(fresh) as MutableScene);
+                  // The bake re-saved the scene (still in RLE form on
+                  // disk). Normalise on read so the in-memory editScene
+                  // stays nested-array.
+                  setEditScene(parseSceneText<MutableScene>(fresh));
                   setSceneDirty(false);
                   setSceneSavedAt(Date.now());
                 } catch {
