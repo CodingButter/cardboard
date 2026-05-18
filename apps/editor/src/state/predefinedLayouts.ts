@@ -7,12 +7,25 @@ import type { SerializedDockview } from "dockview";
  * These describe dockview's internal panel layout only. The Workspace
  * rail is page chrome, not a dockview panel, so it never appears in
  * these JSON snapshots. Each entry's `panels` map MUST reference only
- * panel ids registered on the page's DockShell (e.g. `map`,
- * `inspector` for the Scene page). Referencing a panel that isn't in
- * the registry causes `api.fromJSON` to drop the whole layout silently.
+ * panel ids registered on the page's DockShell. Referencing a panel
+ * that isn't in the registry causes `api.fromJSON` to drop the whole
+ * layout silently.
  *
  * Catalogue is keyed by pageId (e.g. `"scene"`); each page registers
  * its own list. Pages without registered layouts get an empty array.
+ *
+ * The Scene-page registry (`PANELS` in `apps/editor/src/views/MapView.tsx`)
+ * defines the canonical 12 panel ids used here:
+ *   tool-palette, brush, tile-preset, layers, map-canvas,
+ *   preview, cell-inspector, quick-tags, output, problems,
+ *   selection-info, scene-settings.
+ *
+ * The "Default" preset replicates `buildDefaultLayout()` in
+ * `MapView.tsx`. We inline it here (rather than importing) to avoid a
+ * MapView ↔ WorkspacePanel ↔ predefinedLayouts module cycle that
+ * would evaluate at init time. If the canonical default layout
+ * shape changes in MapView, mirror the change in `defaultLayout()`
+ * below.
  */
 
 export interface PredefinedLayout {
@@ -31,96 +44,298 @@ export interface PredefinedLayout {
   readonly layout: SerializedDockview;
 }
 
-/** "Default" — Map + Inspector side-by-side. */
+/**
+ * "Default" — the full Map.png layout.
+ *
+ *   [ Left col | Centre col | Right col ]
+ *
+ * Left:   Tool Palette / Brush / Tile Presets / Layers.
+ * Centre: Map Canvas / [Output+Problems (tabbed) + Selection row].
+ * Right:  3D Preview / Cell Inspector / Quick Tags / Scene Settings.
+ *
+ * Kept in lock-step with `buildDefaultLayout()` in
+ * `apps/editor/src/views/MapView.tsx`.
+ */
 function defaultLayout(): SerializedDockview {
   return {
     grid: {
       root: {
         type: "branch",
         data: [
+          // Left column
           {
-            type: "leaf",
-            data: {
-              views: ["map"],
-              activeView: "map",
-              id: "map-group",
-            },
-            size: 600,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["tool-palette"],
+                  activeView: "tool-palette",
+                  id: "tool-palette-group",
+                },
+                size: 200,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["brush"],
+                  activeView: "brush",
+                  id: "brush-group",
+                },
+                size: 180,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["tile-preset"],
+                  activeView: "tile-preset",
+                  id: "tile-preset-group",
+                },
+                size: 240,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["layers"],
+                  activeView: "layers",
+                  id: "layers-group",
+                },
+                size: 180,
+              },
+            ],
+            size: 240,
           },
+          // Centre column
           {
-            type: "leaf",
-            data: {
-              views: ["inspector"],
-              activeView: "inspector",
-              id: "inspector-group",
-            },
-            size: 400,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["map-canvas"],
+                  activeView: "map-canvas",
+                  id: "map-canvas-group",
+                },
+                size: 600,
+              },
+              {
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["output", "problems"],
+                      activeView: "output",
+                      id: "output-group",
+                    },
+                    size: 400,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["selection-info"],
+                      activeView: "selection-info",
+                      id: "selection-info-group",
+                    },
+                    size: 240,
+                  },
+                ],
+                size: 160,
+              },
+            ],
+            size: 780,
+          },
+          // Right column
+          {
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["preview"],
+                  activeView: "preview",
+                  id: "preview-group",
+                },
+                size: 220,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["cell-inspector"],
+                  activeView: "cell-inspector",
+                  id: "cell-inspector-group",
+                },
+                size: 300,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["quick-tags"],
+                  activeView: "quick-tags",
+                  id: "quick-tags-group",
+                },
+                size: 120,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["scene-settings"],
+                  activeView: "scene-settings",
+                  id: "scene-settings-group",
+                },
+                size: 160,
+              },
+            ],
+            size: 340,
           },
         ],
-        size: 1000,
+        size: 1360,
       },
-      height: 1000,
-      width: 1000,
+      height: 800,
+      width: 1360,
       orientation: "HORIZONTAL",
     },
     panels: {
-      map: { id: "map", contentComponent: "map", title: "Map" },
-      inspector: {
-        id: "inspector",
-        contentComponent: "inspector",
-        title: "Inspector",
+      "tool-palette": {
+        id: "tool-palette",
+        contentComponent: "tool-palette",
+        title: "Tools",
+      },
+      brush: { id: "brush", contentComponent: "brush", title: "Brush" },
+      "tile-preset": {
+        id: "tile-preset",
+        contentComponent: "tile-preset",
+        title: "Tile Presets",
+      },
+      "map-canvas": {
+        id: "map-canvas",
+        contentComponent: "map-canvas",
+        title: "Map",
+      },
+      preview: {
+        id: "preview",
+        contentComponent: "preview",
+        title: "3D Preview",
+      },
+      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
+      "cell-inspector": {
+        id: "cell-inspector",
+        contentComponent: "cell-inspector",
+        title: "Cell Inspector",
+      },
+      "quick-tags": {
+        id: "quick-tags",
+        contentComponent: "quick-tags",
+        title: "Quick Tags",
+      },
+      output: {
+        id: "output",
+        contentComponent: "output",
+        title: "Output",
+      },
+      problems: {
+        id: "problems",
+        contentComponent: "problems",
+        title: "Problems",
+      },
+      "selection-info": {
+        id: "selection-info",
+        contentComponent: "selection-info",
+        title: "Selection Info",
+      },
+      "scene-settings": {
+        id: "scene-settings",
+        contentComponent: "scene-settings",
+        title: "Scene Settings",
       },
     },
   } as unknown as SerializedDockview;
 }
 
-/** "Map Focus" — Map takes ~80% width with Inspector reduced to a
- *  narrow right column. Useful when working primarily on the canvas. */
+/**
+ * "Map Focus" — wide canvas, slim left rail.
+ *
+ *   [ Tools / Tile Presets (narrow) | Canvas (wide) ]
+ *
+ * For paint-heavy work where the inspector/preview stack is noise.
+ */
 function mapFocusLayout(): SerializedDockview {
   return {
     grid: {
       root: {
         type: "branch",
         data: [
+          // Left column — Tool Palette + Tile Presets only
           {
-            type: "leaf",
-            data: {
-              views: ["map"],
-              activeView: "map",
-              id: "map-group",
-            },
-            size: 800,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["tool-palette"],
+                  activeView: "tool-palette",
+                  id: "tool-palette-group",
+                },
+                size: 240,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["tile-preset"],
+                  activeView: "tile-preset",
+                  id: "tile-preset-group",
+                },
+                size: 360,
+              },
+            ],
+            size: 220,
           },
+          // Centre column — wide Map Canvas
           {
             type: "leaf",
             data: {
-              views: ["inspector"],
-              activeView: "inspector",
-              id: "inspector-group",
+              views: ["map-canvas"],
+              activeView: "map-canvas",
+              id: "map-canvas-group",
             },
-            size: 200,
+            size: 780,
           },
         ],
         size: 1000,
       },
-      height: 1000,
+      height: 800,
       width: 1000,
       orientation: "HORIZONTAL",
     },
     panels: {
-      map: { id: "map", contentComponent: "map", title: "Map" },
-      inspector: {
-        id: "inspector",
-        contentComponent: "inspector",
-        title: "Inspector",
+      "tool-palette": {
+        id: "tool-palette",
+        contentComponent: "tool-palette",
+        title: "Tools",
+      },
+      "tile-preset": {
+        id: "tile-preset",
+        contentComponent: "tile-preset",
+        title: "Tile Presets",
+      },
+      "map-canvas": {
+        id: "map-canvas",
+        contentComponent: "map-canvas",
+        title: "Map",
       },
     },
   } as unknown as SerializedDockview;
 }
 
-/** "Split Horizontal" — Map on the top half of the content area,
- *  Inspector on the bottom. */
-function splitHorizontalLayout(): SerializedDockview {
+/**
+ * "Inspect" — canvas + right-side inspector stack.
+ *
+ *   [ Map Canvas (wide) | Cell Inspector / 3D Preview / Quick Tags / Selection Info ]
+ *
+ * No left palette panels — the focus is on inspecting + verifying the
+ * current selection, not painting.
+ */
+function inspectLayout(): SerializedDockview {
   return {
     grid: {
       root: {
@@ -129,78 +344,186 @@ function splitHorizontalLayout(): SerializedDockview {
           {
             type: "leaf",
             data: {
-              views: ["map"],
-              activeView: "map",
-              id: "map-group",
+              views: ["map-canvas"],
+              activeView: "map-canvas",
+              id: "map-canvas-group",
             },
-            size: 500,
+            size: 620,
           },
+          // Right inspector stack
           {
-            type: "leaf",
-            data: {
-              views: ["inspector"],
-              activeView: "inspector",
-              id: "inspector-group",
-            },
-            size: 500,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["cell-inspector"],
+                  activeView: "cell-inspector",
+                  id: "cell-inspector-group",
+                },
+                size: 320,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["preview"],
+                  activeView: "preview",
+                  id: "preview-group",
+                },
+                size: 240,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["quick-tags"],
+                  activeView: "quick-tags",
+                  id: "quick-tags-group",
+                },
+                size: 120,
+              },
+              {
+                type: "leaf",
+                data: {
+                  views: ["selection-info"],
+                  activeView: "selection-info",
+                  id: "selection-info-group",
+                },
+                size: 160,
+              },
+            ],
+            size: 380,
           },
         ],
         size: 1000,
       },
-      height: 1000,
+      height: 840,
       width: 1000,
-      orientation: "VERTICAL",
+      orientation: "HORIZONTAL",
     },
     panels: {
-      map: { id: "map", contentComponent: "map", title: "Map" },
-      inspector: {
-        id: "inspector",
-        contentComponent: "inspector",
-        title: "Inspector",
+      "map-canvas": {
+        id: "map-canvas",
+        contentComponent: "map-canvas",
+        title: "Map",
+      },
+      "cell-inspector": {
+        id: "cell-inspector",
+        contentComponent: "cell-inspector",
+        title: "Cell Inspector",
+      },
+      preview: {
+        id: "preview",
+        contentComponent: "preview",
+        title: "3D Preview",
+      },
+      "quick-tags": {
+        id: "quick-tags",
+        contentComponent: "quick-tags",
+        title: "Quick Tags",
+      },
+      "selection-info": {
+        id: "selection-info",
+        contentComponent: "selection-info",
+        title: "Selection Info",
       },
     },
   } as unknown as SerializedDockview;
 }
 
-/** "Inspector Wide" — Map narrowed, Inspector takes the larger column.
- *  Useful when editing entity properties with the canvas as reference. */
-function inspectorWideLayout(): SerializedDockview {
+/**
+ * "Debug" — canvas + bottom debugging stack.
+ *
+ *   [ Layers (narrow left) | Canvas (top) / Output+Problems + Selection Info (bottom row) ]
+ *
+ * Useful when chasing down "why doesn't paint apply here?" issues —
+ * the Output/Problems tabbed group catches diagnostics, the
+ * selection-info readout confirms what's actually under the cursor,
+ * and Layers lets you isolate which layer is on top.
+ */
+function debugLayout(): SerializedDockview {
   return {
     grid: {
       root: {
         type: "branch",
         data: [
+          // Left column — Layers only
           {
             type: "leaf",
             data: {
-              views: ["map"],
-              activeView: "map",
-              id: "map-group",
+              views: ["layers"],
+              activeView: "layers",
+              id: "layers-group",
             },
-            size: 400,
+            size: 180,
           },
+          // Centre+right column — Canvas on top, status row below
           {
-            type: "leaf",
-            data: {
-              views: ["inspector"],
-              activeView: "inspector",
-              id: "inspector-group",
-            },
-            size: 600,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: {
+                  views: ["map-canvas"],
+                  activeView: "map-canvas",
+                  id: "map-canvas-group",
+                },
+                size: 540,
+              },
+              {
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["output", "problems"],
+                      activeView: "output",
+                      id: "output-group",
+                    },
+                    size: 560,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["selection-info"],
+                      activeView: "selection-info",
+                      id: "selection-info-group",
+                    },
+                    size: 260,
+                  },
+                ],
+                size: 260,
+              },
+            ],
+            size: 820,
           },
         ],
         size: 1000,
       },
-      height: 1000,
+      height: 800,
       width: 1000,
       orientation: "HORIZONTAL",
     },
     panels: {
-      map: { id: "map", contentComponent: "map", title: "Map" },
-      inspector: {
-        id: "inspector",
-        contentComponent: "inspector",
-        title: "Inspector",
+      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
+      "map-canvas": {
+        id: "map-canvas",
+        contentComponent: "map-canvas",
+        title: "Map",
+      },
+      output: {
+        id: "output",
+        contentComponent: "output",
+        title: "Output",
+      },
+      problems: {
+        id: "problems",
+        contentComponent: "problems",
+        title: "Problems",
+      },
+      "selection-info": {
+        id: "selection-info",
+        contentComponent: "selection-info",
+        title: "Selection Info",
       },
     },
   } as unknown as SerializedDockview;
@@ -211,26 +534,29 @@ export const PREDEFINED_LAYOUTS: Record<string, readonly PredefinedLayout[]> = {
     {
       id: "scene/default",
       name: "Default",
-      description: "Map and Inspector side-by-side.",
+      description: "All panels visible — full editing surface per Map.png.",
       layout: defaultLayout(),
     },
     {
       id: "scene/map-focus",
       name: "Map Focus",
-      description: "Map takes ~80% width.",
+      description:
+        "Wide canvas with just Tools + Tile Presets for paint-heavy work.",
       layout: mapFocusLayout(),
     },
     {
-      id: "scene/split-horizontal",
-      name: "Split Horizontal",
-      description: "Map above Inspector.",
-      layout: splitHorizontalLayout(),
+      id: "scene/inspect",
+      name: "Inspect",
+      description:
+        "Canvas + Cell Inspector + Preview for selection-focused work.",
+      layout: inspectLayout(),
     },
     {
-      id: "scene/inspector-wide",
-      name: "Inspector Wide",
-      description: "Inspector takes the larger column.",
-      layout: inspectorWideLayout(),
+      id: "scene/debug",
+      name: "Debug",
+      description:
+        "Canvas + Output/Problems + layers for debugging painting issues.",
+      layout: debugLayout(),
     },
   ],
 };
