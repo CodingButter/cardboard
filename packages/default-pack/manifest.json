@@ -48,7 +48,6 @@
     "presets/walls.jsonc",
     "presets/floors.jsonc",
     "presets/ceilings.jsonc",
-    "presets/sheet_props.jsonc",
     "presets/_anonymous.jsonc"
   ],
   "items": {
