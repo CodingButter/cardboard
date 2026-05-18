@@ -5,6 +5,8 @@
     "paths": {
       "@two_5_d/engine": ["../../packages/engine/src/index.ts"],
       "@two_5_d/engine/*": ["../../packages/engine/src/*"],
+      "@two_5_d/shared": ["../../packages/shared/src/index.ts"],
+      "@two_5_d/shared/*": ["../../packages/shared/src/*"],
       // Same intra-package alias map as `apps/game/tsconfig.json`. TS
       // needs the engine's bare-name aliases reachable from here too
       // because importing `@two_5_d/engine` pulls in source files

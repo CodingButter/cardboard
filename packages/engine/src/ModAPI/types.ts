@@ -7,16 +7,11 @@ import type { KeyCode } from "Controllers/KeyboardController";
 import type { SceneRenderer } from "Renderers";
 import type { ComponentType } from "preact";
 import type { PartialGameConfig } from "Settings";
-import {
-  Position,
-  Facing,
-  Aim,
-  Camera,
-  Sprite,
-  Animation,
-  Light,
-  Shader,
-} from "Components";
+// NOTE: `BuiltInComponents` no longer hard-references the engine's
+// component classes. Built-in component shapes are now declared by
+// the default-pack manifest and routed through the `PackComponents`
+// augmentation point (see `packages/shared/src/generatePackTypes.ts`
+// + the engine barrel's exported empty `PackComponents` interface).
 import {
   BAG_SIZE,
   HOTBAR_SIZE,
@@ -202,53 +197,48 @@ export interface BindingsAPI {
 }
 
 /**
- * Engine-defined components exposed to mods by name — the slim set
- * the engine itself reads (render + scene-loader infrastructure).
+ * Augmentation point for pack-declared component shapes.
  *
- * Pack-declared components (PlayerInput, Movement, Weapon, Inventory,
- * MinimapMarker, Pickup, Health, AI, …) are NOT in this type. They
- * still resolve through `api.components` at runtime — the registry
- * exposes a Proxy that walks every registered name — but they don't
- * have a static field on this interface because the engine doesn't
- * know about them. Pack code that wants compile-time component access
- * either uses `api.getComponent("Name")` or imports the typed class
- * the pack itself exports.
+ * `PackComponents` is an empty interface at the engine level — every
+ * field comes from generated `.d.ts` files emitted by
+ * `generatePackTypes(manifest.components, …)` (see
+ * `packages/shared/src/generatePackTypes.ts`). Each pack's build
+ * produces a `types/pack.d.ts` that declaration-merges its components
+ * into this interface via:
  *
- * See `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — engine no longer
- * reads any game-specific component.
+ *   declare module "@two_5_d/engine" {
+ *     interface PackComponents {
+ *       Position: Component<{ x: number; y: number }>;
+ *       Movement: Component<MovementData>;
+ *       // …
+ *     }
+ *   }
+ *
+ * Pack code that wants compile-time component access reads through
+ * `api.components.<Name>` and gets the merged-in `Component<T>` type
+ * for free; names not declared by any pack's schema fall through to
+ * the index signature below as `Component<unknown>`.
+ *
+ * The engine itself does NOT declare built-ins on this interface —
+ * the default-pack manifest's `components[]` is the authoritative
+ * source for Position / Facing / Aim / Camera / Sprite / Animation /
+ * Light / Shader shapes. See `docs/plans/PREFABS_EDITOR_ONLY.md` §17
+ * and WORLD_STATE.md §4.
  */
-export interface BuiltInComponents {
-  Position: typeof Position;
-  Facing: typeof Facing;
-  Aim: typeof Aim;
-  Camera: typeof Camera;
-  Sprite: typeof Sprite;
-  /**
-   * Frame-based sprite animation playback state (A1 of
-   * `docs/plans/ANIMATIONS.md`). Attach alongside `Sprite` to drive
-   * named-animation playback through `api.anim`. Entities without an
-   * `Animation` component render frame 0 of angle 0 (= pre-A1
-   * single-image path).
-   */
-  Animation: typeof Animation;
-  Light: typeof Light;
-  /**
-   * Per-entity shader-hook attachment (M1 of MATERIALS.md). Attach a
-   * `Shader` component to ride pack-supplied `.glsl` hook overrides
-   * for just this entity. Sprites only in M1.
-   */
-  Shader: typeof Shader;
-  /**
-   * Forward-compat — pack-declared components (`PlayerInput`,
-   * `Movement`, `Weapon`, etc.) resolve through the proxy at runtime
-   * under their string key, so reading `api.components.PlayerInput`
-   * yields the manifest-registered `Component<unknown>`. The index
-   * signature documents that fall-through; consumers cast to the
-   * concrete pack-defined component class when they need stronger
-   * typing.
-   */
-  readonly [name: string]: Component<unknown> | undefined;
+export interface PackComponents {
+  // Intentionally empty — populated by generated pack `.d.ts` files
+  // via declaration merging.
 }
+
+/**
+ * The shape `api.components` actually carries — the augmented
+ * `PackComponents` plus an index-signature fallback so pack scripts
+ * can still read unknown component names without TS errors. The
+ * fallback resolves through the runtime Proxy in `ComponentRegistry`.
+ */
+export type BuiltInComponents = PackComponents & {
+  readonly [name: string]: Component<unknown> | undefined;
+};
 
 /**
  * Inventory helpers + sizing constants. Exposed on `api.inventory` so

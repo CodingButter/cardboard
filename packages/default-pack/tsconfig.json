@@ -1,17 +1,20 @@
 {
+  // tsconfig for the default content pack. Bun executes pack scripts
+  // (`scripts/**/*.js`, `.ts`, `.tsx`) at pack-build time via Bun's
+  // bundler — this tsconfig exists purely so `tsc --noEmit` can
+  // typecheck the scripts against the generated `types/pack.d.ts`
+  // (declaration-merged `PackComponents`) and the engine's public
+  // surface.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      // `@two_5_d/engine` resolves to the engine source barrel so
-      // type imports (Component, ComponentDef) flow without needing
-      // a build step. Same pattern as `apps/pack-builder/tsconfig.json`.
       "@two_5_d/engine": ["../engine/src/index.ts"],
       "@two_5_d/engine/*": ["../engine/src/*"],
-      // The engine's intra-package bare-name aliases need to be
-      // reachable here because importing from `@two_5_d/engine`
-      // pulls in source files whose own imports use those aliases.
-      // Keep in sync with `packages/engine/tsconfig.json`.
+      // Engine intra-package bare-name aliases — must be reachable
+      // because importing `@two_5_d/engine` pulls in source files
+      // whose own imports use these aliases. Keep in sync with
+      // `packages/engine/tsconfig.json`.
       "AssetPack": ["../engine/src/AssetPack/index.ts"],
       "AssetPack/*": ["../engine/src/AssetPack/*"],
       "Components": ["../engine/src/Components/index.ts"],
@@ -43,6 +46,12 @@
       "UI/*": ["../engine/src/UI/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": [
+    "types/**/*.d.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx",
+    "scripts/**/*.js",
+    "scripts/**/*.jsx"
+  ],
   "exclude": ["node_modules"]
 }

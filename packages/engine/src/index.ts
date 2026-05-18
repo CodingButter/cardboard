@@ -87,7 +87,14 @@ export type {
   SoundDef,
   SoundGroup,
   DeclarativePrefab,
+  ComponentDef,
 } from "./AssetPack";
+
+// ECS Component class — re-exported so generated pack `.d.ts` files
+// (see `packages/shared/src/generatePackTypes.ts`) can declare
+// `Component<T>` instances in the `PackComponents` augmentation
+// without reaching past the engine's public surface.
+export { Component } from "./ECS";
 // Inventory types — pack-side modal UIs (InventoryScreen) need
 // `InventoryShape` so they can type the inventory component they
 // receive as a prop. The helper functions stay engine-internal; pack
@@ -110,6 +117,8 @@ export type {
   AudioAPI,
   AudioHandle,
   PlayOpts,
+  PackComponents,
+  BuiltInComponents,
 } from "./ModAPI";
 
 // Settings overlay type — needed by SettingsScreen (pack-side after R4)

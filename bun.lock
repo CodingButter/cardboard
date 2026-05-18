@@ -90,6 +90,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@two_5_d/engine": "workspace:*",
+        "@two_5_d/shared": "workspace:*",
         "jszip": "^3.10.1",
       },
     },
@@ -108,6 +109,9 @@
     "packages/shared": {
       "name": "@two_5_d/shared",
       "version": "0.0.0",
+      "dependencies": {
+        "@two_5_d/engine": "workspace:*",
+      },
     },
   },
   "packages": {

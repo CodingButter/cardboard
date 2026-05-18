@@ -5,6 +5,7 @@ export type {
   PlayOpts,
   FrameFn,
   BuiltInComponents,
+  PackComponents,
   ModAPI,
   InputAPI,
   KeyboardInputAPI,

@@ -42,3 +42,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # WAD files — id Software proprietary binary assets, fetched/dropped locally
 apps/game/public/wads/*.wad
 apps/game/public/wads/*.WAD
+
+# Generated pack component type declarations — emitted by
+# `bun run build-packs` per-pack into `packages/*/types/pack.d.ts`.
+# The file is a tsc-only artefact (does NOT ship in the .apg) and
+# regenerates deterministically from `manifest.components`.
+packages/*/types/

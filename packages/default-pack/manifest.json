@@ -5,23 +5,243 @@
   "startScene": "scenes/scene1.json",
   "config": "config.json",
   "components": [
-    { "name": "Position",      "tags": ["entity"] },
-    { "name": "Facing",        "tags": ["entity"] },
-    { "name": "Movement",      "tags": ["entity"] },
-    { "name": "PlayerInput",   "tags": ["entity", "input"] },
-    { "name": "Aim",           "tags": ["entity", "input"] },
-    { "name": "Camera",        "tags": ["entity", "render"] },
-    { "name": "MinimapMarker", "tags": ["entity", "ui"] },
-    { "name": "Weapon",        "tags": ["entity"] },
-    { "name": "Inventory",     "tags": ["entity"] },
-    { "name": "Sprite",        "tags": ["entity", "render"] },
-    { "name": "Animation",     "tags": ["entity", "render"] },
-    { "name": "Pickup",        "tags": ["entity"] },
-    { "name": "Light",         "tags": ["entity", "render"] },
-    { "name": "Shader",        "tags": ["entity", "render"] },
-    { "name": "SpawnerList",   "tags": ["scene", "spawning"] },
-    { "name": "Systems" },
-    { "name": "Scripts" }
+    {
+      "name": "Position",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "x": { "type": "number" },
+          "y": { "type": "number" }
+        },
+        "required": ["x", "y"]
+      }
+    },
+    {
+      "name": "Facing",
+      "tags": ["entity"],
+      "schema": { "type": "number" }
+    },
+    {
+      "name": "Movement",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "speed":          { "type": "number" },
+          "rotationSpeed":  { "type": "number" },
+          "runMultiplier":  { "type": "number" },
+          "isRunning":      { "type": "boolean" },
+          "z":              { "type": "number" },
+          "vz":             { "type": "number" },
+          "crouching":      { "type": "boolean" }
+        },
+        "required": ["speed", "rotationSpeed", "runMultiplier", "isRunning", "z", "vz", "crouching"]
+      }
+    },
+    {
+      "name": "PlayerInput",
+      "tags": ["entity", "input"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "bindings": { "type": "object" }
+        },
+        "required": ["bindings"]
+      }
+    },
+    {
+      "name": "Aim",
+      "tags": ["entity", "input"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "screenY": { "type": "number" }
+        },
+        "required": ["screenY"]
+      }
+    },
+    {
+      "name": "Camera",
+      "tags": ["entity", "render"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "fov":          { "type": "number" },
+          "ceiling":      { "type": "number" },
+          "floor":        { "type": "number" },
+          "fogDistance":  { "type": "number" },
+          "maxRaySteps":  { "type": "number" },
+          "cameraZ":      { "type": "number" }
+        },
+        "required": ["fov", "ceiling", "floor", "fogDistance", "maxRaySteps", "cameraZ"]
+      }
+    },
+    {
+      "name": "MinimapMarker",
+      "tags": ["entity", "ui"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "color":          { "type": "string" },
+          "radius":         { "type": "number" },
+          "drawForwardRay": { "type": "boolean" }
+        },
+        "required": ["color", "radius", "drawForwardRay"]
+      }
+    },
+    {
+      "name": "Weapon",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "lastFireTime": { "type": "number" },
+          "walkPhase":    { "type": "number" },
+          "wasFiring":    { "type": "boolean" },
+          "reloadStart":  { "type": "number" }
+        },
+        "required": ["lastFireTime", "walkPhase", "wasFiring", "reloadStart"]
+      }
+    },
+    {
+      "name": "Inventory",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "bag":               { "type": "array" },
+          "hotbar":            { "type": "array" },
+          "equipment":         { "type": "object" },
+          "activeHotbarIndex": { "type": "number" }
+        },
+        "required": ["bag", "hotbar", "equipment", "activeHotbarIndex"]
+      }
+    },
+    {
+      "name": "Sprite",
+      "tags": ["entity", "render"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "imageId":     { "type": "string" },
+          "worldHeight": { "type": "number" },
+          "yOffset":     { "type": "number" }
+        },
+        "required": ["imageId", "worldHeight", "yOffset"]
+      }
+    },
+    {
+      "name": "Animation",
+      "tags": ["entity", "render"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "current":      { "type": "string" },
+          "frame":        { "type": "number" },
+          "elapsed":      { "type": "number" },
+          "paused":       { "type": "boolean" },
+          "playbackRate": { "type": "number" }
+        },
+        "required": ["current", "frame", "elapsed"]
+      }
+    },
+    {
+      "name": "Pickup",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "itemId": { "type": "string" },
+          "count":  { "type": "number" }
+        },
+        "required": ["itemId", "count"]
+      }
+    },
+    {
+      "name": "Light",
+      "tags": ["entity", "render"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "color":     { "type": "array", "items": { "type": "number" } },
+          "intensity": { "type": "number" },
+          "radius":    { "type": "number" },
+          "z":         { "type": "number" }
+        },
+        "required": ["color", "intensity", "radius"]
+      }
+    },
+    {
+      "name": "Shader",
+      "tags": ["entity", "render"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "worldHooks":  { "type": "string" },
+          "spriteHooks": { "type": "string" },
+          "skyHooks":    { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "SpawnerList",
+      "tags": ["scene", "spawning"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id":     { "type": "string" },
+                "x":      { "type": "number" },
+                "y":      { "type": "number" },
+                "facing": { "type": "number" }
+              },
+              "required": ["id", "x", "y", "facing"]
+            }
+          }
+        },
+        "required": ["points"]
+      }
+    },
+    {
+      "name": "Systems",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "script":       { "type": "string" },
+                "phase":        { "type": "string" },
+                "dependencies": { "type": "array", "items": { "type": "string" } },
+                "enabled":      { "type": "boolean" }
+              },
+              "required": ["script", "phase"]
+            }
+          }
+        },
+        "required": ["list"]
+      }
+    },
+    {
+      "name": "Scripts",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["refs"]
+      }
+    }
   ],
   "tileTextures": {
     "1": "images/tiles/wall.jpg",
