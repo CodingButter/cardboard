@@ -1,5 +1,4 @@
 import React from "react";
-import { ChevronDown } from "lucide-react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { cn } from "../../lib/cn";
 
@@ -39,37 +38,19 @@ export const DockPanelHeaderOrnamentsContext = React.createContext<
  *     automatically reverts to its narrow-tab look — that's correct
  *     fallback behaviour.
  *
- * Header shape (per Entities.png target):
- *   - h-9 (36px) bar
- *   - bg-(--color-bg-card-elev), border-b border-(--color-border)
+ * Header shape:
+ *   - 22px bar (driven by --dv-tabs-and-actions-container-height)
+ *   - transparent background — inherits the panel body colour so the
+ *     header reads as a thin drag handle, not a contrasting bar
  *   - small-caps uppercase title, text-[11px] tracking-wider
- *   - optional left icon (passed via params.icon as a node)
- *   - optional right controls slot (params.controls — a node) or a
- *     fallback chevron-down menu placeholder
+ *   - optional right controls slot (params.controls — a node) for
+ *     inline filter chips, dropdowns, etc. Nothing rendered when
+ *     absent (no placeholder chevron — non-functional UI was
+ *     confusing users).
  *   - clicking-and-dragging the bar still feeds dockview's native
  *     reorder/split/popout machinery (dockview attaches its DnD
  *     listeners to the element this component renders).
- *
- * Reading custom params: panel params are arbitrary objects supplied
- * via the panel-options JSON or `api.addPanel({ params: ... })`. We
- * expose two optional, render-only knobs:
- *   - `icon` — a small React node painted left of the title.
- *   - `controls` — a React node painted right of the title (for
- *     inline filter chips, dropdowns, etc.). When omitted we render a
- *     muted chevron icon as a visual placeholder so the bar reads as
- *     interactive in the design language even on minimal panels.
- *
- * These params are *not* part of dockview's core schema; they're a
- * convention this app applies. We type them loosely (the cast below)
- * since dockview's `Parameters` is intentionally `{ [k: string]: any }`.
  */
-
-/** Serialisable knobs the header reads from dockview panel params.
- *  These survive JSON round-trip — keep them primitive only. */
-interface DockPanelHeaderParams {
-  /** Hide the trailing chevron placeholder. Defaults to false. */
-  hideTrailingChevron?: boolean;
-}
 
 export function DockPanelHeader(
   props: IDockviewPanelHeaderProps,
@@ -84,14 +65,12 @@ export function DockPanelHeader(
     return () => sub.dispose();
   }, [api]);
 
-  const params = (props.params ?? {}) as DockPanelHeaderParams;
   const ornaments = React.useContext(DockPanelHeaderOrnamentsContext);
   const own = ornaments[api.id] ?? {};
   // Per-panel icons are intentionally NOT rendered in the dock tab
   // strip — the title alone identifies the panel. The MANIFEST.icon
   // field is still consumed by DocksModal (panel-discovery card grid).
   const controls = own.controls ?? null;
-  const showChevron = !controls && !params.hideTrailingChevron;
 
   return (
     <div
@@ -120,13 +99,6 @@ export function DockPanelHeader(
         <span className="dock-panel-header__controls flex items-center gap-1">
           {controls}
         </span>
-      ) : null}
-      {showChevron ? (
-        <ChevronDown
-          size={12}
-          aria-hidden
-          className="dock-panel-header__chevron text-(--color-fg-muted)"
-        />
       ) : null}
     </div>
   );
