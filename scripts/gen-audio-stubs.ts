@@ -10,14 +10,16 @@
  * time. WAV decodes natively in Web Audio and the encoder is ~30
  * lines of JS, so there's no toolchain dependency.
  *
- *  - `gunshot.wav` — 120 ms 200 Hz square wave with a fast exponential
- *    decay. Sounds like a percussive "pop" — fine for a placeholder.
  *  - `pickup.wav`  — 180 ms 800 Hz sine wave with a slow exponential
  *    decay. Sounds like a quick chime.
  *
- * Modders authoring their own asset packs should replace these with
- * real samples; the manifest schema (`SoundDef.file`) accepts any
- * format the browser decodes (`.ogg`, `.mp3`, `.wav`, `.opus`).
+ * Historical: this script also synthesised a `gunshot.wav` square-wave
+ * placeholder. The default pack now ships a recorded
+ * `audio/sfx/riffle_shot.mp3` wired to the `gunshot` sound id, so the
+ * stub generator no longer emits the WAV. Modders authoring their own
+ * asset packs should replace these with real samples; the manifest
+ * schema (`SoundDef.file`) accepts any format the browser decodes
+ * (`.ogg`, `.mp3`, `.wav`, `.opus`).
  *
  * Run with: `bun run scripts/gen-audio-stubs.ts`.
  */
@@ -71,26 +73,6 @@ function writeAscii(view: DataView, offset: number, text: string): void {
 }
 
 /**
- * 120 ms 200 Hz square wave with exponential amplitude decay
- * (tau ≈ 30 ms). Percussive — reads as a flat "pop" without
- * dominating the mix when stacked.
- */
-function synthGunshot(): Float32Array {
-  const lengthSec = 0.12;
-  const N = Math.floor(SAMPLE_RATE * lengthSec);
-  const samples = new Float32Array(N);
-  const freq = 200;
-  for (let i = 0; i < N; i++) {
-    const t = i / SAMPLE_RATE;
-    const phase = (t * freq) % 1;
-    const square = phase < 0.5 ? 1 : -1;
-    const env = Math.exp(-t / 0.03);
-    samples[i] = square * env * 0.7;
-  }
-  return samples;
-}
-
-/**
  * 180 ms 800 Hz sine with a slower exponential decay (tau ≈ 80 ms).
  * Reads as a soft chime — the kind of "got it" cue inventory
  * pickups expect.
@@ -112,7 +94,6 @@ function synthPickup(): Float32Array {
 await mkdir(outDir, { recursive: true });
 
 const stubs: Array<[string, Float32Array]> = [
-  ["gunshot.wav", synthGunshot()],
   ["pickup.wav", synthPickup()],
 ];
 

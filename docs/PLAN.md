@@ -42,6 +42,7 @@ in `docs/plans/*` per topic. Latest session-state snapshot lives at
 | `docs/plans/TUTORIALS.md` | In-editor guided tutorials — step-by-step overlays driven by pack-declared lessons. | Planned. |
 | `docs/plans/RESPONSIVE_DESIGN.md` | Editor + game layout adapt to viewport size (mobile, tablet, desktop, ultrawide). | Planned (#244). |
 | `docs/plans/CLOUD_SYNC.md` | Optional Supabase-backed pack sync — projects, assets, collaboration. | Planned (#251). |
+| `docs/plans/PUBLISH_SETTINGS.md` | `.env`-driven publish modes for the pack-builder; asset optimization (sharp images + ffmpeg audio) on `PUBLISH_MODE=production`; tilesheets pixel-preserved. | P1 landed 2026-05-18 (pack-builder). P2–P4 (editor mirror + CI integration) pending. |
 
 When the user names a phase ("R3", "Phase 4 lighting", "M1") look up
 the corresponding doc before acting. When they reference "the plan"
@@ -295,6 +296,7 @@ killer) to stop a stale dev server.
 | Engine unopinionated — game-specific components moved to pack | ✅ 2026-05-17 — `PlayerInput` / `Movement` / `Weapon` / `Inventory` / `MinimapMarker` / `Pickup` deleted from engine built-ins, instantiated from `manifest.components[]`. `api.components` is a proxy that resolves through the full registry. Engine built-ins slimmed to render/lifecycle infra only (Position/Facing/Aim/Camera/Sprite/Animation/Light/Shader). Scene-entity load loop in `Game.spawnSceneEntities`. `player:moved` emission moved pack-side. See `PREFABS_EDITOR_ONLY.md` §17 + `WORLD_STATE.md` §11.6 |
 | Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
 | Recovery 2026-05-17 | ✅ ~60 files reconstructed via transcript-replay engine across commits `4d3c1e9` → `93fb93d` (+ dedup) after sandbox reset incident wiped tracked-file modifications |
+| PUBLISH_SETTINGS P1: pack-builder `.env` modes + sharp/ffmpeg optimization + tilesheet-pixel-preserve | ✅ 2026-05-18 — `apps/pack-builder/.env.example` + `publish-config.ts` + emit-pass wiring. Dev mode = pass-through; production mode resizes individual images (`IMAGE_MAX_DIMENSION`), re-encodes images via sharp, transcodes audio via ffmpeg (wav→mp3, mp3 re-encode), pixel-preserves `manifest.tileSheets[]` paths. Also rewired default-pack `gunshot` from placeholder `.wav` to recorded `riffle_shot.mp3` + dropped orphan `sounds/weapons/` dupe. See `docs/plans/PUBLISH_SETTINGS.md`. |
 
 ---
 

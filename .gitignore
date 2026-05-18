@@ -22,6 +22,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
+# Pack-builder publish-mode local config (see apps/pack-builder/.env.example
+# and docs/plans/PUBLISH_SETTINGS.md). The example file IS committed.
+apps/pack-builder/.env
+
 # caches
 .eslintcache
 .cache

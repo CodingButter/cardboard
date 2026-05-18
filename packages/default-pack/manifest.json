@@ -301,7 +301,7 @@
     }
   },
   "sounds": {
-    "gunshot": { "file": "audio/sfx/gunshot.wav", "group": "sfx", "volume": 0.6 },
+    "gunshot": { "file": "audio/sfx/riffle_shot.mp3", "group": "sfx", "volume": 0.5 },
     "pickup":  { "file": "audio/sfx/pickup.wav",  "group": "sfx", "volume": 0.8 }
   },
   "_animationsSmokeTest_doc": "A1 of ANIMATIONS.md smoke test. Flip `animationsSmokeTest` to `true` and run `bun run build-packs` to enable. With the flag on, `scripts/hello.js` spawns one 'anim_marker' sprite at (4, 4) using the 4-angle × 4-frame `anim_marker` sheet — the hue shifts as the camera walks around it (exercises the angle-selection math) and the centered arrow's brightness pulses through 4 frames (exercises the AnimationSystem). Disabled by default; with the flag off the default pack renders byte-identically to pre-A1.",

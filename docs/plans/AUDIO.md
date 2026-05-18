@@ -1034,6 +1034,10 @@ Files touched / added:
 - `packages/default-pack/manifest.json` — `sounds` registry with
   `gunshot` + `pickup_chime`.
 - `packages/default-pack/audio/sfx/gunshot.ogg` — **NEW.** Sample.
+  (Historical: actually shipped as the synthesised `gunshot.wav`
+  placeholder via `scripts/gen-audio-stubs.ts`. Replaced 2026-05-17 by
+  wiring the `gunshot` id to the recorded `audio/sfx/riffle_shot.mp3`;
+  the placeholder `gunshot.wav` was deleted.)
 - `packages/default-pack/audio/sfx/pickup.ogg` — **NEW.** Sample.
 - `packages/default-pack/scripts/systems/gun-render.js` —
   `api.audio.play("gunshot")` in the fire branch.

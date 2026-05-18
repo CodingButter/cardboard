@@ -64,10 +64,51 @@ import {
   type ShaderRefToValidate,
 } from "@two_5_d/engine";
 import { generatePackTypes } from "@two_5_d/shared";
+import {
+  loadPublishConfig,
+  optimizeImage,
+  optimizeAudio,
+  isImagePath,
+  isAudioPath,
+  replaceExt,
+  type PublishConfig,
+} from "./publish-config";
+
+function extOf(path: string): string {
+  const idx = path.lastIndexOf(".");
+  return idx === -1 ? "" : path.slice(idx + 1);
+}
 
 interface ManifestLightingBlock {
   lightmapResolution?: number;
   supersample?: number;
+}
+
+/** Per-pack accumulator for the publish-mode run summary. */
+interface PublishStats {
+  imagesOptimized: number;
+  tilesheetsOptimized: number;
+  imagesResized: number;
+  imagesWarned: number;
+  audioTranscoded: number;
+  audioWavToMp3: number;
+  audioFfmpegMissing: boolean;
+  bytesIn: number;
+  bytesOut: number;
+}
+
+function emptyPublishStats(): PublishStats {
+  return {
+    imagesOptimized: 0,
+    tilesheetsOptimized: 0,
+    imagesResized: 0,
+    imagesWarned: 0,
+    audioTranscoded: 0,
+    audioWavToMp3: 0,
+    audioFfmpegMissing: false,
+    bytesIn: 0,
+    bytesOut: 0,
+  };
 }
 
 const root = new URL("../../../", import.meta.url).pathname;
@@ -529,9 +570,11 @@ async function validatePackShaders(
 
 async function buildPack(
   dirName: string,
-): Promise<{ size: number; files: number; outName: string }> {
+  publish: PublishConfig,
+): Promise<{ size: number; files: number; outName: string; stats: PublishStats }> {
   const packRoot = join(sourceRoot, dirName);
   const zip = new JSZip();
+  const publishStats = emptyPublishStats();
 
   let bakeOpts: BakeOpts = {};
   let outName = dirName;
@@ -552,6 +595,19 @@ async function buildPack(
     }
   } catch {
     // Missing or malformed manifest: fall through with default opts.
+  }
+
+  // ── Tilesheet path set ───────────────────────────────────────────
+  // Built once per pack and consulted in the emit pass so an image at
+  // a `manifest.tileSheets[i].path` gets the tilesheet optimization
+  // contract (pixel-preserving re-encode), while every other image
+  // goes through the individual-image path (resize + re-encode).
+  // See `docs/plans/PUBLISH_SETTINGS.md`.
+  const tileSheetPaths = new Set<string>();
+  if (manifest && Array.isArray((manifest as unknown as { tileSheets?: Array<{ path?: string }> }).tileSheets)) {
+    for (const sheet of (manifest as unknown as { tileSheets?: Array<{ path?: string }> }).tileSheets!) {
+      if (sheet && typeof sheet.path === "string") tileSheetPaths.add(sheet.path);
+    }
   }
 
   // ── Component .d.ts emission ─────────────────────────────────────
@@ -819,22 +875,29 @@ async function buildPack(
     }
   }
 
-  // The manifest.json no longer carries a `scripts[]` field — but if
-  // a stale one exists on disk the editor's previous-version output
-  // may still ship it. Strip on emit so the zipped manifest stays
-  // clean.
-  let manifestText: string | null = null;
-  if (
-    manifest &&
-    (manifest as unknown as { scripts?: unknown }).scripts !== undefined
-  ) {
-    const stripped: Record<string, unknown> = { ...(manifest as unknown as Record<string, unknown>) };
-    delete stripped.scripts;
-    manifestText = JSON.stringify(stripped, null, 2);
-  }
+  // The manifest is emitted by the post-walk fixup phase below so
+  // audio renames (.wav → .mp3 in production mode) can mirror into
+  // `manifest.sounds[].file` before the zipped manifest is written.
+  // The same phase also strips the legacy `manifest.scripts[]` field
+  // if a stale editor build left one behind.
 
   // ── Emit pass: bake + zip ─────────────────────────────────────────
+  //
+  // In production mode this pass also routes image + audio bytes
+  // through the optimization helpers in `publish-config.ts`. The
+  // manifest emit is deferred until AFTER the walk so any audio file
+  // that gets transcoded (e.g. `.wav` → `.mp3`) can mirror its new
+  // extension into `manifest.sounds[].file` before the zipped manifest
+  // ships. `audioPathRewrites` tracks `oldZipPath → newZipPath` for
+  // exactly that.
+  const audioPathRewrites = new Map<string, string>();
   let fileCount = 0;
+
+  // Defer manifest emit so audio renames can land in the rewritten
+  // copy. We collect a "delayed manifest emitter" here that the
+  // post-walk fixup phase calls.
+  let manifestEmitted = false;
+
   for await (const filePath of walk(packRoot)) {
     const inZip = relative(packRoot, filePath).split(/[\\/]+/).join("/");
 
@@ -853,8 +916,10 @@ async function buildPack(
       continue;
     }
 
-    if (inZip === "manifest.json" && manifestText !== null) {
-      zip.file(inZip, manifestText);
+    if (inZip === "manifest.json") {
+      // Defer — see note above. The post-walk phase emits whichever
+      // copy (rewritten or original) reflects every rename.
+      continue;
     } else if (inZip === "world.json" && worldJsonText !== null) {
       zip.file(inZip, worldJsonText);
     } else if (inZip.startsWith("scenes/") && inZip.endsWith(".json")) {
@@ -873,11 +938,76 @@ async function buildPack(
           ` (${stats.userLights} user + ${stats.autoLights} auto-emissive),` +
           ` K=${stats.resolution} N=${stats.supersample}, ${stats.ms.toFixed(1)} ms`,
       );
+    } else if (publish.mode === "production" && isImagePath(inZip)) {
+      const original = await Bun.file(filePath).bytes();
+      publishStats.bytesIn += original.byteLength;
+      const role = tileSheetPaths.has(inZip) ? "tilesheet" : "image";
+      const result = await optimizeImage(original, inZip, role, publish);
+      zip.file(inZip, result.bytes);
+      publishStats.bytesOut += result.bytes.byteLength;
+      if (role === "tilesheet") publishStats.tilesheetsOptimized++;
+      else publishStats.imagesOptimized++;
+      if (result.resized) publishStats.imagesResized++;
+      if (result.warned) publishStats.imagesWarned++;
+    } else if (publish.mode === "production" && isAudioPath(inZip)) {
+      const original = await Bun.file(filePath).bytes();
+      publishStats.bytesIn += original.byteLength;
+      const result = await optimizeAudio(original, inZip, publish);
+      if (result.ffmpegMissing) publishStats.audioFfmpegMissing = true;
+      let outZipPath = inZip;
+      if (result.transcoded && result.outExt && extOf(inZip) !== result.outExt) {
+        outZipPath = replaceExt(inZip, result.outExt);
+        audioPathRewrites.set(inZip, outZipPath);
+      }
+      zip.file(outZipPath, result.bytes);
+      publishStats.bytesOut += result.bytes.byteLength;
+      if (result.transcoded) {
+        publishStats.audioTranscoded++;
+        if (result.wavToMp3) publishStats.audioWavToMp3++;
+      }
     } else {
       const bytes = await Bun.file(filePath).bytes();
       zip.file(inZip, bytes);
+      publishStats.bytesIn += bytes.byteLength;
+      publishStats.bytesOut += bytes.byteLength;
     }
     fileCount++;
+  }
+
+  // ── Manifest emit (post-walk so audio renames apply) ─────────────
+  // If any `.wav` → `.mp3` rewrite happened, mirror it into the
+  // `manifest.sounds[].file` paths so the runtime still finds the
+  // sound. Then emit the manifest exactly once.
+  {
+    let manifestForZip: Record<string, unknown> | null = null;
+    if (manifest) {
+      manifestForZip = { ...(manifest as unknown as Record<string, unknown>) };
+      if ((manifestForZip as { scripts?: unknown }).scripts !== undefined) {
+        delete manifestForZip.scripts;
+      }
+      if (audioPathRewrites.size > 0 && manifestForZip.sounds && typeof manifestForZip.sounds === "object") {
+        const sounds = manifestForZip.sounds as Record<string, { file?: string }>;
+        const rewritten: Record<string, unknown> = {};
+        for (const [id, def] of Object.entries(sounds)) {
+          if (def && typeof def === "object" && typeof def.file === "string") {
+            const newFile = audioPathRewrites.get(def.file) ?? def.file;
+            rewritten[id] = { ...def, file: newFile };
+          } else {
+            rewritten[id] = def;
+          }
+        }
+        manifestForZip.sounds = rewritten;
+      }
+    }
+    if (manifestForZip) {
+      zip.file("manifest.json", JSON.stringify(manifestForZip, null, 2));
+      manifestEmitted = true;
+      fileCount++;
+    }
+    if (!manifestEmitted) {
+      // The walk didn't visit a manifest.json and we have no in-memory
+      // copy — leave it to the final guard below to throw.
+    }
   }
 
   // Emit each compiled .tsx → .js. Done after the walk so they land
@@ -897,7 +1027,7 @@ async function buildPack(
   });
   const outFile = join(outDir, `${outName}.apg`);
   await Bun.write(outFile, buffer);
-  return { size: buffer.byteLength, files: fileCount, outName };
+  return { size: buffer.byteLength, files: fileCount, outName, stats: publishStats };
 }
 
 // A "pack" is any workspace package under `packages/` whose root has
@@ -917,11 +1047,60 @@ if (subdirs.length === 0) {
   process.exit(0);
 }
 
+// Resolve publish mode + knobs once from process.env (Bun loads
+// `apps/pack-builder/.env` automatically). Logged up-front so the
+// build mode is obvious in CI logs.
+const publish = loadPublishConfig();
+console.log(`[build-packs] mode=${publish.mode}`);
+if (publish.mode === "production") {
+  console.log(
+    `  image: maxDim=${publish.image.maxDimension}, jpegQ=${publish.image.jpegQuality}, pngQuant=${publish.image.pngQuantize}`,
+  );
+  console.log(
+    `  tilesheet: jpegQ=${publish.tilesheet.jpegQuality}, pngQuant=${publish.tilesheet.pngQuantize}`,
+  );
+  console.log(
+    `  audio: bitrate=${publish.audio.bitrate}, sampleRate=${publish.audio.sampleRate}`,
+  );
+}
+
+function fmtBytes(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
 console.log(`Building ${subdirs.length} pack(s) from ${relative(root, sourceRoot)}/`);
 for (const name of subdirs) {
   try {
-    const { size, files, outName } = await buildPack(name);
-    console.log(`  ${outName}.apg  —  ${files} file(s), ${(size / 1024).toFixed(1)} KB`);
+    const { size, files, outName, stats } = await buildPack(name, publish);
+    if (publish.mode === "production") {
+      const parts: string[] = [];
+      const imgTotal = stats.imagesOptimized + stats.tilesheetsOptimized;
+      if (imgTotal > 0) {
+        parts.push(
+          `${imgTotal} image(s) (${stats.tilesheetsOptimized} tilesheet(s) pixel-preserved` +
+            (stats.imagesResized > 0 ? `, ${stats.imagesResized} resized` : "") +
+            `)`,
+        );
+      }
+      if (stats.audioTranscoded > 0) {
+        parts.push(
+          `${stats.audioTranscoded} audio file(s) (${stats.audioWavToMp3} wav→mp3, ${
+            stats.audioTranscoded - stats.audioWavToMp3
+          } mp3 re-encoded)`,
+        );
+      }
+      if (stats.audioFfmpegMissing) {
+        parts.push("ffmpeg missing — audio passed through");
+      }
+      console.log(
+        `  ${outName} — ${files} files, ${fmtBytes(size)} bytes` +
+          (parts.length > 0 ? `\n    optimized: ${parts.join(", ")}` : ""),
+      );
+    } else {
+      console.log(
+        `  ${outName} — ${files} files, ${fmtBytes(size)} bytes (pass-through)`,
+      );
+    }
   } catch (err) {
     console.error(`  ${name}: FAILED — ${(err as Error).message}`);
     process.exitCode = 1;

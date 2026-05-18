@@ -13,6 +13,7 @@
   "dependencies": {
     "@two_5_d/engine": "workspace:*",
     "@two_5_d/shared": "workspace:*",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "sharp": "^0.34.5"
   }
 }
