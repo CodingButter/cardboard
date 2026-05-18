@@ -131,7 +131,7 @@ Playtest overlay. Each subsection follows the same template:
     the fixed `3-pane grid-cols-[var(--rail-left)_1fr_var(--rail-right)]`
     grammar. Every page-local panel — Map Toolbar, Tool Palette,
     Brush, Tile Preset, Layers, Map Canvas, 3D Preview, Cell
-    Inspector, Quick Tags, Map Status Console, Selection Info — is
+    Inspector, Quick Tools, Map Status Console, Selection Info — is
     its own dock entry. Default layout evokes `Map.png` but the user
     can retile and pop out freely; persisted per project under
     `cardboard_workspace.dockLayouts[scene::<projectId>]`.

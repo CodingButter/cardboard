@@ -17,7 +17,7 @@ import type { SerializedDockview } from "dockview";
  * The Scene-page registry (`PANELS` in `apps/editor/src/views/MapView.tsx`)
  * defines the canonical 12 panel ids used here:
  *   tool-palette, brush, tile-preset, layers, map-canvas,
- *   preview, cell-inspector, quick-tags, output, problems,
+ *   preview, cell-inspector, quick-tools, output, problems,
  *   selection-info, scene-settings.
  *
  * The "Default" preset replicates `buildDefaultLayout()` in
@@ -45,13 +45,18 @@ export interface PredefinedLayout {
 }
 
 /**
- * "Default" — the full Map.png layout.
+ * "Default" — the full editor surface, captured from the maintainer's
+ * working layout snapshot.
  *
- *   [ Left col | Centre col | Right col ]
+ *   Top half (HORIZONTAL — 4 columns):
+ *     ├─ Col 1: Tool Palette / Brush / Tile Presets
+ *     ├─ Col 2: Map Canvas
+ *     ├─ Col 3: 3D Preview / Layers
+ *     └─ Col 4: Cell Inspector / Scene Settings / Quick Tools
  *
- * Left:   Tool Palette / Brush / Tile Presets / Layers.
- * Centre: Map Canvas / [Output+Problems (tabbed) + Selection row].
- * Right:  3D Preview / Cell Inspector / Quick Tags / Scene Settings.
+ *   Bottom strip (HORIZONTAL):
+ *     ├─ Output+Problems (tabbed group)
+ *     └─ Selection Info
  *
  * Kept in lock-step with `buildDefaultLayout()` in
  * `apps/editor/src/views/MapView.tsx`.
@@ -62,53 +67,43 @@ function defaultLayout(): SerializedDockview {
       root: {
         type: "branch",
         data: [
-          // Left column
+          // Top half — 4 columns
           {
             type: "branch",
             data: [
               {
-                type: "leaf",
-                data: {
-                  views: ["tool-palette"],
-                  activeView: "tool-palette",
-                  id: "tool-palette-group",
-                },
-                size: 200,
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["tool-palette"],
+                      activeView: "tool-palette",
+                      id: "tool-palette-group",
+                    },
+                    size: 207,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["brush"],
+                      activeView: "brush",
+                      id: "brush-group",
+                    },
+                    size: 207,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["tile-preset"],
+                      activeView: "tile-preset",
+                      id: "tile-preset-group",
+                    },
+                    size: 209,
+                  },
+                ],
+                size: 279,
               },
-              {
-                type: "leaf",
-                data: {
-                  views: ["brush"],
-                  activeView: "brush",
-                  id: "brush-group",
-                },
-                size: 180,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["tile-preset"],
-                  activeView: "tile-preset",
-                  id: "tile-preset-group",
-                },
-                size: 240,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["layers"],
-                  activeView: "layers",
-                  id: "layers-group",
-                },
-                size: 180,
-              },
-            ],
-            size: 240,
-          },
-          // Centre column
-          {
-            type: "branch",
-            data: [
               {
                 type: "leaf",
                 data: {
@@ -116,7 +111,7 @@ function defaultLayout(): SerializedDockview {
                   activeView: "map-canvas",
                   id: "map-canvas-group",
                 },
-                size: 600,
+                size: 1063,
               },
               {
                 type: "branch",
@@ -124,76 +119,91 @@ function defaultLayout(): SerializedDockview {
                   {
                     type: "leaf",
                     data: {
-                      views: ["output", "problems"],
-                      activeView: "output",
-                      id: "output-group",
+                      views: ["preview"],
+                      activeView: "preview",
+                      id: "preview-group",
                     },
-                    size: 400,
+                    size: 388,
                   },
                   {
                     type: "leaf",
                     data: {
-                      views: ["selection-info"],
-                      activeView: "selection-info",
-                      id: "selection-info-group",
+                      views: ["layers"],
+                      activeView: "layers",
+                      id: "layers-group",
                     },
-                    size: 240,
+                    size: 235,
                   },
                 ],
-                size: 160,
+                size: 283,
+              },
+              {
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["cell-inspector"],
+                      activeView: "cell-inspector",
+                      id: "cell-inspector-group",
+                    },
+                    size: 305,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["scene-settings"],
+                      activeView: "scene-settings",
+                      id: "scene-settings-group",
+                    },
+                    size: 199,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["quick-tools"],
+                      activeView: "quick-tools",
+                      id: "quick-tools-group",
+                    },
+                    size: 119,
+                  },
+                ],
+                size: 255,
               },
             ],
-            size: 780,
+            size: 623,
           },
-          // Right column
+          // Bottom strip
           {
             type: "branch",
             data: [
               {
                 type: "leaf",
                 data: {
-                  views: ["preview"],
-                  activeView: "preview",
-                  id: "preview-group",
+                  views: ["output", "problems"],
+                  activeView: "output",
+                  id: "output-group",
                 },
-                size: 220,
+                size: 1334,
               },
               {
                 type: "leaf",
                 data: {
-                  views: ["cell-inspector"],
-                  activeView: "cell-inspector",
-                  id: "cell-inspector-group",
+                  views: ["selection-info"],
+                  activeView: "selection-info",
+                  id: "selection-info-group",
                 },
-                size: 300,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["quick-tags"],
-                  activeView: "quick-tags",
-                  id: "quick-tags-group",
-                },
-                size: 120,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["scene-settings"],
-                  activeView: "scene-settings",
-                  id: "scene-settings-group",
-                },
-                size: 160,
+                size: 546,
               },
             ],
-            size: 340,
+            size: 144,
           },
         ],
-        size: 1360,
+        size: 1880,
       },
-      height: 800,
-      width: 1360,
-      orientation: "HORIZONTAL",
+      height: 767,
+      width: 1880,
+      orientation: "VERTICAL",
     },
     panels: {
       "tool-palette": {
@@ -207,46 +217,42 @@ function defaultLayout(): SerializedDockview {
         contentComponent: "tile-preset",
         title: "Tile Presets",
       },
+      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
       "map-canvas": {
         id: "map-canvas",
         contentComponent: "map-canvas",
         title: "Map",
-      },
-      preview: {
-        id: "preview",
-        contentComponent: "preview",
-        title: "3D Preview",
-      },
-      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
-      "cell-inspector": {
-        id: "cell-inspector",
-        contentComponent: "cell-inspector",
-        title: "Cell Inspector",
-      },
-      "quick-tags": {
-        id: "quick-tags",
-        contentComponent: "quick-tags",
-        title: "Quick Tags",
-      },
-      output: {
-        id: "output",
-        contentComponent: "output",
-        title: "Output",
-      },
-      problems: {
-        id: "problems",
-        contentComponent: "problems",
-        title: "Problems",
       },
       "selection-info": {
         id: "selection-info",
         contentComponent: "selection-info",
         title: "Selection Info",
       },
+      preview: {
+        id: "preview",
+        contentComponent: "preview",
+        title: "3D Preview",
+      },
+      "cell-inspector": {
+        id: "cell-inspector",
+        contentComponent: "cell-inspector",
+        title: "Cell Inspector",
+      },
+      "quick-tools": {
+        id: "quick-tools",
+        contentComponent: "quick-tools",
+        title: "Quick Tools",
+      },
       "scene-settings": {
         id: "scene-settings",
         contentComponent: "scene-settings",
         title: "Scene Settings",
+      },
+      output: { id: "output", contentComponent: "output", title: "Output" },
+      problems: {
+        id: "problems",
+        contentComponent: "problems",
+        title: "Problems",
       },
     },
   } as unknown as SerializedDockview;
@@ -330,7 +336,7 @@ function mapFocusLayout(): SerializedDockview {
 /**
  * "Inspect" — canvas + right-side inspector stack.
  *
- *   [ Map Canvas (wide) | Cell Inspector / 3D Preview / Quick Tags / Selection Info ]
+ *   [ Map Canvas (wide) | Cell Inspector / 3D Preview / Quick Tools / Selection Info ]
  *
  * No left palette panels — the focus is on inspecting + verifying the
  * current selection, not painting.
@@ -375,9 +381,9 @@ function inspectLayout(): SerializedDockview {
               {
                 type: "leaf",
                 data: {
-                  views: ["quick-tags"],
-                  activeView: "quick-tags",
-                  id: "quick-tags-group",
+                  views: ["quick-tools"],
+                  activeView: "quick-tools",
+                  id: "quick-tools-group",
                 },
                 size: 120,
               },
@@ -416,10 +422,10 @@ function inspectLayout(): SerializedDockview {
         contentComponent: "preview",
         title: "3D Preview",
       },
-      "quick-tags": {
-        id: "quick-tags",
-        contentComponent: "quick-tags",
-        title: "Quick Tags",
+      "quick-tools": {
+        id: "quick-tools",
+        contentComponent: "quick-tools",
+        title: "Quick Tools",
       },
       "selection-info": {
         id: "selection-info",

@@ -140,9 +140,9 @@ export const MOCK_LOG_LINES = [
 ] as const satisfies readonly LogLineRow[];
 
 // ---------------------------------------------------------------------------
-// Quick tags
+// Quick tools
 
-export const MOCK_QUICK_TAGS = [
+export const MOCK_QUICK_TOOLS = [
   "solid",
   "door",
   "trigger",

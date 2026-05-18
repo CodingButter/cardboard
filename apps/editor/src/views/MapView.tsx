@@ -39,9 +39,9 @@ import {
   MANIFEST as CELL_INSPECTOR_MANIFEST,
 } from "./scene/panels/CellInspectorPanel";
 import {
-  QuickTagsPanel,
-  MANIFEST as QUICK_TAGS_MANIFEST,
-} from "./scene/panels/QuickTagsPanel";
+  QuickToolsPanel,
+  MANIFEST as QUICK_TOOLS_MANIFEST,
+} from "./scene/panels/QuickToolsPanel";
 import {
   OutputPanel,
   MANIFEST as OUTPUT_MANIFEST,
@@ -127,7 +127,7 @@ const PANELS: readonly DockPanelDef[] = [
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
   { ...LAYERS_MANIFEST, component: LayersPanel },
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
-  { ...QUICK_TAGS_MANIFEST, component: QuickTagsPanel },
+  { ...QUICK_TOOLS_MANIFEST, component: QuickToolsPanel },
   { ...OUTPUT_MANIFEST, component: OutputPanel },
   { ...PROBLEMS_MANIFEST, component: ProblemsPanel },
   { ...SELECTION_INFO_MANIFEST, component: SelectionInfoPanel },
@@ -142,20 +142,25 @@ const PANELS: readonly DockPanelDef[] = [
   { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
 ];
 
-/** Initial layout JSON — laid out to evoke `Editor Design/Map.png`:
+/** Initial layout JSON — captured from the maintainer's working
+ *  layout (exported from `cardboard_workspace.dockLayouts[scene::*]`).
  *
- *    [ Left col | Centre col | Right col ]
+ *  Structure (root orientation VERTICAL — top half + bottom strip):
  *
- *  Left column (top→bottom):   Tool Palette / Brush / Tile Presets / Layers.
- *  Centre column (top→bottom): Map Canvas /
- *                              [Output+Problems (tabbed) + Selection Info side-by-side].
- *  Right column (top→bottom):  3D Preview / Cell Inspector / Quick Tags /
- *                              Scene Settings.
+ *    Top half (size 623, HORIZONTAL — 4 columns):
+ *      ├─ Col 1 (size 279, VERTICAL): Tool Palette / Brush / Tile Presets
+ *      ├─ Col 2 (size 1063):          Map Canvas
+ *      ├─ Col 3 (size 283, VERTICAL): 3D Preview / Layers
+ *      └─ Col 4 (size 255, VERTICAL): Cell Inspector / Scene Settings / Quick Tools
  *
- *  Sizes are relative weights normalised by dockview; the actual
- *  pixel widths flex with the viewport. The user can drag any
- *  splitter to rebalance, and every panel id below is also present
- *  in the `panels` dict so dockview can reconstruct the layout.
+ *    Bottom strip (size 144, HORIZONTAL — 2 leaves):
+ *      ├─ Output+Problems (tabbed, size 1334)
+ *      └─ Selection Info (size 546)
+ *
+ *  Sizes are relative weights; the actual pixel widths flex with the
+ *  viewport. The user can drag any splitter to rebalance, and every
+ *  panel id below is also present in the `panels` dict so dockview can
+ *  reconstruct the layout.
  *
  *  Persisted via the workspace store under
  *  `cardboard_workspace.dockLayouts[scene::<projectId>]`. */
@@ -165,53 +170,45 @@ function buildDefaultLayout(): SerializedDockview {
       root: {
         type: "branch",
         data: [
-          // Left column — Tool Palette / Brush / Tile Presets / Layers
+          // Top half — 4 columns
           {
             type: "branch",
             data: [
+              // Col 1: Tool Palette / Brush / Tile Presets
               {
-                type: "leaf",
-                data: {
-                  views: ["tool-palette"],
-                  activeView: "tool-palette",
-                  id: "tool-palette-group",
-                },
-                size: 200,
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["tool-palette"],
+                      activeView: "tool-palette",
+                      id: "tool-palette-group",
+                    },
+                    size: 207,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["brush"],
+                      activeView: "brush",
+                      id: "brush-group",
+                    },
+                    size: 207,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["tile-preset"],
+                      activeView: "tile-preset",
+                      id: "tile-preset-group",
+                    },
+                    size: 209,
+                  },
+                ],
+                size: 279,
               },
-              {
-                type: "leaf",
-                data: {
-                  views: ["brush"],
-                  activeView: "brush",
-                  id: "brush-group",
-                },
-                size: 180,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["tile-preset"],
-                  activeView: "tile-preset",
-                  id: "tile-preset-group",
-                },
-                size: 240,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["layers"],
-                  activeView: "layers",
-                  id: "layers-group",
-                },
-                size: 180,
-              },
-            ],
-            size: 240,
-          },
-          // Centre column — Canvas / [Output+Problems (tabbed) + Selection]
-          {
-            type: "branch",
-            data: [
+              // Col 2: Map Canvas
               {
                 type: "leaf",
                 data: {
@@ -219,84 +216,101 @@ function buildDefaultLayout(): SerializedDockview {
                   activeView: "map-canvas",
                   id: "map-canvas-group",
                 },
-                size: 600,
+                size: 1063,
               },
+              // Col 3: 3D Preview / Layers
               {
                 type: "branch",
                 data: [
                   {
                     type: "leaf",
                     data: {
-                      views: ["output", "problems"],
-                      activeView: "output",
-                      id: "output-group",
+                      views: ["preview"],
+                      activeView: "preview",
+                      id: "preview-group",
                     },
-                    size: 400,
+                    size: 388,
                   },
                   {
                     type: "leaf",
                     data: {
-                      views: ["selection-info"],
-                      activeView: "selection-info",
-                      id: "selection-info-group",
+                      views: ["layers"],
+                      activeView: "layers",
+                      id: "layers-group",
                     },
-                    size: 240,
+                    size: 235,
                   },
                 ],
-                size: 160,
+                size: 283,
+              },
+              // Col 4: Cell Inspector / Scene Settings / Quick Tools
+              {
+                type: "branch",
+                data: [
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["cell-inspector"],
+                      activeView: "cell-inspector",
+                      id: "cell-inspector-group",
+                    },
+                    size: 305,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["scene-settings"],
+                      activeView: "scene-settings",
+                      id: "scene-settings-group",
+                    },
+                    size: 199,
+                  },
+                  {
+                    type: "leaf",
+                    data: {
+                      views: ["quick-tools"],
+                      activeView: "quick-tools",
+                      id: "quick-tools-group",
+                    },
+                    size: 119,
+                  },
+                ],
+                size: 255,
               },
             ],
-            size: 780,
+            size: 623,
           },
-          // Right column — 3D Preview / Cell Inspector / Quick Tags / Scene Settings
+          // Bottom strip — Output+Problems tabbed + Selection Info
           {
             type: "branch",
             data: [
               {
                 type: "leaf",
                 data: {
-                  views: ["preview"],
-                  activeView: "preview",
-                  id: "preview-group",
+                  views: ["output", "problems"],
+                  activeView: "output",
+                  id: "output-group",
                 },
-                size: 220,
+                size: 1334,
               },
               {
                 type: "leaf",
                 data: {
-                  views: ["cell-inspector"],
-                  activeView: "cell-inspector",
-                  id: "cell-inspector-group",
+                  views: ["selection-info"],
+                  activeView: "selection-info",
+                  id: "selection-info-group",
                 },
-                size: 300,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["quick-tags"],
-                  activeView: "quick-tags",
-                  id: "quick-tags-group",
-                },
-                size: 120,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["scene-settings"],
-                  activeView: "scene-settings",
-                  id: "scene-settings-group",
-                },
-                size: 160,
+                size: 546,
               },
             ],
-            size: 340,
+            size: 144,
           },
         ],
-        size: 1360,
+        size: 1880,
       },
-      height: 800,
-      width: 1360,
-      orientation: "HORIZONTAL",
+      height: 767,
+      width: 1880,
+      orientation: "VERTICAL",
     },
     panels: {
       "tool-palette": {
@@ -310,46 +324,42 @@ function buildDefaultLayout(): SerializedDockview {
         contentComponent: "tile-preset",
         title: "Tile Presets",
       },
+      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
       "map-canvas": {
         id: "map-canvas",
         contentComponent: "map-canvas",
         title: "Map",
-      },
-      preview: {
-        id: "preview",
-        contentComponent: "preview",
-        title: "3D Preview",
-      },
-      layers: { id: "layers", contentComponent: "layers", title: "Layers" },
-      "cell-inspector": {
-        id: "cell-inspector",
-        contentComponent: "cell-inspector",
-        title: "Cell Inspector",
-      },
-      "quick-tags": {
-        id: "quick-tags",
-        contentComponent: "quick-tags",
-        title: "Quick Tags",
-      },
-      output: {
-        id: "output",
-        contentComponent: "output",
-        title: "Output",
-      },
-      problems: {
-        id: "problems",
-        contentComponent: "problems",
-        title: "Problems",
       },
       "selection-info": {
         id: "selection-info",
         contentComponent: "selection-info",
         title: "Selection Info",
       },
+      preview: {
+        id: "preview",
+        contentComponent: "preview",
+        title: "3D Preview",
+      },
+      "cell-inspector": {
+        id: "cell-inspector",
+        contentComponent: "cell-inspector",
+        title: "Cell Inspector",
+      },
+      "quick-tools": {
+        id: "quick-tools",
+        contentComponent: "quick-tools",
+        title: "Quick Tools",
+      },
       "scene-settings": {
         id: "scene-settings",
         contentComponent: "scene-settings",
         title: "Scene Settings",
+      },
+      output: { id: "output", contentComponent: "output", title: "Output" },
+      problems: {
+        id: "problems",
+        contentComponent: "problems",
+        title: "Problems",
       },
     },
   } as unknown as SerializedDockview;
