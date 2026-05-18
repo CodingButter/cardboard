@@ -52,3 +52,6 @@ apps/game/public/wads/*.WAD
 # The file is a tsc-only artefact (does NOT ship in the .apg) and
 # regenerates deterministically from `manifest.components`.
 packages/*/types/
+
+# Playwright MCP screenshot debris
+.playwright-mcp/
