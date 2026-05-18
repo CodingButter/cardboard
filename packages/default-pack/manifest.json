@@ -244,6 +244,28 @@
         },
         "required": ["refs"]
       }
+    },
+    {
+      "name": "ItemRegistry",
+      "tags": ["world", "singleton"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "byId": { "type": "object", "default": {} }
+        },
+        "required": ["byId"]
+      }
+    },
+    {
+      "name": "DefaultInventoryRecipe",
+      "tags": ["world", "singleton"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "entries": { "type": "array", "default": [] }
+        },
+        "required": ["entries"]
+      }
     }
   ],
   "tileTextures": {
@@ -259,33 +281,6 @@
     "presets/ceilings.jsonc",
     "presets/_anonymous.jsonc"
   ],
-  "items": {
-    "rifle": {
-      "name": "Assault Rifle",
-      "image": "images/items/rifle.png",
-      "type": "weapon",
-      "stackMax": 1,
-      "equipSlot": "mainHand",
-      "weapon": {
-        "fireRate": 8,
-        "magazineSize": 30,
-        "reloadTime": 1.5,
-        "startingMag": 30,
-        "ammoItem": "rifle_ammo"
-      }
-    },
-    "rifle_ammo": {
-      "name": "5.56mm Rounds",
-      "image": "images/items/ammo_pack.png",
-      "type": "ammo",
-      "stackMax": 120,
-      "worldSpriteId": "ammo_pack"
-    }
-  },
-  "defaultInventory": [
-    { "itemId": "rifle", "slot": "hotbar:0" },
-    { "itemId": "rifle_ammo", "count": 90 }
-  ],
   "sprites": {
     "ammo_pack": { "image": "images/items/ammo_pack.png" },
     "anim_marker": {
@@ -300,7 +295,7 @@
       }
     }
   },
-  "sounds": {
+  "audio": {
     "gunshot": { "file": "audio/sfx/riffle_shot.mp3", "group": "sfx", "volume": 0.5 },
     "pickup":  { "file": "audio/sfx/pickup.wav",  "group": "sfx", "volume": 0.8 }
   },

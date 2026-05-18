@@ -22,6 +22,7 @@ export default (api) => {
   const C = api.components;
   const Vec2 = api.Vec2;
   const inv = api.inventory;
+  const itemRegistry = api.singleton("ItemRegistry");
 
   // Reference logical canvas height the aim system clamps against.
   // Hard-wired to the engine's `Config.CANVAS_SIZE.y` (720) so the
@@ -186,7 +187,7 @@ export default (api) => {
         // Reload (R) start — completion lives in gun-render.
         if (reloadPressed && inventory) {
           const active = inv.getActiveItem(inventory);
-          const def = active ? api.pack.manifest.items?.[active.itemId] : null;
+          const def = active ? itemRegistry.byId?.[active.itemId] : null;
           const weapon = C.Weapon.get(entity);
           const stats = def?.weapon;
           const magSize = stats?.magazineSize ?? 0;

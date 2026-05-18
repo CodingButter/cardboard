@@ -187,7 +187,7 @@ export async function bootFromChain(
   // off the main thread; the bootstrap doesn't await it — sounds
   // become playable as their buffers complete and the first
   // `api.audio.play("...")` call resolves once the buffer lands. A
-  // pack without `manifest.sounds` no-ops here without creating an
+  // pack without `manifest.audio` no-ops here without creating an
   // AudioContext.
   void game.api.audio.preloadAll();
 

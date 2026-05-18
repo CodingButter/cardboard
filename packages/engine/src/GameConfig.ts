@@ -174,8 +174,9 @@ export interface GameConfig {
   /**
    * Baseline first-person weapon viewmodel tuning. The active weapon's
    * image and any of these per-weapon fields come from the pack's
-   * `manifest.items[id].weapon`; anything the manifest leaves out
-   * falls back to the values here.
+   * item registry (loaded into `api.singleton("ItemRegistry").byId`
+   * from `data/items.json`); anything the registry leaves out falls
+   * back to the values here.
    *
    * Sizes are *fractions of canvas height* (not absolute pixels) so the
    * viewmodel scales with the renderer's resolution — changing `FACTOR`
@@ -255,7 +256,7 @@ export interface GameConfig {
    * Audio mixer volumes — Au1 of `docs/plans/AUDIO.md` §6.1. Each
    * group has its own gain node feeding `master`; this block drives
    * the live `GainNode.gain.value` updates from the Settings UI. All
-   * values are 0..1. A pack that ships no `manifest.sounds` never
+   * values are 0..1. A pack that ships no `manifest.audio` never
    * touches the audio subsystem, so these knobs are inert by default.
    */
   audio: {

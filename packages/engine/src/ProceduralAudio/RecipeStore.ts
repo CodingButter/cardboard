@@ -59,7 +59,7 @@ export class RecipeStore {
    * logged + skipped; one bad recipe doesn't take down the others.
    *
    * Packs without any matching files load fine — the store stays
-   * empty and the audio resolver falls through to `manifest.sounds`.
+   * empty and the audio resolver falls through to `manifest.audio`.
    */
   async loadFromPack(pack: AssetPack): Promise<void> {
     if (this.loaded) return;
@@ -87,7 +87,7 @@ export class RecipeStore {
         }
         if (this.recipes.has(json.id)) {
           // Per SOUND_LAB.md §6.6 — collisions log + last-write-wins
-          // (matching `manifest.sounds`).
+          // (matching `manifest.audio`).
           console.warn(`[procedural-audio] recipe id "${json.id}" already registered; replacing`);
         }
         this.recipes.set(json.id, { recipe: json, buffer: null, pool: null });

@@ -11,6 +11,7 @@
 export default (api) => {
   const C = api.components;
   const inv = api.inventory;
+  const itemRegistry = api.singleton("ItemRegistry");
 
   api.registerRendererSystem((renderer, world) => {
     const entity = world.first(C.PlayerInput, C.Inventory);
@@ -41,7 +42,7 @@ export default (api) => {
     ctx.save();
     for (let i = 0; i < n; i++) {
       const stack = inventory.hotbar[i];
-      const def = stack ? api.pack.manifest.items?.[stack.itemId] : null;
+      const def = stack ? itemRegistry.byId?.[stack.itemId] : null;
       const x = startX + i * (slotSize + gap);
       const isActive = i === inventory.activeHotbarIndex;
 

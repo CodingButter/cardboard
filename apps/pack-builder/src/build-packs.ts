@@ -877,7 +877,7 @@ async function buildPack(
 
   // The manifest is emitted by the post-walk fixup phase below so
   // audio renames (.wav → .mp3 in production mode) can mirror into
-  // `manifest.sounds[].file` before the zipped manifest is written.
+  // `manifest.audio[].file` before the zipped manifest is written.
   // The same phase also strips the legacy `manifest.scripts[]` field
   // if a stale editor build left one behind.
 
@@ -887,7 +887,7 @@ async function buildPack(
   // through the optimization helpers in `publish-config.ts`. The
   // manifest emit is deferred until AFTER the walk so any audio file
   // that gets transcoded (e.g. `.wav` → `.mp3`) can mirror its new
-  // extension into `manifest.sounds[].file` before the zipped manifest
+  // extension into `manifest.audio[].file` before the zipped manifest
   // ships. `audioPathRewrites` tracks `oldZipPath → newZipPath` for
   // exactly that.
   const audioPathRewrites = new Map<string, string>();
@@ -976,7 +976,7 @@ async function buildPack(
 
   // ── Manifest emit (post-walk so audio renames apply) ─────────────
   // If any `.wav` → `.mp3` rewrite happened, mirror it into the
-  // `manifest.sounds[].file` paths so the runtime still finds the
+  // `manifest.audio[].file` paths so the runtime still finds the
   // sound. Then emit the manifest exactly once.
   {
     let manifestForZip: Record<string, unknown> | null = null;
@@ -985,8 +985,8 @@ async function buildPack(
       if ((manifestForZip as { scripts?: unknown }).scripts !== undefined) {
         delete manifestForZip.scripts;
       }
-      if (audioPathRewrites.size > 0 && manifestForZip.sounds && typeof manifestForZip.sounds === "object") {
-        const sounds = manifestForZip.sounds as Record<string, { file?: string }>;
+      if (audioPathRewrites.size > 0 && manifestForZip.audio && typeof manifestForZip.audio === "object") {
+        const sounds = manifestForZip.audio as Record<string, { file?: string }>;
         const rewritten: Record<string, unknown> = {};
         for (const [id, def] of Object.entries(sounds)) {
           if (def && typeof def === "object" && typeof def.file === "string") {
@@ -996,7 +996,7 @@ async function buildPack(
             rewritten[id] = def;
           }
         }
-        manifestForZip.sounds = rewritten;
+        manifestForZip.audio = rewritten;
       }
     }
     if (manifestForZip) {

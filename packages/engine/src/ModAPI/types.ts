@@ -491,7 +491,7 @@ export interface ProceduralPlayInstrumentOpts {
  *
  * Static + loop recipes also resolve through the existing
  * `api.audio.play(id)` path — the registry checks the recipe store
- * first, then `manifest.sounds` (per §6.6 + §12 Q11 RESOLVED:
+ * first, then `manifest.audio` (per §6.6 + §12 Q11 RESOLVED:
  * shared namespace). This `proceduralAudio` surface gives pack scripts
  * direct access to the underlying recipe machinery for advanced use
  * — most pack scripts can stick with `api.audio.play(...)`.

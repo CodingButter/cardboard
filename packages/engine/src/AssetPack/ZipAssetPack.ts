@@ -1,6 +1,5 @@
 import { AssetPack } from "./AssetPack";
-import { discoverItemVariants } from "./discoverItemVariants";
-import type { PackManifest, SpriteDef } from "./types";
+import type { PackManifest } from "./types";
 
 /**
  * Pack backed by a downloaded `.apg` zip file. Decoded once at `load`
@@ -58,26 +57,16 @@ export class ZipAssetPack extends AssetPack {
       throw new Error(`Pack ${source} has invalid manifest.json: ${err}`);
     }
 
-    // Auto-register sprite atlas entries for any item that ships a
-    // `.world.<ext>` sibling but doesn't have one explicitly assigned.
-    // Lets mods spawn pickups with `imageId: itemId` directly without
-    // having to author a separate `manifest.sprites` entry.
-    const has = (p: string): boolean => files.has(p);
-    const sprites: Record<string, SpriteDef> = { ...(manifest.sprites ?? {}) };
-    for (const [itemId, def] of Object.entries(manifest.items ?? {})) {
-      if (def.worldSpriteId) continue;
-      if (sprites[itemId]) continue; // honour an existing sprite of the same name
-      const variants = discoverItemVariants(has, def.image);
-      const worldPath = variants.world;
-      if (worldPath) {
-        sprites[itemId] = { image: worldPath };
-        // Mutate the item def so callers that read worldSpriteId pick up
-        // the synthesized id without further wiring.
-        def.worldSpriteId = itemId;
-      }
-    }
-    manifest.sprites = sprites;
-
+    // Per-item world-sprite synthesis used to live here (auto-register
+    // `<image>.world.<ext>` siblings as `manifest.sprites[itemId]`).
+    // After the items move into pack data (`data/items.json`, loaded by
+    // `scripts/setup/load-items.js`), the manifest no longer carries
+    // an `items` map — packs that want this convenience now perform the
+    // synth themselves during their item-loader script via
+    // `api.itemImages.pathFor(...)` + an `api.spriteRegistry.register`
+    // (follow-up). The default pack declares `worldSpriteId` explicitly
+    // in `data/items.json`, so removing the synth here is a no-op for
+    // it.
     return new ZipAssetPack(manifest, files);
   }
 

@@ -14,9 +14,11 @@ const PICKUP_RADIUS = 0.5;
 export default (api) => {
   const C = api.components;
   const inv = api.inventory;
+  const itemRegistry = api.singleton("ItemRegistry");
 
   api.registerSystem((world) => {
     const radiusSq = PICKUP_RADIUS * PICKUP_RADIUS;
+    const items = itemRegistry.byId ?? {};
 
     world.each(
       C.PlayerInput, C.Position, C.Inventory,
@@ -28,7 +30,7 @@ export default (api) => {
 
           const leftover = inv.addItem(
             inventory,
-            api.pack.manifest,
+            items,
             pickup.itemId,
             pickup.count,
           );

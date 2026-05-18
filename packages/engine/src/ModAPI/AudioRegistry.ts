@@ -22,7 +22,7 @@ import type { AudioAPI, AudioHandle, PlayOpts } from "./types";
  *     `BufferSource`'s `ended` event.
  *
  * One `AudioRegistry` per `ModAPI` instance. The engine constructs it
- * with the active pack; if the pack doesn't ship `manifest.sounds`,
+ * with the active pack; if the pack doesn't ship `manifest.audio`,
  * `preloadAll()` is a no-op and the AudioContext stays uninitialised
  * until/unless a script ever calls `play(...)` against an unknown id
  * (which just warns).
@@ -59,8 +59,8 @@ export class AudioRegistry implements AudioAPI {
    * the manifest sound lookup (per §6.6 + §12 Q11 RESOLVED: shared
    * namespace, recipes first). Static + loop recipes resolve to an
    * `AudioBuffer` and flow through the same per-handle machinery as
-   * manifest sounds; instrument-mode recipes are NOT plumbed through
-   * `play()` — callers use `api.proceduralAudio.playInstrument(...)`.
+   * manifest audio entries; instrument-mode recipes are NOT plumbed
+   * through `play()` — callers use `api.proceduralAudio.playInstrument(...)`.
    */
   private recipeStore: RecipeStore | null = null;
 
@@ -173,13 +173,13 @@ export class AudioRegistry implements AudioAPI {
   }
 
   /**
-   * Decode every `manifest.sounds` entry whose `preload` isn't
+   * Decode every `manifest.audio` entry whose `preload` isn't
    * explicitly `false`. Called by the engine after pack scripts have
    * run (so the pack manifest is final). Returns immediately when the
-   * pack has no `sounds` field — no AudioContext is created.
+   * pack has no `audio` field — no AudioContext is created.
    */
   async preloadAll(): Promise<void> {
-    const sounds = this.pack.manifest.sounds;
+    const sounds = this.pack.manifest.audio;
     if (!sounds) return;
     // Build the context up front so eager sounds decode against the
     // real context — `decodeAudioData` resamples to the context's
@@ -281,9 +281,9 @@ export class AudioRegistry implements AudioAPI {
     replace: boolean,
   ): AudioHandle {
     // Procedural recipe lookup first (SOUND_LAB.md §6.6 + §12 Q11).
-    // Recipes share the namespace with `manifest.sounds`; recipes win.
+    // Recipes share the namespace with `manifest.audio`; recipes win.
     const recipe = this.recipeStore?.get(id);
-    const sounds = this.pack.manifest.sounds;
+    const sounds = this.pack.manifest.audio;
     const def = sounds?.[id];
 
     if (!recipe && !def) {
@@ -294,7 +294,7 @@ export class AudioRegistry implements AudioAPI {
     }
 
     if (recipe && def) {
-      // Collision warning — same shape as `manifest.sounds` last-wins.
+      // Collision warning — same shape as `manifest.audio` last-wins.
       // The recipe takes precedence; the manifest sound is shadowed.
       console.warn(
         `[audio] id "${id}" matches both a recipe and a manifest sound; using recipe`,
