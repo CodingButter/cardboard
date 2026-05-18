@@ -11,8 +11,8 @@
       "schema": {
         "type": "object",
         "properties": {
-          "x": { "type": "number" },
-          "y": { "type": "number" }
+          "x": { "type": "number", "default": 0 },
+          "y": { "type": "number", "default": 0 }
         },
         "required": ["x", "y"]
       }
@@ -20,7 +20,7 @@
     {
       "name": "Facing",
       "tags": ["entity"],
-      "schema": { "type": "number" }
+      "schema": { "type": "number", "default": 0 }
     },
     {
       "name": "Movement",
@@ -28,13 +28,13 @@
       "schema": {
         "type": "object",
         "properties": {
-          "speed":          { "type": "number" },
-          "rotationSpeed":  { "type": "number" },
-          "runMultiplier":  { "type": "number" },
-          "isRunning":      { "type": "boolean" },
-          "z":              { "type": "number" },
-          "vz":             { "type": "number" },
-          "crouching":      { "type": "boolean" }
+          "speed":          { "type": "number",  "default": 0.05 },
+          "rotationSpeed":  { "type": "number",  "default": 1.5 },
+          "runMultiplier":  { "type": "number",  "default": 1.8 },
+          "isRunning":      { "type": "boolean", "default": false },
+          "z":              { "type": "number",  "default": 0 },
+          "vz":             { "type": "number",  "default": 0 },
+          "crouching":      { "type": "boolean", "default": false }
         },
         "required": ["speed", "rotationSpeed", "runMultiplier", "isRunning", "z", "vz", "crouching"]
       }
@@ -45,7 +45,7 @@
       "schema": {
         "type": "object",
         "properties": {
-          "bindings": { "type": "object" }
+          "bindings": { "type": "object", "default": {} }
         },
         "required": ["bindings"]
       }
@@ -56,7 +56,7 @@
       "schema": {
         "type": "object",
         "properties": {
-          "screenY": { "type": "number" }
+          "screenY": { "type": "number", "default": 0 }
         },
         "required": ["screenY"]
       }
@@ -67,12 +67,12 @@
       "schema": {
         "type": "object",
         "properties": {
-          "fov":          { "type": "number" },
-          "ceiling":      { "type": "number" },
-          "floor":        { "type": "number" },
-          "fogDistance":  { "type": "number" },
-          "maxRaySteps":  { "type": "number" },
-          "cameraZ":      { "type": "number" }
+          "fov":          { "type": "number", "default": 1.5708 },
+          "ceiling":      { "type": "number", "default": 1 },
+          "floor":        { "type": "number", "default": 0 },
+          "fogDistance":  { "type": "number", "default": 10 },
+          "maxRaySteps":  { "type": "number", "default": 512 },
+          "cameraZ":      { "type": "number", "default": 0.5 }
         },
         "required": ["fov", "ceiling", "floor", "fogDistance", "maxRaySteps", "cameraZ"]
       }
@@ -83,9 +83,9 @@
       "schema": {
         "type": "object",
         "properties": {
-          "color":          { "type": "string" },
-          "radius":         { "type": "number" },
-          "drawForwardRay": { "type": "boolean" }
+          "color":          { "type": "string",  "default": "#fff" },
+          "radius":         { "type": "number",  "default": 0.05 },
+          "drawForwardRay": { "type": "boolean", "default": false }
         },
         "required": ["color", "radius", "drawForwardRay"]
       }
@@ -96,10 +96,10 @@
       "schema": {
         "type": "object",
         "properties": {
-          "lastFireTime": { "type": "number" },
-          "walkPhase":    { "type": "number" },
-          "wasFiring":    { "type": "boolean" },
-          "reloadStart":  { "type": "number" }
+          "lastFireTime": { "type": "number",  "default": -100 },
+          "walkPhase":    { "type": "number",  "default": 0 },
+          "wasFiring":    { "type": "boolean", "default": false },
+          "reloadStart":  { "type": "number",  "default": -1 }
         },
         "required": ["lastFireTime", "walkPhase", "wasFiring", "reloadStart"]
       }
@@ -110,10 +110,10 @@
       "schema": {
         "type": "object",
         "properties": {
-          "bag":               { "type": "array" },
-          "hotbar":            { "type": "array" },
-          "equipment":         { "type": "object" },
-          "activeHotbarIndex": { "type": "number" }
+          "bag":               { "type": "array",  "default": [] },
+          "hotbar":            { "type": "array",  "default": [] },
+          "equipment":         { "type": "object", "default": {} },
+          "activeHotbarIndex": { "type": "number", "default": 0 }
         },
         "required": ["bag", "hotbar", "equipment", "activeHotbarIndex"]
       }
@@ -125,8 +125,8 @@
         "type": "object",
         "properties": {
           "imageId":     { "type": "string" },
-          "worldHeight": { "type": "number" },
-          "yOffset":     { "type": "number" }
+          "worldHeight": { "type": "number", "default": 1 },
+          "yOffset":     { "type": "number", "default": 0 }
         },
         "required": ["imageId", "worldHeight", "yOffset"]
       }
@@ -138,10 +138,10 @@
         "type": "object",
         "properties": {
           "current":      { "type": "string" },
-          "frame":        { "type": "number" },
-          "elapsed":      { "type": "number" },
-          "paused":       { "type": "boolean" },
-          "playbackRate": { "type": "number" }
+          "frame":        { "type": "number",  "default": 0 },
+          "elapsed":      { "type": "number",  "default": 0 },
+          "paused":       { "type": "boolean", "default": false },
+          "playbackRate": { "type": "number",  "default": 1 }
         },
         "required": ["current", "frame", "elapsed"]
       }
@@ -153,7 +153,7 @@
         "type": "object",
         "properties": {
           "itemId": { "type": "string" },
-          "count":  { "type": "number" }
+          "count":  { "type": "number", "default": 1 }
         },
         "required": ["itemId", "count"]
       }
@@ -164,10 +164,10 @@
       "schema": {
         "type": "object",
         "properties": {
-          "color":     { "type": "array", "items": { "type": "number" } },
-          "intensity": { "type": "number" },
-          "radius":    { "type": "number" },
-          "z":         { "type": "number" }
+          "color":     { "type": "array", "items": { "type": "number" }, "default": [1, 1, 1] },
+          "intensity": { "type": "number", "default": 1 },
+          "radius":    { "type": "number", "default": 4 },
+          "z":         { "type": "number", "default": 0.5 }
         },
         "required": ["color", "intensity", "radius"]
       }
@@ -192,13 +192,14 @@
         "properties": {
           "points": {
             "type": "array",
+            "default": [],
             "items": {
               "type": "object",
               "properties": {
                 "id":     { "type": "string" },
-                "x":      { "type": "number" },
-                "y":      { "type": "number" },
-                "facing": { "type": "number" }
+                "x":      { "type": "number", "default": 0 },
+                "y":      { "type": "number", "default": 0 },
+                "facing": { "type": "number", "default": 0 }
               },
               "required": ["id", "x", "y", "facing"]
             }
@@ -214,13 +215,14 @@
         "properties": {
           "list": {
             "type": "array",
+            "default": [],
             "items": {
               "type": "object",
               "properties": {
                 "script":       { "type": "string" },
                 "phase":        { "type": "string" },
                 "dependencies": { "type": "array", "items": { "type": "string" } },
-                "enabled":      { "type": "boolean" }
+                "enabled":      { "type": "boolean", "default": true }
               },
               "required": ["script", "phase"]
             }
@@ -236,6 +238,7 @@
         "properties": {
           "refs": {
             "type": "array",
+            "default": [],
             "items": { "type": "string" }
           }
         },

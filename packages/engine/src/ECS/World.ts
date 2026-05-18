@@ -55,6 +55,20 @@ export class World {
     null;
 
   /**
+   * Optional component-name → schema lookup, installed by `ModAPIImpl`
+   * so `add(entity, C, value)` can fill in schema-declared `default`
+   * fields before storage. Returns the manifest-declared schema (or
+   * `undefined` when the component has no schema or is unknown).
+   * WORLD_STATE.md §4 ("schema is a natural extension for defaults").
+   *
+   * Bare-`World` callers leave this unset; defaults application
+   * becomes a no-op in that mode (engine internals + tests behave
+   * byte-identically to pre-defaults).
+   */
+  resolveComponentSchema: ((name: string) => Record<string, unknown> | undefined) | null =
+    null;
+
+  /**
    * Optional name → entity id index. Pack-side spawn paths (the engine's
    * scene-entity loader, the world-entity loader, pack scripts calling
    * `world.spawn() + setName`) write to this so `world.findByName("player")`
@@ -149,9 +163,26 @@ export class World {
   /**
    * Attach (or overwrite) a component on `entity`. Registers the component
    * with the world so `despawn` knows to clean it up.
+   *
+   * When a `resolveComponentSchema` callback is installed (default
+   * runtime path via `ModAPIImpl`) and the component has a manifest-
+   * declared schema, missing fields are filled in from the schema's
+   * `default` keyword before the value is stored. Schema-less
+   * components (and bare-`World` callers with no resolver installed)
+   * pass the value through unchanged — byte-identical to pre-defaults
+   * behaviour.
    */
   add<T>(entity: Entity, component: Component<T>, value: T): this {
     this.knownComponents.add(component as Component<unknown>);
+    const resolve = this.resolveComponentSchema;
+    if (resolve !== null) {
+      const schema = resolve(component.name);
+      if (schema !== undefined) {
+        const withDefaults = applyDefaults(schema, value) as T;
+        component.set(entity, withDefaults);
+        return this;
+      }
+    }
     component.set(entity, value);
     return this;
   }
@@ -309,4 +340,124 @@ export class World {
     if (c === undefined) return undefined;
     return c.get(entity);
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Schema-driven defaults                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fill in schema-declared `default` fields on `value`. Pure / idempotent:
+ *   - Top-level primitive schema (`{ type: "number", default: 0 }`):
+ *     returns `default` when `value === undefined`, else `value`.
+ *   - Object schema: shallow-copies `value` and back-fills each
+ *     property whose declared `default` is present and whose value
+ *     is missing from `value`. Recurses into nested object properties
+ *     so nested schemas with their own `default` fields propagate too.
+ *   - Array properties: top-level array `default` is honoured when
+ *     the field is missing; the function does NOT walk array items
+ *     (per-item defaults only matter on `push` operations, not on
+ *     the array as a whole).
+ *
+ * Returns a NEW object when defaults were applied; returns `value`
+ * itself (no allocation) when no defaults were missing — keeps the
+ * hot path cheap for components that are already fully specified.
+ *
+ * Exposed at module scope (not on `World`) so the engine + future
+ * editor tooling can share the same definition.
+ */
+export function applyDefaults(
+  schema: Record<string, unknown>,
+  value: unknown,
+): unknown {
+  const type = (schema as { type?: unknown }).type;
+  if (type === "object" || (type === undefined && hasProperties(schema))) {
+    return applyObjectDefaults(schema, value);
+  }
+  // Top-level primitive / array / etc. — honour `default` when value is
+  // undefined.
+  if (value === undefined && "default" in schema) {
+    return (schema as { default: unknown }).default;
+  }
+  return value;
+}
+
+function hasProperties(schema: Record<string, unknown>): boolean {
+  const p = (schema as { properties?: unknown }).properties;
+  return !!p && typeof p === "object";
+}
+
+function applyObjectDefaults(
+  schema: Record<string, unknown>,
+  value: unknown,
+): Record<string, unknown> | unknown {
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  if (!props || typeof props !== "object") {
+    // No properties declared — pass-through (an opaque object schema).
+    return value === undefined ? {} : value;
+  }
+
+  const input =
+    value !== undefined && value !== null && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+
+  // Decide whether anything actually needs filling in. Avoids the
+  // shallow-copy allocation on the hot path where every field is
+  // already set by the caller.
+  let needsCopy = input === null;
+  if (!needsCopy && input !== null) {
+    for (const key of Object.keys(props)) {
+      const sub = props[key] as Record<string, unknown> | undefined;
+      if (!sub) continue;
+      if (input[key] === undefined && "default" in sub) {
+        needsCopy = true;
+        break;
+      }
+      // A nested object property with its own defaults might still
+      // need recursion even when the parent key exists.
+      if (
+        input[key] !== undefined &&
+        sub &&
+        (sub as { type?: unknown }).type === "object" &&
+        hasProperties(sub)
+      ) {
+        // Recurse into the nested object; only triggers a copy if the
+        // nested call returns a NEW reference.
+        const recursed = applyObjectDefaults(sub, input[key]);
+        if (recursed !== input[key]) {
+          needsCopy = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!needsCopy && input !== null) return input;
+
+  const out: Record<string, unknown> = input !== null ? { ...input } : {};
+  for (const key of Object.keys(props)) {
+    const sub = props[key] as Record<string, unknown> | undefined;
+    if (!sub) continue;
+    if (out[key] === undefined) {
+      if ("default" in sub) {
+        out[key] = cloneDefault((sub as { default: unknown }).default);
+      }
+    } else if ((sub as { type?: unknown }).type === "object" && hasProperties(sub)) {
+      out[key] = applyObjectDefaults(sub, out[key]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Shallow clone of a literal `default` value so two `add(...)` calls
+ * with no value-supplied don't share the same array / object instance.
+ * Primitives pass through. Arrays / plain objects are one-level cloned;
+ * deeper nesting in a `default` block is rare and the cost of full
+ * deep-cloning isn't justified for this hot path.
+ */
+function cloneDefault(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return [...value];
+  return { ...(value as Record<string, unknown>) };
 }

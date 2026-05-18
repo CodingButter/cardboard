@@ -310,6 +310,12 @@ export class ModAPIImpl implements ModAPI {
     // shared ComponentRegistry. WORLD_STATE.md §9.
     this.world.resolveComponentName = (name) =>
       this.componentRegistry.getComponent(name);
+    // Wire the World's schema-resolver so `world.add(e, C, value)`
+    // can fill in schema-declared `default` fields before storage.
+    // WORLD_STATE.md §4 — schema's `default` keyword is honoured as
+    // a runtime safety net for partial component literals.
+    this.world.resolveComponentSchema = (name) =>
+      this.componentRegistry.getMetadata(name)?.schema;
     // Minimal debug surface — see the field's doc comment for why the
     // renderer / timing fields are stubbed. The closure captures
     // `this.world` so a later `world` reassignment (currently never

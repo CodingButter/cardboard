@@ -345,14 +345,38 @@ export interface PostPassDef {
 
 /**
  * One manifest-declared component (WORLD_STATE.md §4 + §10.3). Engine
- * uses only `name`; `schema` and `tags` are editor-only metadata that
- * round-trip opaquely so component pickers can filter without
- * hard-coding built-ins.
+ * uses only `name` for registration; `schema` is consulted at
+ * `world.add(e, C, value)` time to back-fill any missing fields whose
+ * declared `default` is present (the JSON-Schema `default` keyword).
+ * `tags` is editor-only metadata that round-trips opaquely so
+ * component pickers can filter without hard-coding built-ins.
+ *
+ * The `schema` shape is a JSON-Schema-ish subset (`type` +
+ * `properties` + `required` + `items` + `default`) — see
+ * `generatePackTypes.ts` for the supported surface. Top-level
+ * primitive schemas (`{ "type": "number", "default": 0 }`) honour
+ * `default` at the value-root; object schemas honour `default` per
+ * property and recurse into nested object properties.
  */
 export interface ComponentDef {
   /** Component identifier referenced by entities + Systems component. */
   name: string;
-  /** Editor-side schema describing fields; engine treats as opaque. */
+  /**
+   * Editor-side schema describing fields. The engine reads only the
+   * `default` keyword (consulted by `World.add` to fill missing
+   * fields); everything else is opaque.
+   *
+   * Supported subset (per-property under `schema.properties`):
+   *  - `{ "type": "number" | "string" | "boolean" | "array" | "object" }`
+   *  - `{ "default": <literal> }` — applied when the field is missing
+   *  - `{ "items": <subSchema> }` for arrays (not walked at runtime)
+   *  - Nested object `{ "type": "object", "properties": { ... } }` —
+   *    inner `default` keywords are honoured recursively.
+   *
+   * Top-level non-object schemas (e.g. `{ "type": "number",
+   * "default": 0 }`) attach to the whole component value: the engine
+   * substitutes `default` when the caller passes `undefined`.
+   */
   schema?: Record<string, unknown>;
   /** Free-form classification tags for editor filtering. */
   tags?: readonly string[];
