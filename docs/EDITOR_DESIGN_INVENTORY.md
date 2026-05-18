@@ -122,6 +122,61 @@ Playtest overlay. Each subsection follows the same template:
   iframe pinned to the current cell; a screenshot-bake fallback is
   acceptable for low-end users. Existing scene-paint smoke tests must
   pass unchanged after the refine.
+- **Architecture decisions (2026-05-18)** — supersede the
+  `Layout grammar` and `Page-local components` bullets above where
+  they conflict. These were settled in conversation; until those
+  earlier bullets are rewritten to match, **these take precedence**.
+  - **Dockable everything**: the Scene page uses the dockview shell
+    in `apps/editor/src/views/MapView.tsx` + `WorkspaceRail`, not
+    the fixed `3-pane grid-cols-[var(--rail-left)_1fr_var(--rail-right)]`
+    grammar. Every page-local panel — Map Toolbar, Tool Palette,
+    Brush, Tile Preset, Layers, Map Canvas, 3D Preview, Cell
+    Inspector, Quick Tags, Map Status Console, Selection Info — is
+    its own dock entry. Default layout evokes `Map.png` but the user
+    can retile and pop out freely; persisted per project under
+    `cardboard_workspace.dockLayouts[scene::<projectId>]`.
+  - **Tile Preset panel**: walls, floors, ceilings, and decor are
+    sub-categories of a **tile preset**, surfaced through the
+    `TilePresetPanel` (see `docs/plans/TILE_PRESETS.md`). The
+    overloaded "TOOLS / BRUSH / TILE TYPES / LAYERS" `ToolsPanel`
+    stub at `apps/editor/src/views/scene/panels/ToolsPanel.tsx`
+    splits into separate dock panels per concern.
+  - **Map / Entity as modes**: the Scene page treats **Map** and
+    **Entity** as modes within the same view, not separate pages.
+    Each mode dictates the active tool palette and painting / picking
+    semantics.
+    - **Map mode** — tile painting against the `TilePresetPanel`.
+    - **Entity mode** — place / author entities, either from scratch
+      or instantiated from prefabs.
+    - **Lights are not a distinct mode** — any entity becomes a light
+      source by attaching the right components (see
+      `docs/plans/LIGHTING_ENTITIES_REFACTOR.md`).
+    - **Shared tools** in both modes: Select, Eraser, Eye Dropper,
+      plus mode-specific extras (Paint / Fill in Map mode; Place /
+      Prefab Drop in Entity mode).
+    - **Sub-tool modes**: selecting a tool may reveal sub-tool
+      buttons underneath it (Select → Box / Polygon / Contiguous,
+      etc.). A default sub-tool is auto-selected the first time a
+      tool is activated in a session.
+  - **Persistence (`localStorage`)**: the active **mode**, the active
+    **tool**, and the per-tool **sub-tool** each persist across
+    sessions so the user's last working configuration restores on
+    reload.
+  - **Canvas overlay HUD**: a translucent floating strip rendered
+    *inside* `MapCanvasPanel` (not as a dock entry) holds the
+    **scene selector** and the Layers / Walls / Floor / Ceiling /
+    Entities / Lights visibility toggles. Replaces the earlier
+    `LayerLegendFloater` concept and absorbs the scene picker that
+    used to live in the topbar tab-context slot.
+  - **Topbar tab-context strip (Scene page)**: with the scene
+    selector moved out, `useTabContextSlot()` content mirrors
+    `Map.png`'s strip — pack info + save-status pill on the left,
+    **Raycast Mode** select, **Grid** toggle, and a **Zoom group**
+    on the right (`[−][+]` IconButton pair grouped together, then a
+    chevron dropdown that opens a zoom-slider popover). The existing
+    `apps/editor/src/views/scene/SceneTabContextPicker.tsx` is
+    repurposed — its DropdownMenu moves into the canvas overlay and
+    the topbar slot gets a new `MapTabContextStrip`.
 
 ### 1.3 Prefabs (Entities)
 
