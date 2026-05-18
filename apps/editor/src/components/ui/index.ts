@@ -153,3 +153,10 @@ export type { TogglePillProps, TogglePillOption } from "./TogglePill";
 
 export { ThreeRailLayout, TwoRailLayout } from "./RailLayout";
 export type { ThreeRailLayoutProps, TwoRailLayoutProps } from "./RailLayout";
+
+// NOTE: The legacy `ui.tsx` SHADOWS this barrel when consumers import
+// from "../components/ui" (no `/index`). The new `Modal` below is
+// intentionally NOT re-exported here to avoid two `Modal`s in the
+// same module graph — Phase 1 callers should import it directly from
+// `./Modal` to bypass the shadow. See `views/HomeScreen.tsx` for the
+// pattern.

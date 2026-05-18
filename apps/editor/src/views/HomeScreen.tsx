@@ -12,6 +12,7 @@ import {
   Sparkles,
   BookOpen,
   GitBranch,
+  Check,
 } from "lucide-react";
 import {
   EditorProjectStore,
@@ -21,26 +22,33 @@ import {
   importPackFromBlob,
   importPackFromUrl,
 } from "../lib/importPack";
+
+// IMPORTANT: import primitives from specific files instead of
+// "../components/ui" (no /index). The legacy flat `ui.tsx` shadows
+// the new `ui/index.ts` barrel when the module specifier resolves to
+// "ui" — so `import { Card } from "../components/ui"` silently
+// returns the legacy Card (no `padded`, no Phase-1 props, no
+// EmptyState). Specific-path imports bypass the shadow and give us
+// the Phase-1 primitives.
+import { Button } from "../components/ui/Button";
 import {
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  Input,
-  Label,
-  Modal,
-} from "../components/ui";
-import {
-  Badge,
-  EmptyState,
-  FilePicker,
-  IconButton,
-  KeyValueList,
-  PanelHeader,
-  ScrollArea,
-  StatsBlock,
-} from "../components/ui/index";
+} from "../components/ui/Card";
+import { TextInput } from "../components/ui/TextInput";
+import { Textarea } from "../components/ui/Textarea";
+import { Modal } from "../components/ui/Modal";
+import { EmptyState } from "../components/ui/EmptyState";
+import { Badge } from "../components/ui/Badge";
+import { FilePicker } from "../components/ui/FilePicker";
+import { IconButton } from "../components/ui/IconButton";
+import { KeyValueList } from "../components/ui/KeyValueList";
+import { PanelHeader } from "../components/ui/PanelHeader";
+import { ScrollArea } from "../components/ui/ScrollArea";
+import { StatsBlock } from "../components/ui/StatsBlock";
+
 import { useStatusBar } from "../shell/StatusBarContext";
 import type { StatusBarSection } from "../components/ui/StatusBar";
 import { cn } from "../lib/cn";
@@ -53,7 +61,12 @@ import { cn } from "../lib/cn";
  * Composition (per §6.5 grammar):
  *   <aside col-span-3>  — Recents sidebar (PanelHeader + scrollable list).
  *   <main  col-span-6>  — Project grid (cards with thumbnail + metadata + Play).
- *   <aside col-span-3>  — Create / import actions + templates + quick links.
+ *   <aside col-span-3>  — Create / import actions + quick links.
+ *
+ * Templates panel removed in favour of the `CreateProjectModal` —
+ * template selection now happens inline with project setup. The freed
+ * right-rail space is given back to the create/import surface (more
+ * breathing room) and the quick-links card.
  *
  * The view does NOT register Save / Export EditorActions — Home has no
  * project context to save against. The shell keeps the TopBar Save /
@@ -66,6 +79,46 @@ import { cn } from "../lib/cn";
  * EmptyState (no projects yet) is rendered inside the main column.
  */
 
+/**
+ * Starter project templates. Hardcoded for now; will move to a
+ * Supabase fetch when CLOUD_SYNC lands (see docs/plans/CLOUD_SYNC.md).
+ * Each entry: id, displayName, description, packUrl pointing at a
+ * starter .apg the project's IndexedDB seeds from. `packUrl: null`
+ * means "blank" — create an empty project with no asset seeding.
+ *
+ * Path note: in dev the editor server (apps/editor/server.ts) serves
+ * from `apps/editor/public/`, which doesn't ship Cardboard.apg today.
+ * The game server at port 3000 does ship it at `/packs/Cardboard.apg`.
+ * Until the editor's public dir mirrors the game's packs (or until
+ * we move pack hosting behind Supabase), the URL is resolved at
+ * fetch time relative to the editor origin — the dev workflow is to
+ * symlink or copy `apps/game/public/packs/Cardboard.apg` into
+ * `apps/editor/public/packs/` (or run both apps and reach across
+ * origins, in which case CORS must be enabled). Production builds
+ * are expected to ship the pack alongside the editor bundle.
+ */
+const STARTER_TEMPLATES: ReadonlyArray<{
+  id: string;
+  displayName: string;
+  description: string;
+  packUrl: string | null;
+  thumbnail?: string;
+}> = [
+  {
+    id: "cardboard",
+    displayName: "Cardboard",
+    description:
+      "The default starter — Wolfenstein-style raycaster with player + sample scene.",
+    packUrl: "/packs/Cardboard.apg",
+  },
+  {
+    id: "blank",
+    displayName: "Blank project",
+    description: "Empty pack — manifest scaffolded, no scenes or scripts.",
+    packUrl: null,
+  },
+];
+
 interface HomeScreenProps {
   onOpenProject: (id: string) => void;
 }
@@ -75,6 +128,9 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Create-project modal state.
+  const [createOpen, setCreateOpen] = React.useState(false);
 
   // URL-import dialog state.
   const [urlOpen, setUrlOpen] = React.useState(false);
@@ -116,15 +172,61 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
     return () => setSections([]);
   }, [projects, setSections]);
 
+  // ─── Project name uniqueness helper ─────────────────────────────────
+  // Tiny case-insensitive compare so "Untitled" and "untitled" clash.
+  const nameTaken = React.useCallback(
+    (candidate: string): boolean => {
+      const norm = candidate.trim().toLowerCase();
+      return projects.some((p) => p.name.trim().toLowerCase() === norm);
+    },
+    [projects],
+  );
+
   // ─── Actions ──────────────────────────────────────────────────────────
 
-  const handleCreate = async () => {
-    const name = window.prompt("Project name?", "Untitled project")?.trim();
-    if (!name) return;
+  /**
+   * Seed a freshly created project's IndexedDB from a template pack
+   * URL. Thin wrapper around `importPackFromUrl` that overrides the
+   * project name with the user's chosen name (the manifest's name
+   * would otherwise win). When `packUrl` is null we just create an
+   * empty project — no asset seeding needed.
+   *
+   * Returns the new project's id (for navigation).
+   *
+   * Future: when CLOUD_SYNC lands this is where we'd flip to a
+   * Supabase signed-URL fetch + (optional) provenance stamp.
+   */
+  const seedProjectFromTemplate = React.useCallback(
+    async (
+      name: string,
+      packUrl: string | null,
+    ): Promise<string> => {
+      if (!packUrl) {
+        const meta = await EditorProjectStore.createProject(name);
+        return meta.id;
+      }
+      // importPackFromUrl creates the project AND seeds its assets in
+      // one pass; we just override the manifest's name so the project
+      // shows up under the user's chosen name in the recents list.
+      const result = await importPackFromUrl(packUrl, {
+        projectName: name,
+      });
+      return result.project.id;
+    },
+    [],
+  );
+
+  const handleCreate = async (
+    name: string,
+    template: (typeof STARTER_TEMPLATES)[number],
+    _description: string,
+  ) => {
     try {
       setBusy("create");
-      const meta = await EditorProjectStore.createProject(name);
-      onOpenProject(meta.id);
+      setError(null);
+      const projectId = await seedProjectFromTemplate(name, template.packUrl);
+      setCreateOpen(false);
+      onOpenProject(projectId);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -275,11 +377,10 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           </div>
           <Button
             variant="primary"
-            onClick={handleCreate}
+            onClick={() => setCreateOpen(true)}
             disabled={busy !== null}
-            className="gap-2"
+            leadingIcon={<Plus size={14} />}
           >
-            <Plus size={14} />
             New project
           </Button>
         </header>
@@ -314,11 +415,10 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={handleCreate}
+                    onClick={() => setCreateOpen(true)}
                     disabled={busy !== null}
-                    className="gap-2"
+                    leadingIcon={<Plus size={14} />}
                   >
-                    <Plus size={14} />
                     New project
                   </Button>
                   <FilePicker
@@ -361,19 +461,19 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           <CardContent className="space-y-3">
             <Button
               variant="primary"
-              className="w-full gap-2"
-              onClick={handleCreate}
+              block
+              onClick={() => setCreateOpen(true)}
               disabled={busy !== null}
+              leadingIcon={<Plus size={14} />}
             >
-              <Plus size={14} />
-              New empty project
+              New project
             </Button>
             <FilePicker
               mode="dropzone"
               accept=".apg,application/zip"
               onFiles={(files) => files[0] && handleImportFile(files[0])}
               disabled={busy !== null}
-              className="min-h-[120px]"
+              className="min-h-[140px]"
             >
               <Upload size={22} className="text-zinc-400" aria-hidden="true" />
               <div className="text-sm text-zinc-200 font-medium">
@@ -387,46 +487,13 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
             </FilePicker>
             <Button
               variant="secondary"
-              className="w-full gap-2"
+              block
               onClick={() => setUrlOpen(true)}
               disabled={busy !== null}
+              leadingIcon={<LinkIcon size={14} />}
             >
-              <LinkIcon size={14} />
               Open URL pack
             </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Templates</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/* WIRING: real template gallery. Spec §7.1 calls for tiles
-                (Empty / Classic Dungeon / Sci-Fi Base) that bootstrap a
-                project from a starter pack manifest. Wire this once the
-                pack-templates module exists (likely under
-                packages/default-pack/templates/ + an
-                EditorProjectStore.createFromTemplate(id) helper). */}
-            <div className="grid grid-cols-1 gap-2">
-              <TemplateTile
-                disabled
-                title="Empty"
-                caption="Blank manifest + one starter scene."
-              />
-              <TemplateTile
-                disabled
-                title="Classic Dungeon"
-                caption="Tile palette + sample mobs."
-                badge="Soon"
-              />
-              <TemplateTile
-                disabled
-                title="Sci-Fi Base"
-                caption="Metal corridors + neon lights."
-                badge="Soon"
-              />
-            </div>
           </CardContent>
         </Card>
 
@@ -465,7 +532,19 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
         </Card>
       </aside>
 
-      {/* URL-import dialog */}
+      {/* Create-project dialog. */}
+      <CreateProjectModal
+        open={createOpen}
+        busy={busy === "create"}
+        onClose={() => {
+          if (busy === "create") return;
+          setCreateOpen(false);
+        }}
+        onCreate={handleCreate}
+        nameTaken={nameTaken}
+      />
+
+      {/* URL-import dialog. */}
       <Modal
         open={urlOpen}
         onClose={() => {
@@ -474,6 +553,7 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           setUrlConfirmed(false);
         }}
         title="Open pack from URL"
+        width="md"
         footer={
           <>
             <Button
@@ -499,28 +579,31 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
         }
       >
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="pack-url">Pack URL</Label>
-            <Input
+          <div className="space-y-1.5">
+            <label htmlFor="pack-url" className="section-eyebrow block">
+              Pack URL
+            </label>
+            <TextInput
               id="pack-url"
               placeholder="https://example.com/cool-pack.apg"
-              className="mt-1.5"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               disabled={busy === "import-url"}
             />
           </div>
-          <div>
-            <Label htmlFor="pack-hash">SHA-256 (optional)</Label>
-            <Input
+          <div className="space-y-1.5">
+            <label htmlFor="pack-hash" className="section-eyebrow block">
+              SHA-256 (optional)
+            </label>
+            <TextInput
               id="pack-hash"
               placeholder="paste hex or sha256-… to pin integrity"
-              className="mt-1.5 font-mono"
+              className="font-mono"
               value={hashInput}
               onChange={(e) => setHashInput(e.target.value)}
               disabled={busy === "import-url"}
             />
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-zinc-500">
               If provided, the editor verifies the pack matches this hash
               before importing.
             </p>
@@ -541,6 +624,244 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
         </div>
       </Modal>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* CreateProjectModal                                                    */
+/* -------------------------------------------------------------------- */
+
+interface CreateProjectModalProps {
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onCreate: (
+    name: string,
+    template: (typeof STARTER_TEMPLATES)[number],
+    description: string,
+  ) => void | Promise<void>;
+  /** Returns true if a project with this (case-insensitive) name already exists. */
+  nameTaken: (candidate: string) => boolean;
+}
+
+/**
+ * Project-setup dialog opened by the "New project" button. Collects:
+ *   - name (required, unique among existing projects)
+ *   - template (required, pick one from STARTER_TEMPLATES)
+ *   - description (optional, free-form)
+ *
+ * The first template is selected by default. Name validation is
+ * inline (empty + duplicate detection); template selection is always
+ * non-null thanks to the default, so the only blocking error is
+ * name-empty / name-duplicate.
+ */
+function CreateProjectModal({
+  open,
+  busy,
+  onClose,
+  onCreate,
+  nameTaken,
+}: CreateProjectModalProps) {
+  const [name, setName] = React.useState("Untitled project");
+  const [templateId, setTemplateId] = React.useState<string>(
+    STARTER_TEMPLATES[0]!.id,
+  );
+  const [description, setDescription] = React.useState("");
+
+  // Reset every time the dialog opens so subsequent creations don't
+  // start with the previous payload pre-filled.
+  React.useEffect(() => {
+    if (open) {
+      setName("Untitled project");
+      setTemplateId(STARTER_TEMPLATES[0]!.id);
+      setDescription("");
+    }
+  }, [open]);
+
+  const trimmed = name.trim();
+  const isEmpty = trimmed.length === 0;
+  const isDuplicate = !isEmpty && nameTaken(trimmed);
+  const nameError = isEmpty
+    ? "Project name is required."
+    : isDuplicate
+      ? "A project with this name already exists."
+      : null;
+
+  const selectedTemplate =
+    STARTER_TEMPLATES.find((t) => t.id === templateId) ?? STARTER_TEMPLATES[0]!;
+
+  const canSubmit = !busy && !nameError;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    void onCreate(trimmed, selectedTemplate, description.trim());
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New project"
+      description="Pick a starter and name your project — assets stay local."
+      width="lg"
+      dismissOnBackdrop={!busy}
+      dismissOnEsc={!busy}
+      footer={
+        <>
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+          >
+            {busy ? "Creating…" : "Create"}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSubmit();
+        }}
+      >
+        {/* Name */}
+        <div className="space-y-1.5">
+          <label htmlFor="create-name" className="section-eyebrow block">
+            Project name
+          </label>
+          <TextInput
+            id="create-name"
+            placeholder="Untitled project"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+            invalid={Boolean(nameError) && !isEmpty}
+            autoFocus
+          />
+          {nameError && !isEmpty ? (
+            <p className="text-xs text-red-400">{nameError}</p>
+          ) : (
+            <p className="text-xs text-zinc-500">
+              Must be unique across your local projects.
+            </p>
+          )}
+        </div>
+
+        {/* Template picker */}
+        <div className="space-y-2">
+          <span className="section-eyebrow block">Template</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {STARTER_TEMPLATES.map((t) => {
+              const active = t.id === templateId;
+              return (
+                <TemplateCard
+                  key={t.id}
+                  template={t}
+                  active={active}
+                  disabled={busy}
+                  onSelect={() => setTemplateId(t.id)}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Description (optional) */}
+        <div className="space-y-1.5">
+          <label htmlFor="create-desc" className="section-eyebrow block">
+            Description <span className="text-zinc-600">(optional)</span>
+          </label>
+          <Textarea
+            id="create-desc"
+            placeholder="What is this project about?"
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* TemplateCard — selectable starter-template tile                       */
+/* -------------------------------------------------------------------- */
+
+interface TemplateCardProps {
+  template: (typeof STARTER_TEMPLATES)[number];
+  active: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
+function TemplateCard({
+  template,
+  active,
+  disabled = false,
+  onSelect,
+}: TemplateCardProps) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-pressed={active}
+      className={cn(
+        "card-surface-elev text-left p-3 relative",
+        "transition-colors duration-150",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+        !disabled && !active && "hover:border-zinc-700",
+        active && "border-amber-500/60 ring-1 ring-amber-500/40",
+        disabled && "opacity-60 cursor-not-allowed",
+      )}
+    >
+      {/* Optional preview thumbnail strip. */}
+      {template.thumbnail ? (
+        <div className="aspect-video w-full rounded-md overflow-hidden bg-zinc-950 border border-zinc-800 mb-3">
+          <img
+            src={template.thumbnail}
+            alt=""
+            className="w-full h-full object-cover"
+            draggable={false}
+          />
+        </div>
+      ) : (
+        <div
+          className="aspect-video w-full rounded-md overflow-hidden border border-zinc-800 mb-3 flex items-center justify-center text-zinc-700"
+          style={{
+            background: active
+              ? "radial-gradient(circle at 30% 30%, rgba(245, 158, 11, 0.25), rgba(8, 9, 11, 0.95) 65%)"
+              : "radial-gradient(circle at 30% 30%, rgba(63, 63, 70, 0.6), rgba(8, 9, 11, 0.95) 65%)",
+          }}
+          aria-hidden="true"
+        >
+          <Sparkles size={22} />
+        </div>
+      )}
+
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-semibold text-zinc-100 truncate">
+          {template.displayName}
+        </div>
+        {active ? (
+          <span
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-zinc-950 shrink-0"
+            aria-hidden="true"
+          >
+            <Check size={12} />
+          </span>
+        ) : null}
+      </div>
+      <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
+        {template.description}
+      </p>
+    </button>
   );
 }
 
@@ -659,50 +980,6 @@ function ProjectCard({
         />
       </div>
     </div>
-  );
-}
-
-/* -------------------------------------------------------------------- */
-/* TemplateTile                                                          */
-/* -------------------------------------------------------------------- */
-
-interface TemplateTileProps {
-  title: string;
-  caption: string;
-  badge?: string;
-  disabled?: boolean;
-  onClick?: () => void;
-}
-
-function TemplateTile({
-  title,
-  caption,
-  badge,
-  disabled = false,
-  onClick,
-}: TemplateTileProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "text-left rounded-md border border-zinc-800 bg-zinc-950/40 p-3",
-        "transition-colors",
-        !disabled && "hover:border-amber-400 hover:bg-zinc-900",
-        disabled && "opacity-60 cursor-not-allowed",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium text-zinc-100 truncate">
-          {title}
-        </div>
-        {badge && <Badge variant="zinc">{badge}</Badge>}
-      </div>
-      <div className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
-        {caption}
-      </div>
-    </button>
   );
 }
 
