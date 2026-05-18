@@ -220,6 +220,19 @@
   @apply text-amber-300 border-amber-400;
 }
 
+/* Utility — hide native scrollbars while keeping the element scrollable.
+ * Used by the scrollable variant of TabStrip where the overflow is
+ * communicated through gradient fade affordances instead of a scrollbar.
+ * Firefox: scrollbar-width; Webkit/Blink: ::-webkit-scrollbar. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* ───────────────────────────────────────────────────────────────────
  * Inputs
  *   Sized to 32px (h-8) to align with buttons. Mono variant is for

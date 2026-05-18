@@ -14,6 +14,7 @@ import {
 import type { PackManifest } from "@two_5_d/engine";
 import { HomeScreen } from "../views/HomeScreen";
 import { ProjectView, type WorkflowMode } from "../views/ProjectView";
+import { MapView } from "../views/MapView";
 import { ProjectTabView } from "../views/project/ProjectTabView";
 import { AssetsView } from "../views/AssetsView";
 import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
@@ -29,7 +30,7 @@ import {
   useEditorActions,
   useEditorActionsState,
 } from "./EditorActionsContext";
-import { ActiveSceneProvider, useActiveScene } from "./ActiveSceneContext";
+import { ActiveSceneProvider } from "./ActiveSceneContext";
 import {
   PrimaryTabs,
   PRIMARY_TAB_ORDER,
@@ -37,6 +38,7 @@ import {
   writePersistedTab,
   type PrimaryTabId,
 } from "./PrimaryTabs";
+import { TabContextSlotProvider } from "../lib/tabContextSlot";
 
 /**
  * localStorage mirror of the current project id, used as a fallback
@@ -77,7 +79,7 @@ function isPrimaryTabId(value: string | null): value is PrimaryTabId {
  *
  * Composition (top → bottom):
  *
- *     <TopBar/>            // brand, project/scene pickers, actions
+ *     <TopBar/>            // brand + actions (scene picker moved to tab strip)
  *     <PrimaryTabs/>       // 10-tab strip (Home / Scene / … / Project)
  *     <body>               // flex-1 region — current tab's view
  *     <StatusBar/>          // per-view status sections
@@ -115,13 +117,6 @@ const PROJECT_PLACEHOLDER_TABS: ReadonlyArray<PrimaryTabId> = [
   "imageLab",
   "soundLab",
   "uiBuilder",
-];
-
-/** Scene dropdown is meaningful on these tabs (per §6.2). */
-const SCENE_TABS: ReadonlyArray<PrimaryTabId> = [
-  "scene",
-  "prefabs",
-  "animation",
 ];
 
 export function EditorShell() {
@@ -236,8 +231,10 @@ export function EditorShell() {
     return () => window.removeEventListener(SET_TAB_EVENT, onSetTab);
   }, [setTab]);
 
-  // ── Project metadata + manifest, surfaced to the TopBar scene dropdown
-  // and to views via the existing prop plumbing. The TopBar's project
+  // ── Project metadata + manifest. Surfaced to views via the
+  // ActiveSceneProvider (scene list + fallbackScene) so the per-tab
+  // contextual right slot (where the Scene picker now lives) can build
+  // itself from a single source of truth. The TopBar's project
   // dropdown was removed (§12 Q9 reversed) — the Home tab is the only
   // project switcher — so the shell no longer needs a `projects` list.
   const projectId = route.projectId;
@@ -287,12 +284,12 @@ export function EditorShell() {
   );
 
   // Active scene state lives in `<ActiveSceneProvider/>` (mounted
-  // below) and is consumed inside `ShellChrome` via `useActiveScene()`.
-  // The provider persists per-project under
-  // `cardboard_editor_active_scene_<projectId>` and exposes a single
-  // setter that both the TopBar dropdown and ProjectView write through.
-  // The fallback when no scene has been pinned is `manifest?.startScene`
-  // — surfaced via the `fallbackScene` prop on ShellChrome below.
+  // below). The provider persists per-project under
+  // `cardboard_editor_active_scene_<projectId>` and exposes a setter
+  // any view (or the Scene picker registered into the tab-row right
+  // slot) calls. The fallback when no scene has been pinned is
+  // `manifest?.startScene` — surfaced to consumers via the provider's
+  // `fallbackScene` value.
   const fallbackScene = manifest?.startScene ?? null;
 
   // Persist the active workflow tab per-project so the next session
@@ -340,30 +337,39 @@ export function EditorShell() {
   return (
     <StatusBarProvider>
       <EditorActionsProvider>
-        <ActiveSceneProvider projectId={projectId}>
-          <ShellChrome
-            projectName={projectName}
-            tab={tab}
-            setTab={setTab}
-            hasProject={hasProject}
-            scenes={scenes}
-            fallbackScene={fallbackScene}
-            showSceneDropdown={hasProject && SCENE_TABS.includes(tab)}
-            projectId={projectId}
-            onOpenProject={(id) => {
-              // Picking a project from Home lands the user on Scene
-              // (the canonical workflow entry) and stamps the hash
-              // with both segments so reload/back/forward all work.
-              navigate(buildHash(id, "scene"));
-              setRefreshTick((n) => n + 1);
-            }}
-            onProjectMutated={() => setRefreshTick((n) => n + 1)}
-            // "Back to Home" preserves the current project segment so
-            // Home highlights it and subsequent tab clicks re-enter
-            // the same project without re-picking.
-            onNavigateHome={() => navigate(buildHash(projectId, null))}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
+        <ActiveSceneProvider
+          projectId={projectId}
+          scenes={scenes}
+          fallbackScene={fallbackScene}
+        >
+          {/* TabContextSlotProvider mounts above BOTH PrimaryTabs (which
+              reads the slot) and the active view (which writes to it
+              via `useTabContextSlot`). The Scene picker used to sit in
+              the TopBar; now MapView registers it here so it lives in
+              the right edge of the tab strip with whatever tab is
+              active driving its visibility. */}
+          <TabContextSlotProvider>
+            <ShellChrome
+              projectName={projectName}
+              tab={tab}
+              setTab={setTab}
+              hasProject={hasProject}
+              projectId={projectId}
+              onOpenProject={(id) => {
+                // Picking a project from Home lands the user on Scene
+                // (the canonical workflow entry) and stamps the hash
+                // with both segments so reload/back/forward all work.
+                navigate(buildHash(id, "scene"));
+                setRefreshTick((n) => n + 1);
+              }}
+              onProjectMutated={() => setRefreshTick((n) => n + 1)}
+              // "Back to Home" preserves the current project segment so
+              // Home highlights it and subsequent tab clicks re-enter
+              // the same project without re-picking.
+              onNavigateHome={() => navigate(buildHash(projectId, null))}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          </TabContextSlotProvider>
           <EditorSettingsModal
             open={settingsOpen}
             onClose={() => setSettingsOpen(false)}
@@ -379,11 +385,6 @@ interface ShellChromeProps {
   tab: PrimaryTabId;
   setTab: (next: PrimaryTabId) => void;
   hasProject: boolean;
-  scenes: ReadonlyArray<{ path: string; label: string }>;
-  /** Manifest-declared start scene, surfaced as the dropdown value when
-   *  the user hasn't pinned a different scene yet. */
-  fallbackScene: string | null;
-  showSceneDropdown: boolean;
   projectId: string | null;
   onOpenProject: (id: string) => void;
   onProjectMutated: () => void;
@@ -403,23 +404,15 @@ function ShellChrome({
   tab,
   setTab,
   hasProject,
-  scenes,
-  fallbackScene,
-  showSceneDropdown,
   projectId,
   onOpenProject,
   onProjectMutated,
   onNavigateHome,
   onOpenSettings,
 }: ShellChromeProps) {
-  // Active scene from the shell-level context. When no scene has been
-  // pinned yet, fall back to the manifest's startScene so the TopBar
-  // shows something useful instead of "—".
-  const { activeScene, setActiveScene } = useActiveScene();
-  const resolvedScene = activeScene ?? fallbackScene;
-  const sceneName = resolvedScene
-    ? resolvedScene.replace(/^scenes\//, "")
-    : "";
+  // Scene picker no longer lives in the TopBar — views read the scene
+  // list + active scene from `<ActiveSceneProvider/>` and register a
+  // picker into the tab-row right slot via `useTabContextSlot`.
   // Register a default Save handler at the shell level so the legacy
   // ProjectView path (which binds Ctrl+S internally for the GridEditor
   // auto-save loop and EntitiesEditor) keeps working until R4f
@@ -463,11 +456,6 @@ function ShellChrome({
   return (
     <div className="flex flex-col h-screen min-h-screen bg-zinc-950 text-zinc-100">
       <TopBar
-        sceneName={sceneName}
-        scenes={scenes}
-        onSelectScene={setActiveScene}
-        sceneDropdownDisabled={!hasProject || scenes.length === 0}
-        showSceneDropdown={showSceneDropdown}
         saveState="saved"
         onSave={handleSave}
         saveAvailable={typeof actions.save === "function"}
@@ -610,7 +598,18 @@ function ShellBody({
     );
   }
 
-  // Real project-workflow tabs: Scene / Prefabs / Animation.
+  // Scene tab routes to MapView so the view can register the Scene
+  // picker into the tab strip's per-tab right slot. MapView is a stub
+  // today; subsequent waves rebuild it from the Map.png mockup.
+  if (tab === "scene") {
+    return (
+      <div className="h-full overflow-hidden">
+        <MapView key={`scene::${projectId}`} />
+      </div>
+    );
+  }
+
+  // Real project-workflow tabs: Prefabs / Animation.
   // ProjectView is the existing monolith that switches its body based
   // on the `workflowMode` prop we feed in here. We keep `key={projectId}`
   // so opening a different project still cleanly remounts the view

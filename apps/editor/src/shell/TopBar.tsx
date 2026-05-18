@@ -2,48 +2,43 @@ import React from "react";
 import { Play, Square, Upload, Save as SaveIcon, Settings } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Button } from "../components/ui";
-import { DropdownMenu } from "../components/ui/DropdownMenu";
 import { IconButton } from "../components/ui/IconButton";
 import logoUrl from "../assets/logo.png" with { type: "file" };
-import type { TopBarScene, SaveState } from "../components/ui/TopBar";
+import type { SaveState } from "../components/ui/TopBar";
 
 /**
  * Shell TopBar — the chrome's top strip. ~64px tall.
  *
  * Layout L→R:
  *   1. Cardboard hex logo (28-32px) + "CARDBOARD" wordmark.
- *   2. Scene dropdown (current scene, only shown on Scene / Prefabs /
- *      Animation; hidden otherwise).
- *   3. Flex spacer.
- *   4. Playtest button (amber, prominent, currently disabled until
- *      R4h ships the in-editor Playtest view).
- *   5. Export button.
- *   6. Save button.
- *   7. Settings cog → opens EditorSettingsModal.
+ *   2. Flex spacer — reserved for future contextual project meta
+ *      (per the Map.png mockup the right side carries project-level
+ *      info; we keep the region available without rendering anything
+ *      until that surface is designed).
+ *   3. Playtest button (amber, prominent).
+ *   4. Export button.
+ *   5. Save button.
+ *   6. Settings cog → opens EditorSettingsModal.
  *
  * Per Q3 (logo) we use the bundled hex logo image + wordmark. No red
  * plaque from the GPT mockups.
  *
- * Per the reversed Q9 (§12) the project dropdown is gone entirely —
- * the Home tab is the canonical project switcher; the TopBar no
- * longer surfaces project selection at all.
+ * Per the reversed Q9 (§12) the project dropdown is gone — the Home
+ * tab is the canonical project switcher.
+ *
+ * The Scene picker that used to sit between the brand and the action
+ * buttons has been moved out of the TopBar entirely. It now renders
+ * in the tab strip's per-tab contextual right slot (see
+ * `lib/tabContextSlot.tsx`) and is registered by the Scene view
+ * (MapView). When the user is on any other tab the slot is empty.
  *
  * The component used to live as a primitive in
  * `components/ui/TopBar.tsx`; R3 wraps it with shell-aware behaviour
- * (scene visibility, lucide icons) and lives here. The primitive
- * version is still exported for the StyleGuide.
+ * (lucide icons + action wiring). The primitive version is still
+ * exported for the StyleGuide.
  */
 
 export interface ShellTopBarProps {
-  sceneName: string;
-  scenes: ReadonlyArray<TopBarScene>;
-  onSelectScene: (path: string) => void;
-  /** When false, the scene dropdown is hidden entirely. */
-  showSceneDropdown: boolean;
-  /** When true, the scene dropdown renders disabled (no project loaded
-   *  or zero `scenes/*.json` assets). */
-  sceneDropdownDisabled?: boolean;
-
   saveState: SaveState;
   onSave: () => void;
   /** When false the Save button renders disabled with a "Not available
@@ -69,11 +64,6 @@ export interface ShellTopBarProps {
 }
 
 export function TopBar({
-  sceneName,
-  scenes,
-  onSelectScene,
-  showSceneDropdown,
-  sceneDropdownDisabled = false,
   saveState,
   onSave,
   saveAvailable = true,
@@ -86,9 +76,6 @@ export function TopBar({
   className,
 }: ShellTopBarProps) {
   const NOT_AVAILABLE_HINT = "Not available in this view.";
-  const currentSceneId =
-    scenes.find((s) => s.label === sceneName || s.path === sceneName)?.path ??
-    "";
 
   return (
     <header
@@ -118,37 +105,10 @@ export function TopBar({
         </div>
       </div>
 
-      <Separator />
-
-      {/* Scene picker — only when the active tab cares about scenes. */}
-      {showSceneDropdown && (
-        <DropdownField
-          label="SCENE"
-          disabled={sceneDropdownDisabled || scenes.length === 0}
-          tooltip={
-            sceneDropdownDisabled
-              ? "Open a project to pick a scene."
-              : scenes.length === 0
-                ? "This project has no scenes/*.json assets yet."
-                : undefined
-          }
-        >
-          <DropdownMenu
-            trigger={
-              <div className="flex items-center justify-between w-full h-9 px-3 border border-zinc-800 rounded-md bg-zinc-900/60 text-sm text-zinc-100">
-                <span className="truncate">{sceneName || "—"}</span>
-                <Chevron />
-              </div>
-            }
-            value={currentSceneId}
-            options={scenes.map((s) => ({ id: s.path, label: s.label }))}
-            onChange={onSelectScene}
-            disabled={sceneDropdownDisabled || scenes.length === 0}
-            width={224}
-          />
-        </DropdownField>
-      )}
-
+      {/* Flex spacer — the Scene picker that previously lived here is
+          now in the tab strip's per-tab contextual right slot
+          (lib/tabContextSlot.tsx). Future contextual project meta
+          (per Map.png) can render in this region. */}
       <div className="flex-1" />
 
       {/* Right-side actions */}
@@ -223,39 +183,6 @@ export function TopBar({
   );
 }
 
-function Separator() {
-  return (
-    <span className="self-center w-px h-8 bg-zinc-800" aria-hidden="true" />
-  );
-}
-
-function DropdownField({
-  label,
-  children,
-  disabled,
-  tooltip,
-}: {
-  label: string;
-  children: React.ReactNode;
-  disabled: boolean;
-  tooltip?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col justify-center gap-0.5 w-[224px] shrink-0",
-        disabled && "opacity-60",
-      )}
-      title={tooltip}
-    >
-      <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500 font-semibold">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 function SaveBadge({ state }: { state: SaveState }) {
   const map: Record<SaveState, { text: string; cls: string }> = {
     saved: { text: "Saved", cls: "text-emerald-400" },
@@ -265,23 +192,4 @@ function SaveBadge({ state }: { state: SaveState }) {
   };
   const { text, cls } = map[state];
   return <span className={cn("text-xs mr-1", cls)}>{text}</span>;
-}
-
-function Chevron() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="text-zinc-400"
-    >
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
 }

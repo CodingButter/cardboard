@@ -13,6 +13,7 @@ import {
   Package,
 } from "lucide-react";
 import { TabStrip, type TabDescriptor } from "../components/ui/TabStrip";
+import { useTabContextSlotValue } from "../lib/tabContextSlot";
 
 /**
  * PrimaryTabs — the 11-tab horizontal strip below the TopBar.
@@ -180,6 +181,14 @@ export function PrimaryTabs({
     [tabs, value, onChange],
   );
 
+  // The active view registers what (if anything) shows at the right
+  // edge of the tab strip via `useTabContextSlot` from `lib/tabContextSlot`.
+  // Reading the value here keeps the slot in sync with whatever the
+  // currently-mounted view installs. When no view registers content
+  // the value is null and TabStrip renders the strip without a right
+  // slot.
+  const rightSlot = useTabContextSlotValue();
+
   return (
     <div onKeyDown={onKeyDown} className={className}>
       <TabStrip<PrimaryTabId>
@@ -188,6 +197,8 @@ export function PrimaryTabs({
         value={value}
         onChange={onChange}
         aria-label="Editor workflow"
+        rightSlot={rightSlot}
+        scrollable
       />
     </div>
   );

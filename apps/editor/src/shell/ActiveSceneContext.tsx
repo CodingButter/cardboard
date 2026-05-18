@@ -21,12 +21,30 @@ import React from "react";
  * inert.
  */
 
+/** Lightweight scene descriptor — exactly the shape any picker UI
+ *  needs (path + label). Sourced from the shell's project asset
+ *  inventory and shared so views can build their own picker UI
+ *  without re-querying. */
+export interface SceneOption {
+  path: string;
+  label: string;
+}
+
 interface ActiveSceneContextValue {
   /** Absolute scene path (e.g. `scenes/foo.json`) or null when no
    *  project is open / no scene resolved yet. */
   activeScene: string | null;
   /** Update the active scene. Pass null to clear. */
   setActiveScene: (scene: string | null) => void;
+  /** The full list of scenes available in the current project. Empty
+   *  when no project is open or the project has no scenes/*.json
+   *  assets yet. */
+  scenes: ReadonlyArray<SceneOption>;
+  /** Manifest-declared start scene path. Used as the resolved-scene
+   *  fallback when `activeScene` is null so picker UIs can show
+   *  something meaningful before the user has explicitly pinned a
+   *  scene. */
+  fallbackScene: string | null;
 }
 
 const ActiveSceneContext = React.createContext<ActiveSceneContextValue | null>(
@@ -38,6 +56,13 @@ export interface ActiveSceneProviderProps {
    *  under. Pass null when no project is open — the provider will
    *  hold `activeScene` as null and ignore writes. */
   projectId: string | null;
+  /** The scene list from the shell's project asset inventory. The
+   *  provider rebroadcasts it via context so any view (e.g. the Scene
+   *  picker registered into the tab-row right slot) can build its own
+   *  picker UI without prop-drilling. Default: empty array. */
+  scenes?: ReadonlyArray<SceneOption>;
+  /** Manifest-declared start scene path. Default: null. */
+  fallbackScene?: string | null;
   children: React.ReactNode;
 }
 
@@ -45,8 +70,12 @@ function storageKeyFor(projectId: string): string {
   return `cardboard_editor_active_scene_${projectId}`;
 }
 
+const EMPTY_SCENES: ReadonlyArray<SceneOption> = [];
+
 export function ActiveSceneProvider({
   projectId,
+  scenes = EMPTY_SCENES,
+  fallbackScene = null,
   children,
 }: ActiveSceneProviderProps) {
   // Hydrate from localStorage when the project changes. We use a lazy
@@ -112,8 +141,8 @@ export function ActiveSceneProvider({
   );
 
   const value = React.useMemo<ActiveSceneContextValue>(
-    () => ({ activeScene, setActiveScene }),
-    [activeScene, setActiveScene],
+    () => ({ activeScene, setActiveScene, scenes, fallbackScene }),
+    [activeScene, setActiveScene, scenes, fallbackScene],
   );
 
   return (
