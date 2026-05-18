@@ -42,9 +42,16 @@ export function TabStrip<T extends string>({
   className,
   "aria-label": ariaLabel,
 }: TabStripProps<T>) {
+  // Primary tabs row sits directly under the near-black TopBar.
+  // Mockups (Editor Design/Map.png et al) show it visibly lighter
+  // than the TopBar — same brightness as the panel cards in the
+  // rails. The `--color-bg-tabs` token drives that whole strip; the
+  // panels inherit `--color-bg-panel` (same value today, kept as a
+  // distinct token so the two can diverge later without retuning
+  // every panel call site).
   const containerClasses =
     variant === "primary"
-      ? "flex items-stretch h-12 border-b border-zinc-800 bg-zinc-950/40"
+      ? "flex items-stretch h-12 border-b border-zinc-800 bg-(--color-bg-tabs)"
       : "flex items-stretch h-9 border-b border-zinc-800";
 
   return (

@@ -194,7 +194,7 @@
  * ─────────────────────────────────────────────────────────────────── */
 
 .tab-strip-primary {
-  @apply flex items-stretch h-12 border-b border-zinc-800 bg-zinc-950/40;
+  @apply flex items-stretch h-12 border-b border-zinc-800 bg-(--color-bg-tabs);
 }
 
 .tab-strip-secondary {
