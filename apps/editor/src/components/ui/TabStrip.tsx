@@ -76,10 +76,13 @@ export function TabStrip<T extends string>({
   // panels inherit `--color-bg-panel` (same value today, kept as a
   // distinct token so the two can diverge later without retuning
   // every panel call site).
+  // border-b uses zinc-700/60 so it actually contrasts with the new
+  // --color-bg-tabs (#272727) — plain border-zinc-800 reads as the
+  // same colour as the tabs-row bg after the theme retune.
   const containerClasses =
     variant === "primary"
-      ? "flex items-stretch h-12 border-b border-zinc-800 bg-(--color-bg-tabs)"
-      : "flex items-stretch h-9 border-b border-zinc-800";
+      ? "flex items-stretch h-12 border-b border-zinc-700/60 bg-(--color-bg-tabs)"
+      : "flex items-stretch h-9 border-b border-zinc-700/60";
 
   const buttons = tabs.map((tab) => {
     const active = tab.id === value;
@@ -121,7 +124,7 @@ export function TabStrip<T extends string>({
         {tab.dividerAfter && (
           <div
             aria-hidden="true"
-            className="my-2 w-px self-stretch bg-zinc-800 shrink-0"
+            className="my-2 w-px self-stretch bg-zinc-700/60 shrink-0"
           />
         )}
       </React.Fragment>

@@ -1,6 +1,15 @@
 @import "tailwindcss";
 
 /*
+ * dockview's base stylesheet — structural CSS for the docking
+ * layout primitives (tab strips, splitters, drop overlays, popout
+ * containers). Themed via the `--dv-*` custom properties overridden
+ * in `design-system.css` under the "dockview theme overrides"
+ * section.
+ */
+@import "dockview/dist/styles/dockview.css";
+
+/*
  * The engine's modal screens (InventoryScreen, SettingsScreen) live
  * in `packages/default-pack/scripts/ui/` and mount inside the engine
  * viewport when the user opens them in play mode. Without these

@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cardboard — Popout</title>
+    <meta name="theme-color" content="#08090b" />
+    <!--
+      Host page for dockview popout groups (see
+      apps/editor/src/components/dock/DockShell.tsx).
+
+      dockview opens this page in a new window via `window.open` and
+      injects the popped-out group's DOM into `body` after `load`
+      fires. The page must:
+
+        1. Be same-origin with the main editor (served by `server.ts`
+           from `apps/editor/public/`).
+        2. Have a `body` element ready for dockview's
+           `appendChild` call (the default empty body satisfies this).
+        3. Render the same design-system tokens as the main editor.
+
+      Item 3 is the tricky one. dockview clones the main document's
+      stylesheets into this document on load, which carries over our
+      `:root` CSS variables — usually. DockShell.tsx also pushes the
+      relevant `--color-*`, `--rail-*`, `--radius-*`, `--gap-*`,
+      `--shadow-*`, `--font-*`, `--dv-*` custom properties onto
+      `:root` explicitly on every `onDidLocationChange` to a popout,
+      belt-and-braces in case a stylesheet fails to clone.
+
+      We intentionally do NOT load the editor bundle here. The popout
+      is just a host frame; React reconciles the popped-out subtree
+      through the main window's React tree.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #08090b;
+        color: #f4f4f5;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+    </style>
+  </head>
+  <body></body>
+</html>
