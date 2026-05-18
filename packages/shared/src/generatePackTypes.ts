@@ -144,12 +144,38 @@ export function generatePackTypes(
     }
   }
 
+  // Collect every tag string declared by any component, deduped and
+  // sorted alphabetically for deterministic output. Drives the
+  // `KnownTags` augmentation emitted below — the engine's `Tag` alias
+  // resolves to `keyof KnownTags & string`, so each tag here becomes
+  // a member of the typed `Tag` union for pack-side consumers.
+  const tagSet = new Set<string>();
+  for (const def of components) {
+    const tags = (def as { tags?: unknown }).tags;
+    if (!Array.isArray(tags)) continue;
+    for (const t of tags) {
+      if (typeof t === "string" && t.length > 0) tagSet.add(t);
+    }
+  }
+  const orderedTags = [...tagSet].sort();
+
   lines.push(`declare module "@two_5_d/engine" {`);
   lines.push(`  interface PackComponents {`);
   for (const { name, ref } of shapeRefs) {
     lines.push(`    ${name}: Component<${ref}>;`);
   }
   lines.push(`  }`);
+  // KnownTags augmentation — omit entirely when no tags exist so the
+  // engine's `Tag` alias falls back to `never` (correct "no tags"
+  // semantics).
+  if (orderedTags.length > 0) {
+    lines.push(`  interface KnownTags {`);
+    for (const tag of orderedTags) {
+      const safeKey = isSafeIdentifier(tag) ? tag : JSON.stringify(tag);
+      lines.push(`    ${safeKey}: true;`);
+    }
+    lines.push(`  }`);
+  }
   lines.push(`}`);
   lines.push("");
 

@@ -231,6 +231,40 @@ export interface PackComponents {
 }
 
 /**
+ * Augmentation point for pack-declared component tags.
+ *
+ * `KnownTags` is an empty interface at the engine level — every key
+ * comes from generated `.d.ts` files emitted by
+ * `generatePackTypes(manifest.components, …)`. Each pack's build
+ * walks `manifest.components[].tags` and emits a single
+ * declaration-merged block:
+ *
+ *   declare module "@two_5_d/engine" {
+ *     interface KnownTags {
+ *       entity: true;
+ *       input: true;
+ *       render: true;
+ *       // …
+ *     }
+ *   }
+ *
+ * Pack code that wants compile-time tag access reads through the
+ * `Tag` alias below and gets the union of every tag declared by the
+ * active pack chain's manifests. When no tags are declared anywhere,
+ * `Tag` falls back to `never` — the correct "no tags" semantics.
+ *
+ * Tags are free-form strings (WORLD_STATE.md §4); the engine never
+ * reads them. The editor uses them to filter component pickers.
+ */
+export interface KnownTags {
+  // Intentionally empty — populated by generated pack `.d.ts` files
+  // via declaration merging.
+}
+
+/** Union of every tag declared by the active pack chain's manifests. */
+export type Tag = keyof KnownTags & string;
+
+/**
  * The shape `api.components` actually carries — the augmented
  * `PackComponents` plus an index-signature fallback so pack scripts
  * can still read unknown component names without TS errors. The

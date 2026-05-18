@@ -119,6 +119,8 @@ export type {
   PlayOpts,
   PackComponents,
   BuiltInComponents,
+  KnownTags,
+  Tag,
 } from "./ModAPI";
 
 // Settings overlay type — needed by SettingsScreen (pack-side after R4)

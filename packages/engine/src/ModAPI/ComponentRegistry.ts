@@ -10,7 +10,7 @@ import {
   Shader,
 } from "Components";
 import type { ComponentDef } from "AssetPack";
-import type { BuiltInComponents } from "./types";
+import type { BuiltInComponents, Tag } from "./types";
 
 /**
  * Editor-/serialize-side metadata for a registered component. Mirrors
@@ -209,6 +209,25 @@ export class ComponentRegistry {
   /** Read-side accessor for editor / serialize tooling. */
   getMetadata(name: string): ComponentMetadata | undefined {
     return this.metadata.get(name);
+  }
+
+  /**
+   * Every registered component whose metadata includes `tag`. The
+   * parameter type is the generated `Tag` union (`keyof KnownTags &
+   * string`) — when no pack has declared any tags, `Tag` collapses
+   * to `never` and call sites are forced to widen explicitly, which
+   * is the intended "tag filtering is a no-op without a manifest"
+   * fallback. Results are returned in the same order
+   * `allNames()` walks (sorted, dedup-free).
+   */
+  byTag(tag: Tag): ComponentMetadata[] {
+    const out: ComponentMetadata[] = [];
+    for (const name of this.allNames()) {
+      const meta = this.metadata.get(name);
+      if (!meta || !meta.tags) continue;
+      if (meta.tags.includes(tag)) out.push(meta);
+    }
+    return out;
   }
 
   /** Snapshot every registered component name (sorted, dedup-free). */

@@ -6,6 +6,8 @@ export type {
   FrameFn,
   BuiltInComponents,
   PackComponents,
+  KnownTags,
+  Tag,
   ModAPI,
   InputAPI,
   KeyboardInputAPI,
