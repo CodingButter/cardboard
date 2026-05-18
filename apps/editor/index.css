@@ -11,6 +11,16 @@
 @source "../../packages/default-pack/scripts/**/*.{js,ts,tsx}";
 
 /*
+ * Editor design-system class library (Phase 0). Composes the tokens
+ * declared in the `@theme` block below into semantic class names
+ * (`.panel-surface-rounded`, `.button-primary`, `.tab-strip-item--active`,
+ * `.scroll-amber`, etc.) that pages and primitives reference instead
+ * of repeating Tailwind utility chains. Imported after Tailwind so the
+ * `@apply` directives resolve.
+ */
+@import "./src/styles/design-system.css";
+
+/*
  * Editor redesign R2 — design-token vocabulary.
  * See docs/plans/EDITOR_REDESIGN.md §3.1 + §5.1.
  *
