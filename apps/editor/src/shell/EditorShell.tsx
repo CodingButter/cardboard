@@ -6,6 +6,7 @@ import {
   LayoutPanelTop,
 } from "lucide-react";
 import { useRoute, buildHash } from "../lib/router";
+import { resolveSceneLabel } from "../lib/sceneLabel";
 import {
   EditorProjectStore,
   type ProjectMeta,
@@ -296,15 +297,64 @@ export function EditorShell() {
   }, [projectId, refreshTick]);
 
   // Scene picker derived from the project's `scenes/*.json` assets.
+  // The display label resolves from two sources, checked in order:
+  //   1. The scene JSON's `name` field, if present and non-empty.
+  //   2. The filename, derived via resolveSceneLabel (strips
+  //      `scenes/` + `.json`, splits on `_`/`-`, title-cases each
+  //      word). Loaded lazily in the effect below.
+  const [sceneNames, setSceneNames] = React.useState<Record<string, string>>(
+    {},
+  );
+
+  // Paths of scene assets currently in the project — stable reference
+  // we feed into the JSON-loading effect's deps without triggering on
+  // unrelated `assets` changes.
+  const scenePaths = React.useMemo(
+    () =>
+      assets.filter((a) => a.path.startsWith("scenes/")).map((a) => a.path),
+    [assets],
+  );
+
+  // Read each scene's JSON, extract `.name`, cache it. Re-runs only
+  // when the list of scene paths changes (not on unrelated asset
+  // mutations). Cancellation flag guards against late writes after
+  // the project / scene list changed mid-load.
+  React.useEffect(() => {
+    if (!projectId || scenePaths.length === 0) {
+      setSceneNames({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const path of scenePaths) {
+        try {
+          const body = await EditorProjectStore.loadAsset(projectId, path);
+          if (typeof body !== "string") continue;
+          const parsed = JSON.parse(body);
+          const name = parsed?.name;
+          if (typeof name === "string" && name.trim()) {
+            next[path] = name.trim();
+          }
+        } catch {
+          // Malformed JSON or missing — fall through to filename
+          // derivation in `scenes` below.
+        }
+      }
+      if (!cancelled) setSceneNames(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, scenePaths]);
+
   const scenes = React.useMemo(
     () =>
-      assets
-        .filter((a) => a.path.startsWith("scenes/"))
-        .map((a) => ({
-          path: a.path,
-          label: a.path.replace(/^scenes\//, ""),
-        })),
-    [assets],
+      scenePaths.map((path) => ({
+        path,
+        label: resolveSceneLabel(path, sceneNames[path]),
+      })),
+    [scenePaths, sceneNames],
   );
 
   // Active scene state lives in `<ActiveSceneProvider/>` (mounted

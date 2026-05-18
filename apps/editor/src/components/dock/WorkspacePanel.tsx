@@ -342,6 +342,7 @@ export function WorkspaceRail({
   const setLastAppliedPresetId = useWorkspaceStore(
     (s) => s.setLastAppliedPresetId,
   );
+  const setEditingPresetId = useWorkspaceStore((s) => s.setEditingPresetId);
 
   const applyLayoutRef = React.useRef<(id: string, layout: SerializedDockview) => void>(
     () => undefined,
@@ -367,6 +368,10 @@ export function WorkspaceRail({
     let n = 2;
     while (taken.has(name)) name = `${base} ${n++}`;
     const preset = savePreset(pageId, name, api.toJSON());
+    // Mark the new preset for inline-rename mode BEFORE updating
+    // `lastAppliedPresetId` so the LayoutsModal renders the freshly-
+    // added card with its name input focused + selected.
+    setEditingPresetId(pageId, preset.id);
     setLastAppliedPresetId(pageId, preset.id);
   };
 
@@ -386,6 +391,12 @@ export function WorkspaceRail({
         title: "Save Current Layout as New",
         category: "Layouts",
         keywords: ["save", "layout", "preset", "new"],
+        // Open the Layouts modal first so the user lands looking at
+        // the grid where their freshly-created card is about to enter
+        // inline-rename mode. `workspace.openLayouts` is idempotent —
+        // calling it when the modal is already open just re-sets the
+        // boolean state to true.
+        preMacro: ["workspace.openLayouts"],
         run: () => saveAsNewRef.current(),
       }),
       registerCommand({

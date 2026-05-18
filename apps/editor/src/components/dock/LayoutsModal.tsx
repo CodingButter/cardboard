@@ -8,9 +8,11 @@ import { Button } from "../ui/Button";
 import { LayoutSkeleton } from "./LayoutSkeleton";
 import {
   useWorkspaceStore,
+  useEditingPresetId,
   type WorkspacePreset,
 } from "../../state/useWorkspaceStore";
 import { getPredefinedLayouts } from "../../state/predefinedLayouts";
+import { useCommandStore } from "../../state/useCommandStore";
 
 /**
  * LayoutsModal — the Workspace v1.5 layouts surface.
@@ -364,13 +366,20 @@ export function LayoutsModal({
   const lastAppliedPresetId = useWorkspaceStore(
     (s) => s.lastAppliedPresetId[pageId] ?? null,
   );
-  const savePreset = useWorkspaceStore((s) => s.savePreset);
   const renamePreset = useWorkspaceStore((s) => s.renamePreset);
   const deletePreset = useWorkspaceStore((s) => s.deletePreset);
   const resavePreset = useWorkspaceStore((s) => s.resavePreset);
   const setLastAppliedPresetId = useWorkspaceStore(
     (s) => s.setLastAppliedPresetId,
   );
+  const clearEditingPresetId = useWorkspaceStore(
+    (s) => s.clearEditingPresetId,
+  );
+
+  // Inline-rename target is owned by the workspace store now — the
+  // palette-driven `layouts.saveAsNew` command writes here from outside
+  // the modal, and this component just reads + clears.
+  const editingPresetId = useEditingPresetId(pageId);
 
   const activeUserPreset = React.useMemo(
     () => presets.find((p) => p.id === lastAppliedPresetId) ?? null,
@@ -409,14 +418,6 @@ export function LayoutsModal({
     activeUserPreset != null &&
     matchedPresetId !== activeUserPreset.id;
 
-  // Tracks which user preset card should mount in inline-rename mode.
-  // Set on "Save current as new" so the freshly-created card focuses
-  // its name input with the placeholder selected — the user can
-  // immediately type to rename or commit the default with Enter / blur.
-  const [editingPresetId, setEditingPresetId] = React.useState<string | null>(
-    null,
-  );
-
   const applyLayout = (id: string, layout: SerializedDockview) => {
     const api = apiRef.current;
     if (!api) return;
@@ -429,23 +430,13 @@ export function LayoutsModal({
     onClose();
   };
 
-  const defaultPresetName = () => {
-    // Auto-numbered default that avoids collisions with existing
-    // user presets so the placeholder is never visually duplicated.
-    const base = "New layout";
-    const names = new Set(presets.map((p) => p.name));
-    if (!names.has(base)) return base;
-    let n = 2;
-    while (names.has(`${base} ${n}`)) n += 1;
-    return `${base} ${n}`;
-  };
-
+  // The header band's "Save current as new" button now routes through
+  // the command registry — same code path as Ctrl+Shift+P → "Save
+  // Current Layout as New". `workspace.openLayouts` is the registered
+  // preMacro; firing it while the modal is already open is a no-op
+  // (the rail's handler just sets `layoutsOpen = true` again).
   const onSaveAsNew = () => {
-    const api = apiRef.current;
-    if (!api) return;
-    const preset = savePreset(pageId, defaultPresetName(), api.toJSON());
-    setLastAppliedPresetId(pageId, preset.id);
-    setEditingPresetId(preset.id);
+    void useCommandStore.getState().runById("layouts.saveAsNew");
   };
 
   const onResave = () => {
@@ -545,7 +536,7 @@ export function LayoutsModal({
                   layout={p.layout}
                   active={matchedPresetId === p.id}
                   autoEdit={editingPresetId === p.id}
-                  onEditEnd={() => setEditingPresetId(null)}
+                  onEditEnd={() => clearEditingPresetId(pageId)}
                   onClick={() => applyLayout(p.id, p.layout)}
                   onRename={(next) => renamePreset(pageId, p.id, next)}
                   onDelete={() => deletePreset(pageId, p.id)}

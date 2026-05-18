@@ -65,6 +65,54 @@ Notes:
   `homescreen.openProject.<id>`). The palette uses these for the MRU
   ring and for keybinding lookup, so renaming an id is breaking.
 
+### preMacro / postMacro — composing commands
+
+Commands can declare two optional arrays of command ids that
+`runById` will dispatch **around** the command's own `run()`:
+
+```ts
+registerCommand({
+  id: "layouts.saveAsNew",
+  title: "Save Current Layout as New",
+  category: "Layouts",
+  preMacro: ["workspace.openLayouts"], // ← runs first
+  run: () => {
+    /* save preset + flip editingPresetId */
+  },
+  // postMacro: ["analytics.notePresetCreated"], // ← would run after
+});
+```
+
+Semantics:
+
+- Both arrays default to empty — existing commands that don't set them
+  behave exactly as before.
+- `runById` is recursive through the macro arrays, so a pre-macro's
+  own pre/post chain runs too. This is what lets the palette flow
+  "Save Current as New" → open the modal (pre) → create the preset
+  (run) → trigger any registered post-side effects without the
+  command itself knowing about the modal at all.
+- A per-invocation `visited: Set<string>` short-circuits cycles. If
+  command `A` declares `preMacro: ["B"]` and `B` declares
+  `preMacro: ["A"]`, the second occurrence is skipped with a
+  `console.warn("[command-registry] cycle broken at \"A\"")`. The
+  visited set is shared across the recursion, so a deep tree where two
+  parents both reference the same pre-macro only runs that pre-macro
+  once per top-level invocation.
+- The visited set ALSO means MRU is recorded for the outermost command
+  only — macros are an implementation detail and shouldn't pollute
+  recents.
+
+When to use macros vs. just calling the helper inline:
+
+- **Use macros** when the surrounding step is itself a registered
+  command that other paths might also want to compose with (modals,
+  navigation, persistence flushes). The macro form is observable,
+  introspectable from the palette, and unit-testable.
+- **Inline** the call when the step is purely internal to this
+  command's implementation and would clutter the command directory if
+  registered.
+
 ### Dynamic registrations (variable lists)
 
 When the command list is data-driven — user-saved layout presets, the

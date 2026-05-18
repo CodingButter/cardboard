@@ -57,6 +57,18 @@ export interface WorkspaceState {
    * layout" button when a user preset is active.
    */
   lastAppliedPresetId: Record<string, string | null>;
+  /**
+   * Per-page tracker for which user-preset card (if any) should mount
+   * in inline-rename mode the moment it next renders inside the
+   * LayoutsModal grid. Set to the new preset's id immediately after
+   * `savePreset`; the card observes the state, focuses its name input,
+   * and selects the placeholder text. Cleared by the card on commit /
+   * cancel via `clearEditingPresetId`.
+   *
+   * Persisted: NO. This is transient UI state — closing the modal or
+   * reloading the page should drop it. See `partialize` below.
+   */
+  editingPresetId: Record<string, string | null>;
   savePreset: (
     pageId: string,
     name: string,
@@ -76,6 +88,9 @@ export interface WorkspaceState {
     layout: DockLayoutJSON | null,
   ) => void;
   setLastAppliedPresetId: (pageId: string, id: string | null) => void;
+  setEditingPresetId: (pageId: string, id: string | null) => void;
+  /** Alias for `setEditingPresetId(pageId, null)`. */
+  clearEditingPresetId: (pageId: string) => void;
 }
 
 const STORAGE_NAME = "cardboard_workspace";
@@ -153,6 +168,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       presets: {},
       dockLayouts: {},
       lastAppliedPresetId: {},
+      editingPresetId: {},
       savePreset: (pageId, name, layout) => {
         const preset: WorkspacePreset = {
           id: genId(),
@@ -202,6 +218,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           lastAppliedPresetId: { ...s.lastAppliedPresetId, [pageId]: id },
         }));
       },
+      setEditingPresetId: (pageId, id) => {
+        set((s) => ({
+          editingPresetId: { ...s.editingPresetId, [pageId]: id },
+        }));
+      },
+      clearEditingPresetId: (pageId) => {
+        set((s) => ({
+          editingPresetId: { ...s.editingPresetId, [pageId]: null },
+        }));
+      },
     }),
     {
       name: STORAGE_NAME,
@@ -243,4 +269,13 @@ export function selectDockLayout(
   storageKey: string,
 ): (state: WorkspaceState) => DockLayoutJSON | null {
   return (state) => state.dockLayouts[storageKey] ?? null;
+}
+
+/**
+ * Reactive read of the currently-editing preset id for a page (the
+ * card that should be in inline-rename mode in the LayoutsModal). Null
+ * when no card should auto-edit.
+ */
+export function useEditingPresetId(pageId: string): string | null {
+  return useWorkspaceStore((s) => s.editingPresetId[pageId] ?? null);
 }

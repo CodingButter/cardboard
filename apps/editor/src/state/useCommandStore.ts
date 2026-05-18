@@ -32,6 +32,18 @@ export interface EditorCommand {
   keybinding?: string;
   icon?: React.ReactNode;
   description?: string;
+  /**
+   * Command ids to await BEFORE this command's `run()` executes. Each
+   * pre-macro id is dispatched through `runById` recursively, so a
+   * pre-macro picks up its own pre/post chain. Cycles are short-circuited
+   * via a per-invocation visited set (with a console.warn).
+   */
+  preMacro?: string[];
+  /**
+   * Command ids to await AFTER this command's `run()` resolves. Same
+   * recursion + cycle semantics as `preMacro`.
+   */
+  postMacro?: string[];
   run: () => void | Promise<void>;
 }
 
@@ -41,7 +53,7 @@ export interface CommandStoreState {
   recent: string[];
   register: (cmd: EditorCommand) => () => void;
   unregister: (id: string) => void;
-  runById: (id: string) => Promise<void>;
+  runById: (id: string, visited?: Set<string>) => Promise<void>;
   noteRecent: (id: string) => void;
 }
 
@@ -62,17 +74,32 @@ export const useCommandStore = create<CommandStoreState>()((set, get) => ({
       return { commands: next };
     });
   },
-  runById: async (id) => {
+  runById: async (id, visited = new Set<string>()) => {
+    if (visited.has(id)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[command-registry] cycle broken at "${id}"`);
+      return;
+    }
+    visited.add(id);
     const cmd = get().commands[id];
     if (!cmd) return;
-    get().noteRecent(id);
+    // Only note MRU for the outermost (user-invoked) command — macros
+    // are implementation detail; recents would otherwise be polluted by
+    // every pre/post step.
+    if (visited.size === 1) get().noteRecent(id);
+    for (const pre of cmd.preMacro ?? []) {
+      await get().runById(pre, visited);
+    }
     try {
       await cmd.run();
     } catch (err) {
       // Surface the error so debugging is easy, but don't crash the
       // palette over a failing command.
       // eslint-disable-next-line no-console
-      console.error(`[command:${id}] failed:`, err);
+      console.error(`[command-registry] run("${id}") threw`, err);
+    }
+    for (const post of cmd.postMacro ?? []) {
+      await get().runById(post, visited);
     }
   },
   noteRecent: (id) => {
