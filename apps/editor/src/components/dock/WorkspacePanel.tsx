@@ -1,11 +1,12 @@
 import React from "react";
-import type { DockviewApi } from "dockview";
+import type { DockviewApi, IDockviewPanel } from "dockview";
 import {
   RotateCcw,
   Boxes,
   LayoutDashboard,
   Settings,
   CircleHelp,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useWorkspaceStore } from "../../state/useWorkspaceStore";
@@ -121,6 +122,138 @@ export function WorkspaceRail({
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
 
+  // ── Trash drop target ──────────────────────────────────────────────
+  //
+  // When the user starts dragging a dockview panel by its tab/header,
+  // a trash icon fades into the rail (between Reset Layout and the
+  // spacer). Releasing the drag over the trash rect closes the panel
+  // via `panel.api.close()`. Releasing anywhere else is a no-op for
+  // this layer — dockview's native drag handling (snap-back, re-dock,
+  // drag-off-viewport popout in DockShell) is unaffected because our
+  // gate is a STRICT pointer-inside-trash-rect check.
+  //
+  // apiRef-subscription strategy:
+  //   We poll `apiRef.current` via a useEffect that re-runs once per
+  //   render. The DockShell sibling fills apiRef during its own
+  //   `onReady` callback — there's no synchronous moment where we
+  //   know it's populated, but the very next render after onReady will
+  //   have it. We use a tiny `apiReady` state flag that we flip when
+  //   we observe a non-null apiRef.current. If null on this pass we
+  //   schedule a single rAF retry. This is the cleanest option of the
+  //   three the spec suggested — no DockShell/MapView changes needed.
+  const [apiReady, setApiReady] = React.useState(false);
+  React.useEffect(() => {
+    if (apiRef.current) {
+      if (!apiReady) setApiReady(true);
+      return;
+    }
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (apiRef.current) {
+        setApiReady(true);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    const raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [apiRef, apiReady]);
+
+  const [dragActive, setDragActive] = React.useState(false);
+  const [isOverTrash, setIsOverTrash] = React.useState(false);
+  const trashRef = React.useRef<HTMLButtonElement | null>(null);
+  // Captured panel + last-known pointer position survive across
+  // pointermove / pointerup / dragend without forcing re-renders.
+  const draggedPanelRef = React.useRef<IDockviewPanel | null>(null);
+  const lastPointerRef = React.useRef<{ x: number; y: number } | null>(null);
+
+  React.useEffect(() => {
+    if (!apiReady) return;
+    const api = apiRef.current;
+    if (!api) return;
+
+    const isPointerInsideTrash = (x: number, y: number): boolean => {
+      const el = trashRef.current;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      // Strict bbox containment — no padding/tolerance. The popout
+      // gesture in DockShell only fires when the pointer is well
+      // OUTSIDE the viewport, so the two layers never both claim a
+      // single release point.
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+
+    const onPointerMove = (ev: PointerEvent) => {
+      lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
+      // Compute hover-during-drag from live coords. HTML5 drag
+      // suppresses CSS :hover on most browsers, so we drive
+      // `isOverTrash` ourselves.
+      const over = isPointerInsideTrash(ev.clientX, ev.clientY);
+      setIsOverTrash((prev) => (prev === over ? prev : over));
+    };
+
+    const cleanupListeners = () => {
+      window.removeEventListener("pointermove", onPointerMove, true);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("dragend", onDragEnd, true);
+    };
+
+    const finishDrag = (releaseX: number, releaseY: number) => {
+      const panel = draggedPanelRef.current;
+      draggedPanelRef.current = null;
+      lastPointerRef.current = null;
+      cleanupListeners();
+      setDragActive(false);
+      setIsOverTrash(false);
+      if (!panel) return;
+      if (!isPointerInsideTrash(releaseX, releaseY)) return;
+      try {
+        panel.api.close();
+      } catch {
+        // Panel already removed (e.g. dockview disposed it mid-drag).
+        // Non-fatal — the layout will reconcile on next layout-change.
+      }
+    };
+
+    function onPointerUp(ev: PointerEvent) {
+      finishDrag(ev.clientX, ev.clientY);
+    }
+
+    // HTML5 dragend fires when the OS drag completes. Some browsers
+    // report (0, 0) on cancel/leave-window; fall back to the last
+    // pointermove position in that case — same trick the popout
+    // gesture in DockShell uses.
+    function onDragEnd(ev: DragEvent) {
+      const x = ev.clientX;
+      const y = ev.clientY;
+      const last = lastPointerRef.current;
+      const px = x === 0 && y === 0 && last ? last.x : x;
+      const py = x === 0 && y === 0 && last ? last.y : y;
+      finishDrag(px, py);
+    }
+
+    const sub = api.onWillDragPanel((e) => {
+      draggedPanelRef.current = e.panel;
+      lastPointerRef.current = null;
+      setDragActive(true);
+      setIsOverTrash(false);
+      window.addEventListener("pointermove", onPointerMove, true);
+      window.addEventListener("pointerup", onPointerUp, true);
+      window.addEventListener("dragend", onDragEnd, true);
+    });
+
+    return () => {
+      sub.dispose();
+      cleanupListeners();
+      draggedPanelRef.current = null;
+      lastPointerRef.current = null;
+    };
+  }, [apiReady, apiRef]);
+
   const onResetLayout = () => {
     if (!storageKey) return;
     setDockLayout(storageKey, null);
@@ -161,6 +294,38 @@ export function WorkspaceRail({
         label="Reset Layout"
         onClick={onResetLayout}
       />
+
+      {/* Trash drop target — only visible while a dockview panel is
+       *  being dragged. We always render the element (so its
+       *  bounding rect is measurable the moment the drag starts) and
+       *  toggle visibility via opacity + pointer-events. Fade is
+       *  120ms ease-out via Tailwind's transition-opacity.
+       *
+       *  Idle drag state  : muted fg + hairline border chip
+       *  Over-trash state : red-tinted bg + red-300 fg
+       *
+       *  pointer-events:none during the idle (non-drag) state keeps
+       *  this from intercepting clicks elsewhere on the rail. */}
+      <button
+        type="button"
+        ref={trashRef}
+        tabIndex={-1}
+        aria-hidden={!dragActive}
+        title="Drop here to remove panel"
+        className={cn(
+          "workspace-rail-icon",
+          "h-9 w-9 inline-flex items-center justify-center rounded",
+          "border transition-[opacity,colors,background-color] duration-[120ms] ease-out",
+          dragActive ? "opacity-100" : "opacity-0 pointer-events-none",
+          isOverTrash
+            ? "text-red-300 bg-red-500/15 border-red-400/40"
+            : "text-(--color-fg-muted) bg-transparent border-(--color-border)",
+        )}
+      >
+        <span className="flex items-center justify-center [&_svg]:h-[18px] [&_svg]:w-[18px]">
+          <Trash2 />
+        </span>
+      </button>
 
       <div className="flex-1" aria-hidden />
 
