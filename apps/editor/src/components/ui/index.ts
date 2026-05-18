@@ -5,6 +5,11 @@
  * from "../components/ui"` (assuming the directory is preferred
  * over the legacy flat `ui.tsx` — note both can coexist, see
  * `../ui.tsx` for the pre-existing primitives).
+ *
+ * Phase 1 of the editor redesign adds the bolded entries below to the
+ * existing library. Each new primitive references the design-system
+ * `@apply` classes in `apps/editor/src/styles/design-system.css` —
+ * retunes happen there, not inside the component file.
  */
 
 export { Slider, ToggleSwitch, SegmentedControl } from "./controls";
@@ -95,3 +100,56 @@ export type { StatusBarProps, StatusBarSection } from "./StatusBar";
 
 export { PreviewHost } from "./PreviewHost";
 export type { PreviewHostProps, PreviewEngine } from "./PreviewHost";
+
+/* ────── Phase 1 additions ──────────────────────────────────────── */
+
+export { Button } from "./Button";
+export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
+
+export {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "./Card";
+export type { CardProps } from "./Card";
+
+export { Divider } from "./Divider";
+export type { DividerProps } from "./Divider";
+
+export { TextInput } from "./TextInput";
+export type { TextInputProps } from "./TextInput";
+
+export { Textarea } from "./Textarea";
+export type { TextareaProps } from "./Textarea";
+
+export { NumberInput } from "./NumberInput";
+export type { NumberInputProps } from "./NumberInput";
+
+export { SearchInput } from "./SearchInput";
+export type { SearchInputProps } from "./SearchInput";
+
+export { Chip } from "./Chip";
+export type { ChipProps, ChipVariant } from "./Chip";
+
+export { LiveIndicator } from "./LiveIndicator";
+export type { LiveIndicatorProps } from "./LiveIndicator";
+
+export { AssetThumbnail } from "./AssetThumbnail";
+export type { AssetThumbnailProps } from "./AssetThumbnail";
+
+export { Breadcrumb } from "./Breadcrumb";
+export type { BreadcrumbProps, BreadcrumbSegment } from "./Breadcrumb";
+
+export { Kbd } from "./Kbd";
+export type { KbdProps } from "./Kbd";
+
+export { PreviewFrame } from "./PreviewFrame";
+export type { PreviewFrameProps } from "./PreviewFrame";
+
+export { TogglePill } from "./TogglePill";
+export type { TogglePillProps, TogglePillOption } from "./TogglePill";
+
+export { ThreeRailLayout, TwoRailLayout } from "./RailLayout";
+export type { ThreeRailLayoutProps, TwoRailLayoutProps } from "./RailLayout";
