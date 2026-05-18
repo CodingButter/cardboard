@@ -68,12 +68,12 @@
   --color-bg-panel: #18181b;
   --color-bg-card: oklch(0.22 0 0);
   --color-bg-card-elev: #2f2f2f;
-  /* Panel-body surface — used by the per-panel inner card wrapper
-   * (ToolPalette, future panels). One clear step lighter than the
-   * new darker page background (--color-bg-panel at zinc-900 / #18181b)
-   * so each panel reads as a raised card on the page. Paired with
-   * `--color-border-strong` as the hairline. */
-  --color-bg-panel-surface: oklch(0.27 0 0);
+  /* Panel-body surface — used by the per-panel inner card wrapper.
+   * Very slightly lighter than the page background (--color-bg-panel
+   * at zinc-900 / oklch ~0.21) so panels read as raised cards
+   * without competing visually. Paired with `--color-border-strong`
+   * as the hairline; the border is what reads, not the fill. */
+  --color-bg-panel-surface: oklch(0.23 0 0);
   --color-bg-active: oklch(0.74 0.18 65 / 0.1);
   --color-bg-hover: oklch(0.32 0 0);
 

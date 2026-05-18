@@ -132,9 +132,9 @@ const PANELS: readonly DockPanelDef[] = [
   { ...LAYERS_MANIFEST, component: LayersPanel },
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
   { ...QUICK_TOOLS_MANIFEST, component: QuickToolsPanel },
-  { ...OUTPUT_MANIFEST, component: OutputPanel },
-  { ...PROBLEMS_MANIFEST, component: ProblemsPanel },
-  { ...SELECTION_INFO_MANIFEST, component: SelectionInfoPanel },
+  { ...OUTPUT_MANIFEST, component: OutputPanel, surface: false },
+  { ...PROBLEMS_MANIFEST, component: ProblemsPanel, surface: false },
+  { ...SELECTION_INFO_MANIFEST, component: SelectionInfoPanel, surface: false },
   { ...SCENE_SETTINGS_MANIFEST, component: SceneSettingsPanel },
   // Opt-in Wave-2 panels — discoverable via the DocksModal but
   // intentionally absent from the default layout below.
