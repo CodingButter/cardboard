@@ -55,23 +55,33 @@ export const DockPanelHeaderOrnamentsContext = React.createContext<
  *     reorder/split/popout machinery (dockview attaches its DnD
  *     listeners to the element this component renders).
  *
- * Ctrl+drag float toggle (DockShell wires the keyboard listener):
- *   - Ctrl+drag from a docked tab → drop in empty space spawns a
- *     floating group at the release point.
- *   - Ctrl+drag from a floating panel's tab → drop onto a docked
- *     group docks the panel back into that group as a tab.
+ * Ctrl+drag popout toggle (DockShell wires the keyboard listener):
+ *   - Ctrl+drag from a docked tab → release in empty space spawns
+ *     the panel in a popout browser window. The window opens at the
+ *     pointer's screen position (ev.screenX/Y), so the popout lands
+ *     under the cursor. When the editor is installed as a PWA, the
+ *     popout window inherits standalone display mode — chrome-less
+ *     by default.
+ *   - To dock a popout back, drag its tab onto the main window's
+ *     dock zones (dockview's native cross-window drag handles this —
+ *     no Ctrl required, no cross-window event plumbing on our side).
+ *   - Ctrl+drag on a legacy in-page floating panel → dock back into
+ *     the group under the release point. The in-page floating
+ *     concept was retired; this branch only exists to keep older
+ *     persisted layouts (with floating groups) recoverable.
+ *
  *   When Ctrl is NOT held, dockview's native drag behaviour is
  *   untouched. The pointerdown handler explicitly does NOT
  *   `preventDefault()` unless Ctrl is held, so non-Ctrl drags hand
  *   off to dockview's HTML5 DnD code cleanly. When Ctrl IS held, we
  *   call `preventDefault()` to suppress dockview's native drag and
- *   take pointer capture ourselves, then trigger the float/dock
+ *   take pointer capture ourselves, then trigger the popout/dock
  *   action on the eventual pointerup.
  */
 
 const CTRL_DRAG_THRESHOLD_PX = 6;
-const CTRL_DRAG_FLOAT_W = 360;
-const CTRL_DRAG_FLOAT_H = 240;
+const CTRL_DRAG_POPOUT_W = 480;
+const CTRL_DRAG_POPOUT_H = 360;
 
 export function DockPanelHeader(
   props: IDockviewPanelHeaderProps,
@@ -234,42 +244,69 @@ export function DockPanelHeader(
         return;
       }
 
-      // Docked → floating. dockview's `addFloatingGroup` takes
-      // `x` / `y` in coordinates relative to the dockview root
-      // element (NOT viewport / page). We translate the release
-      // point into that space by subtracting the dockview root's
-      // bounding-rect origin.
-      let originX = 0;
-      let originY = 0;
-      // The dockview root lives at the closest `.dv-dockview`
-      // ancestor of the tab element.
-      const dockRoot = target.closest<HTMLElement>(".dv-dockview");
-      if (dockRoot) {
-        const rect = dockRoot.getBoundingClientRect();
-        originX = rect.left;
-        originY = rect.top;
-      }
-      const localX = Math.max(
-        0,
-        Math.round(ev.clientX - originX - CTRL_DRAG_FLOAT_W / 2),
-      );
-      const localY = Math.max(
-        0,
-        Math.round(ev.clientY - originY - 12),
-      );
+      // Docked → popout. dockview's `addPopoutGroup` spawns a new
+      // browser window (via window.open under the hood). Two fixups
+      // around dockview's default behaviour:
+      //
+      // 1. **Position**: dockview's PopoutWindow internally computes
+      //    `final.left = window.screenX + box.left` (see
+      //    dockview-core/popoutWindow). To land the popout under the
+      //    pointer release point, the box.left we pass must be in
+      //    EDITOR-WINDOW coordinates (clientX/Y), not screen coords —
+      //    dockview adds the editor window's screen origin itself.
+      //
+      // 2. **popup=yes**: dockview builds `top=...,left=...,
+      //    width=...,height=...` as window.open features and never
+      //    sets `popup=yes`. Chrome 120+ has been treating this as
+      //    "open in a tab in an existing window" — particularly when
+      //    the editor is itself a PWA, the new window inherits the
+      //    PWA chrome but lands inside a different already-open
+      //    Chrome window as a tab. Wrapping `window.open` for the
+      //    duration of dockview's async open call lets us inject
+      //    `popup=yes` into the features string so Chrome opens a
+      //    real popup window (chrome-less when launched from a PWA,
+      //    minimal-chrome popup otherwise).
+      const localX = Math.max(0, Math.round(ev.clientX - 24));
+      const localY = Math.max(0, Math.round(ev.clientY - 12));
 
-      try {
-        containerApi.addFloatingGroup(panel, {
-          x: localX,
-          y: localY,
-          width: CTRL_DRAG_FLOAT_W,
-          height: CTRL_DRAG_FLOAT_H,
+      const win = window as Window & { open: typeof window.open };
+      const origOpen = win.open.bind(window);
+      const wrappedOpen: typeof window.open = (
+        url?: string | URL,
+        target?: string,
+        features?: string,
+      ) => {
+        const enhanced = features ? `${features},popup=yes` : "popup=yes";
+        return origOpen(url, target, enhanced);
+      };
+      win.open = wrappedOpen;
+
+      void containerApi
+        .addPopoutGroup(panel, {
+          position: {
+            left: localX,
+            top: localY,
+            width: CTRL_DRAG_POPOUT_W,
+            height: CTRL_DRAG_POPOUT_H,
+          },
+        })
+        .catch(() => {
+          // Popup blocker or dockview rejection. Non-fatal — the
+          // panel keeps its docked location. Browsers may block the
+          // popup if the gesture chain is broken (e.g. the user took
+          // a long pause between pointerdown and pointerup); the
+          // user can retry.
+        })
+        .finally(() => {
+          // Restore the original window.open as soon as dockview's
+          // async open is done. The actual window.open call inside
+          // dockview happens in the synchronous prelude of the async
+          // function (before any await yields), so by the time this
+          // finally runs the popup has already been launched.
+          if (win.open === wrappedOpen) {
+            win.open = origOpen;
+          }
         });
-      } catch {
-        // dockview rejected the float (e.g. last panel in last
-        // docked group). Non-fatal — the panel keeps its current
-        // location.
-      }
     },
     [api, clearCtrlDragVisual, containerApi],
   );
