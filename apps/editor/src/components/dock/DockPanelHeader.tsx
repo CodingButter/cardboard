@@ -73,7 +73,7 @@ interface DockPanelHeaderParams {
 
 export function DockPanelHeader(
   props: IDockviewPanelHeaderProps,
-): React.JSX.Element {
+): React.JSX.Element | null {
   const { api } = props;
   // Subscribe to title changes — dockview can update the title at
   // runtime via api.setTitle() so we mirror that into local state.
@@ -83,6 +83,31 @@ export function DockPanelHeader(
     const sub = api.onDidTitleChange((e) => setTitle(e.title ?? ""));
     return () => sub.dispose();
   }, [api]);
+
+  // Workspace panel is pinned chrome — IT is the panel header, so it
+  // must not render a visible tab strip. We render a zero-height
+  // sentinel carrying `data-panel-id="workspace"` so the CSS rules
+  // in design-system.css can locate the workspace tab and collapse
+  // its dockview-managed container (`.dv-tabs-and-actions-container`)
+  // down to 0 height. Returning a true `null` would still leave
+  // dockview's wrapper at its default 32px height; the sentinel +
+  // CSS gives us a flush-edge rail with no header gutter.
+  //
+  // Closing the panel: dockview's close icon is a separate
+  // `.dv-default-tab-action` painted inside its own tab container —
+  // hidden globally for the workspace tab by the same CSS rules
+  // because that container collapses to 0 height. No additional
+  // close-icon suppression is required here.
+  if (api.id === "workspace") {
+    return (
+      <span
+        data-panel-id="workspace"
+        data-dock-panel-header
+        aria-hidden
+        style={{ display: "none" }}
+      />
+    );
+  }
 
   const params = (props.params ?? {}) as DockPanelHeaderParams;
   const ornaments = React.useContext(DockPanelHeaderOrnamentsContext);

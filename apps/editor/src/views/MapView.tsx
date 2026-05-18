@@ -1,15 +1,20 @@
 import React from "react";
 import { Construction, MapIcon, SlidersHorizontal } from "lucide-react";
+import type { SerializedDockview } from "dockview";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useTabContextSlot } from "../lib/tabContextSlot";
 import { SceneTabContextPicker } from "./scene/SceneTabContextPicker";
 import { useRoute } from "../lib/router";
 import {
   DockShell,
-  buildSideBySideLayout,
   type DockPanelDef,
 } from "../components/dock/DockShell";
 import { DockPanel } from "../components/dock/DockPanel";
+import {
+  WorkspacePanel,
+  WorkspacePanelIcon,
+  WORKSPACE_PANEL_ID,
+} from "../components/dock/WorkspacePanel";
 
 /**
  * MapView — Scene page shell.
@@ -78,6 +83,12 @@ function InspectorBody() {
  *  wire real controls later. */
 const PANELS: readonly DockPanelDef[] = [
   {
+    id: WORKSPACE_PANEL_ID,
+    title: "Workspace",
+    component: WorkspacePanel,
+    icon: <WorkspacePanelIcon size={12} />,
+  },
+  {
     id: "map",
     title: "Map",
     component: MapBody,
@@ -91,11 +102,64 @@ const PANELS: readonly DockPanelDef[] = [
   },
 ];
 
-/** Initial layout JSON — Map on the left (60%), Inspector on the
- *  right (40%). The user can re-tile, tab-group, or pop out at will;
- *  the result lands in localStorage under
- *  `cardboard_editor_dock_layout_scene::<projectId>`. */
-const DEFAULT_LAYOUT = buildSideBySideLayout(PANELS);
+/** Initial layout JSON — Map (60%) + Inspector (40%) side by side.
+ *  The Workspace rail is NOT included in the default JSON; DockShell's
+ *  `ensureWorkspace` safety net adds it via `addPanel({ initialWidth: 48 })`
+ *  after `fromJSON` completes. addPanel honours `initialWidth` in
+ *  absolute pixels, whereas grid `size` fields in `fromJSON` are
+ *  relative weights normalised to the viewport — making it impossible
+ *  to declare an exact 48px column in JSON form.
+ *
+ *  Result is persisted via the workspace store under
+ *  `cardboard_workspace.dockLayouts[scene::<projectId>]`. The
+ *  Workspace panel always survives in the persisted snapshot because
+ *  the safety net runs on every onReady, so dock layouts re-load with
+ *  the rail present even if it was somehow removed. */
+function buildDefaultLayout(): SerializedDockview {
+  return {
+    grid: {
+      root: {
+        type: "branch",
+        data: [
+          {
+            type: "leaf",
+            data: {
+              views: ["map"],
+              activeView: "map",
+              id: "map-group",
+            },
+            size: 600,
+          },
+          {
+            type: "leaf",
+            data: {
+              views: ["inspector"],
+              activeView: "inspector",
+              id: "inspector-group",
+            },
+            size: 400,
+          },
+        ],
+        size: 1000,
+      },
+      height: 1000,
+      width: 1000,
+      orientation: "HORIZONTAL",
+    },
+    panels: {
+      map: {
+        id: "map",
+        contentComponent: "map",
+        title: "Map",
+      },
+      inspector: {
+        id: "inspector",
+        contentComponent: "inspector",
+        title: "Inspector",
+      },
+    },
+  } as unknown as SerializedDockview;
+}
 
 export function MapView(_props: MapViewProps = {}): React.JSX.Element {
   const [route] = useRoute();
@@ -122,12 +186,20 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
     );
   }
 
+  const storageKey = `scene::${projectId}`;
+  // Memoize so we don't rebuild the JSON every render (DockShell uses
+  // referential equality on `defaultLayout` in the onReady callback
+  // dep array). The default layout shape doesn't depend on the
+  // project — Workspace is added separately by DockShell's safety
+  // net using addPanel with absolute initialWidth.
+  const defaultLayout = React.useMemo(() => buildDefaultLayout(), []);
+
   return (
     <div className="h-full w-full min-h-0">
       <DockShell
-        storageKey={`scene::${projectId}`}
+        storageKey={storageKey}
         panels={PANELS}
-        defaultLayout={DEFAULT_LAYOUT}
+        defaultLayout={defaultLayout}
       />
     </div>
   );

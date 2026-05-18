@@ -1,83 +1,79 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DockviewApi, SerializedDockview } from "dockview";
+import { useWorkspaceStore } from "../../state/useWorkspaceStore";
 
 /**
- * useDockLayoutPersistence — per-page `localStorage` round-trip for a
- * dockview layout JSON snapshot. Used by `<DockShell/>`.
+ * useDockLayoutPersistence — per-page round-trip for a dockview layout
+ * JSON snapshot. Used by `<DockShell/>`.
  *
- * Storage key shape: `cardboard_editor_dock_layout_<storageKey>`.
+ * Previously this hook owned its own `localStorage.getItem` /
+ * `setItem` calls keyed by `cardboard_editor_dock_layout_<storageKey>`.
+ * It now reads + writes through the workspace store
+ * (`useWorkspaceStore`) so dock layouts ride the same persistence
+ * boundary as user-saved layout presets. The store's
+ * `onRehydrateStorage` hook migrates the old `localStorage` entries
+ * into the store on first load so saved layouts survive the change.
  *
- * Why localStorage and not IndexedDB: dockview's layout JSON is a few
- * hundred bytes per page even with popout groups; the synchronous read
- * on first paint avoids a flash of empty layout before
- * `fromJSON` fires. We can promote to IDB later if multi-tab sync or
- * cross-device sync is needed — the hook's surface is small enough to
- * swap the backing store without touching call sites.
- *
- * Contract:
- *   - `read()` reads the saved JSON once at mount time. Returns `null`
- *     when no key exists or the JSON fails to parse (corruption guard
- *     so a stale entry can't permawedge the page).
+ * Contract (unchanged from the previous implementation):
+ *   - `initial` is the snapshot read at mount time, or `null` if no
+ *     saved state.
  *   - `save(api)` persists the current `api.toJSON()` snapshot. Wired
  *     to dockview's `onDidLayoutChange` by `<DockShell/>`.
+ *
+ * The hook reads the store's value exactly once at mount and stashes
+ * it as `initial` — DockShell uses this in `fromJSON` and we don't
+ * want subscriptions thrashing the dockview component after that.
+ * Writes go through `setDockLayout(...)` on every layout change.
  */
-
-const PREFIX = "cardboard_editor_dock_layout_";
-
-function buildKey(storageKey: string): string {
-  return `${PREFIX}${storageKey}`;
-}
 
 export interface DockLayoutPersistence {
   /** The snapshot read at mount time, or `null` if no saved state. */
   readonly initial: SerializedDockview | null;
   /** Persist the api's current layout. Cheap — debouncing not needed
-   *  at this volume; localStorage writes are synchronous and fast on
-   *  the editor-sized JSON we emit. */
+   *  at this volume; the store write is synchronous + the persist
+   *  middleware writes localStorage once per change. */
   readonly save: (api: DockviewApi) => void;
 }
 
 export function useDockLayoutPersistence(
   storageKey: string,
 ): DockLayoutPersistence {
-  // Read the saved layout once at mount. We use a ref + useState so the
-  // initial value is stable across renders (the JSON read happens
-  // exactly once), and so a remount with a different `storageKey`
-  // re-reads cleanly.
+  const setDockLayout = useWorkspaceStore((s) => s.setDockLayout);
+
+  // Read the saved layout once at mount. We pull straight from the
+  // store via `getState()` so we don't subscribe (which would force
+  // a re-render whenever any other consumer touches the same slice).
+  // The value is captured as state so a remount with a different
+  // `storageKey` re-reads cleanly.
   const [initial] = useState<SerializedDockview | null>(() => {
     if (typeof window === "undefined") return null;
     try {
-      const raw = localStorage.getItem(buildKey(storageKey));
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as SerializedDockview;
-      return parsed;
+      const slice = useWorkspaceStore.getState().dockLayouts;
+      return slice[storageKey] ?? null;
     } catch {
-      // Corrupted entry — drop it so subsequent saves land clean.
-      try {
-        localStorage.removeItem(buildKey(storageKey));
-      } catch {
-        // ignore
-      }
       return null;
     }
   });
 
   // Keep the key in a ref so `save` doesn't need to re-bind on every
   // render of the consumer.
-  const keyRef = useRef(buildKey(storageKey));
+  const keyRef = useRef(storageKey);
   useEffect(() => {
-    keyRef.current = buildKey(storageKey);
+    keyRef.current = storageKey;
   }, [storageKey]);
 
-  const save = useCallback((api: DockviewApi) => {
-    try {
-      const snapshot = api.toJSON();
-      localStorage.setItem(keyRef.current, JSON.stringify(snapshot));
-    } catch {
-      // Quota errors / serialization errors are non-fatal — the user
-      // simply won't get layout persistence this session.
-    }
-  }, []);
+  const save = useCallback(
+    (api: DockviewApi) => {
+      try {
+        const snapshot = api.toJSON();
+        setDockLayout(keyRef.current, snapshot);
+      } catch {
+        // Serialization errors are non-fatal — the user simply won't
+        // get layout persistence this session.
+      }
+    },
+    [setDockLayout],
+  );
 
   return { initial, save };
 }

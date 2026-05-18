@@ -9,6 +9,7 @@ import {
   Loader2,
   AlertCircle,
   CircleDot,
+  Sidebar as SidebarIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Button } from "../components/ui";
@@ -103,6 +104,27 @@ export function TopBar({
           than the default .button-* h-9 to match the chrome rhythm of
           Map.png. */}
       <div className="flex items-center gap-3 shrink-0">
+        {/* "Show Workspace" — dispatches a custom event the active
+            DockShell subscribes to. If the workspace panel is gone
+            (shouldn't happen with the safety net, but possible mid-
+            transition), DockShell re-adds it; otherwise it focuses
+            the existing panel for a visual ping. */}
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("cardboard:show-workspace"));
+          }}
+          title="Show Workspace"
+          aria-label="Show Workspace"
+          className={cn(
+            "inline-flex items-center justify-center h-7 w-7 rounded",
+            "text-(--color-fg-muted) hover:text-(--color-fg-primary)",
+            "hover:bg-zinc-800/50 transition-colors",
+          )}
+        >
+          <SidebarIcon size={14} />
+        </button>
+
         <SaveStatusPill state={saveState} />
 
         {/* Outline buttons read as stroked chips against the near-black

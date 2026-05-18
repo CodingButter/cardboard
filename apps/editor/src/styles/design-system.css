@@ -767,3 +767,127 @@
    * (1rem) is too generous for a tab competing with siblings. */
   padding-inline: 0.75rem;
 }
+
+/* ───────────────────────────────────────────────────────────────────
+ * Workspace rail (Workspace v1 — `WorkspacePanel.tsx`)
+ *
+ * The Workspace panel is dockview's first non-content panel: a thin
+ * vertical rail of icon buttons that lets the user save / apply /
+ * delete layout presets and drag closed panels back into the dock
+ * via the Panel Packer flyout.
+ *
+ * Key behaviours expressed in CSS:
+ *
+ *   - `.workspace-rail` declares `container-type: size` so its
+ *     children can use `@container workspace (orientation: ...)`
+ *     queries to flip between vertical (left/right edge) and
+ *     horizontal (top/bottom edge) orientation. NO ResizeObserver —
+ *     the layout is fully CSS-driven.
+ *
+ *   - When the rail is in landscape (wider than tall) the inner
+ *     stack switches from `flex-col` to `flex-row` so the icon
+ *     buttons sit side by side.
+ *
+ *   - The workspace panel's dockview group should not render a tab
+ *     strip at all. Our `DockPanelHeader` returns `null` for
+ *     `panel.id === "workspace"`, but dockview still paints the
+ *     surrounding `.dv-tabs-and-actions-container` chrome. We hide
+ *     that chrome by targetting the group whose tab strip contains a
+ *     workspace tab.
+ * ─────────────────────────────────────────────────────────────────── */
+
+.workspace-rail {
+  container-type: size;
+  container-name: workspace;
+}
+
+/* Default inner stack — vertical (portrait rail). The button row
+ * gets a small gap; the rail's gutter is handled by the buttons'
+ * own padding. */
+.workspace-rail .workspace-rail-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+}
+
+/* Landscape — rail docked top or bottom; flip to a row. The
+ * `@container` query reads against the `.workspace-rail` parent
+ * (declared above with `container-type: size`). */
+@container workspace (orientation: landscape) {
+  .workspace-rail-stack {
+    flex-direction: row !important;
+  }
+  /* The hairline divider inside the rail flips axis when the stack
+   * does — vertical line between row items rather than a horizontal
+   * line between column items. */
+  .workspace-rail .workspace-rail-divider {
+    height: 24px !important;
+    width: 1px !important;
+  }
+}
+
+/* Per-button shared shape — used by Save / Reset / Packer triggers
+ * AND by `LayoutPresetButton`. Keeping the geometry here avoids
+ * drift between the dedicated preset buttons and the chrome
+ * actions in the same rail. */
+.workspace-preset-button {
+  /* Geometry is composed by Tailwind utility classes on the buttons
+   * themselves; this rule exists so future styling hooks (e.g.
+   * focus ring overrides, dark/light theme variants) have a single
+   * target. */
+}
+
+.workspace-preset-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.workspace-preset-button-active {
+  /* Visual ping for the Panel Packer trigger while the flyout is
+   * open. The Tailwind classes on the button set the active border /
+   * background; this hook is here for future theme overrides. */
+}
+
+/* Skeleton thumbnail (LayoutSkeleton leaf nodes) shares this class.
+ * Kept thin — the inline styles in LayoutSkeleton already paint the
+ * background / border because the colours derive from CSS vars. */
+.workspace-preset-thumb {
+}
+
+/* Panel Packer flyout — keep the surface readable against the dock
+ * area behind it. Inline styles on the React node handle layout +
+ * positioning; this class exists for theme hooks + the
+ * card-surface-elev composition. */
+.workspace-panel-packer-flyout {
+  /* shadow-popover composition handled inline via the tailwind
+   * `shadow-popover` class on the React node. */
+}
+
+/* Hide the dockview tab strip for any group whose visible panel is
+ * the workspace rail. Dockview wraps our React tab in a
+ * `.dv-react-part` div, so the path to the sentinel is
+ * `.dv-tab > .dv-react-part > [data-panel-id="workspace"]`. The
+ * sentinel is `display: none` — but `:has()` still matches it
+ * because it's a DOM-tree test, not a layout test. */
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container:has(
+    [data-panel-id="workspace"]
+  ) {
+  height: 0 !important;
+  min-height: 0 !important;
+  border-bottom: none !important;
+  overflow: hidden !important;
+}
+
+/* Workspace-mode hint — when the editor sets
+ * `data-workspace-mode="on"` on the dockview-theme-cardboard root,
+ * any tab strip carrying the workspace sentinel collapses to zero.
+ * This is the JS-side belt-and-braces in case the `:has()` selector
+ * above isn't recognised (Safari < 15.4, older Firefox). */
+.dockview-theme-cardboard[data-workspace-mode="on"]
+  [data-panel-id="workspace"] {
+  display: none;
+}
+

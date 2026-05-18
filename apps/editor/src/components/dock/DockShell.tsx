@@ -12,6 +12,10 @@ import {
   DockPanelHeaderOrnamentsContext,
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
+import {
+  WorkspacePanelContext,
+  WORKSPACE_PANEL_ID,
+} from "./WorkspacePanel";
 
 /**
  * DockShell — the editor's React wrapper around `<DockviewReact/>`.
@@ -347,6 +351,54 @@ export function DockShell({
         }
       }
 
+      // ── Workspace safety net ──────────────────────────────────────
+      //
+      // The Workspace rail is pinned — the user cannot close it and
+      // saved layouts always include it. But determined dev-tools
+      // users (or bad serialisations) could land us in a state where
+      // the workspace id is missing. Force-add it on the left edge if
+      // it's gone, so the user is never stranded without a way back
+      // to layout controls.
+      const WORKSPACE_DEFAULT_WIDTH = 48;
+      const ensureWorkspace = () => {
+        if (!panels.some((p) => p.id === WORKSPACE_PANEL_ID)) return;
+        if (api.getPanel(WORKSPACE_PANEL_ID)) return;
+        try {
+          api.addPanel({
+            id: WORKSPACE_PANEL_ID,
+            component: WORKSPACE_PANEL_ID,
+            title: "Workspace",
+            params: {
+              pageId: storageKey.split("::")[0] ?? "default",
+              storageKey,
+            },
+            position: { direction: "left" },
+            initialWidth: WORKSPACE_DEFAULT_WIDTH,
+            // Lock the rail at 48px. dockview's gridview enforces a
+            // minimum of 100px by default; without these constraints
+            // the rail snaps to 100 even though we asked for 48. The
+            // user can still re-dock the workspace to a different
+            // edge (those use `minimumHeight`), but along the
+            // current axis it stays at exactly 48.
+            minimumWidth: WORKSPACE_DEFAULT_WIDTH,
+            maximumWidth: WORKSPACE_DEFAULT_WIDTH,
+          });
+        } catch {
+          // Adding the panel failed — surface nothing to the user;
+          // they can still navigate away and back to reset.
+        }
+      };
+      ensureWorkspace();
+      // Persist the post-ensureWorkspace state once so a fresh load
+      // (no existing entry) saves the workspace-included layout
+      // immediately. Without this the dockLayouts slice stays empty
+      // until the user triggers a real layout change.
+      try {
+        save(api);
+      } catch {
+        // ignore — first persist is best-effort
+      }
+
       // Persist on every layout change. Cheap enough that debouncing
       // isn't necessary — the JSON is tiny and writes are synchronous.
       const layoutSub = api.onDidLayoutChange(() => {
@@ -603,6 +655,16 @@ export function DockShell({
       };
 
       const willDragPanelSub = api.onWillDragPanel((e) => {
+        // Workspace is pinned — drag-off-viewport on the workspace
+        // panel must NOT spawn a popout. We don't try to suppress
+        // dockview's own drag (the user has no header to grab in
+        // the first place because DockPanelHeader returns null for
+        // workspace), but if some other code path triggers a panel
+        // drag for the workspace id, we silently drop it.
+        if (e.panel.id === WORKSPACE_PANEL_ID) {
+          pendingDrag = null;
+          return;
+        }
         pendingDrag = { kind: "panel", panel: e.panel };
         // Capture pointerId from the underlying DragEvent's target
         // pointer when available. HTML5 drag events don't have a
@@ -611,10 +673,102 @@ export function DockShell({
         startTracking();
       });
       const willDragGroupSub = api.onWillDragGroup((e) => {
+        // Skip popout for any group whose only panel is the
+        // workspace rail. Multi-panel groups (the user could
+        // theoretically drag a non-workspace panel into the
+        // workspace group, though we don't expect that) still
+        // pop out.
+        const panels = e.group.panels;
+        if (
+          panels.length === 1 &&
+          panels[0]?.id === WORKSPACE_PANEL_ID
+        ) {
+          pendingDrag = null;
+          return;
+        }
         pendingDrag = { kind: "group", group: e.group };
         activePointerId = null;
         startTracking();
       });
+
+      // ── External-drag drop handler (Panel Packer chips) ──────────
+      //
+      // PanelPacker chips carry `dataTransfer["dockview/panel-id"]`
+      // payloads. dockview fires `onDidDrop` only for drops it could
+      // NOT handle itself — which includes external drags from
+      // outside the dockview tree (our case). When the payload
+      // matches a registered panel id, we mount it into the target
+      // group (within = same tab strip) or fall back to right-edge
+      // placement if no group is provided.
+      const onDidDropSub = api.onDidDrop((event) => {
+        try {
+          const id = event.nativeEvent.dataTransfer?.getData(
+            "dockview/panel-id",
+          );
+          if (!id) return;
+          const def = panels.find((p) => p.id === id);
+          if (!def) return;
+          // Don't double-mount.
+          if (api.getPanel(id)) return;
+          const targetGroup = event.group;
+          if (targetGroup) {
+            api.addPanel({
+              id,
+              component: id,
+              title: def.title,
+              position: { referenceGroup: targetGroup, direction: "within" },
+            });
+          } else {
+            api.addPanel({
+              id,
+              component: id,
+              title: def.title,
+              position: { direction: "right" },
+            });
+          }
+        } catch {
+          // dockview rejected the drop — non-fatal.
+        }
+      });
+
+      // ── Reset-layout event ───────────────────────────────────────
+      //
+      // The Workspace rail's Reset button clears the persisted layout
+      // from the store and dispatches this event on `window`. We
+      // re-apply the default layout (which always includes the
+      // workspace panel) so the user sees the page-default
+      // configuration restored.
+      const onReset = (ev: Event) => {
+        const detail = (ev as CustomEvent<{ storageKey?: string }>).detail;
+        if (!detail || detail.storageKey !== storageKey) return;
+        try {
+          api.fromJSON(defaultLayout);
+          ensureWorkspace();
+        } catch {
+          // ignore
+        }
+      };
+      window.addEventListener("cardboard:reset-workspace", onReset);
+
+      // ── Show-workspace event ─────────────────────────────────────
+      //
+      // The TopBar "Show Workspace" button dispatches this; if the
+      // workspace panel is missing (shouldn't happen because of the
+      // safety net but possible during transition states), we
+      // re-add it. Otherwise we focus it for a visual ping.
+      const onShow = () => {
+        const existing = api.getPanel(WORKSPACE_PANEL_ID);
+        if (existing) {
+          try {
+            existing.focus();
+          } catch {
+            // ignore
+          }
+        } else {
+          ensureWorkspace();
+        }
+      };
+      window.addEventListener("cardboard:show-workspace", onShow);
 
       // Clean up on unmount.
       return () => {
@@ -623,6 +777,9 @@ export function DockShell({
         removeGroupSub.dispose();
         willDragPanelSub.dispose();
         willDragGroupSub.dispose();
+        onDidDropSub.dispose();
+        window.removeEventListener("cardboard:reset-workspace", onReset);
+        window.removeEventListener("cardboard:show-workspace", onShow);
         window.removeEventListener("pointermove", onPointerMove, true);
         window.removeEventListener("pointerup", onPointerUp, true);
         window.removeEventListener("dragend", onDragEnd, true);
@@ -630,7 +787,7 @@ export function DockShell({
         groupCleanups.clear();
       };
     },
-    [defaultLayout, initial, onLayoutChange, panels, save],
+    [defaultLayout, initial, onLayoutChange, panels, save, storageKey],
   );
 
   // Build the icon/controls map for `DockPanelHeader` to read from
@@ -647,33 +804,46 @@ export function DockShell({
     [panels],
   );
 
+  // Surface the live api ref + panel registry to the WorkspacePanel
+  // via context. The workspace rail needs both to (a) snapshot the
+  // current layout into a preset, (b) list available panels in the
+  // Panel Packer flyout, and (c) re-mount panels via api.addPanel.
+  // We can't pass these through dockview's params (api isn't
+  // serialisable; registry contains React components).
+  const workspaceCtxValue = React.useMemo(
+    () => ({ api: apiRef.current, registry: panels, apiRef }),
+    [panels],
+  );
+
   return (
     <div
       className={`dockview-theme-cardboard h-full w-full min-h-0 ${className ?? ""}`}
     >
-      <DockPanelHeaderOrnamentsContext.Provider value={ornaments}>
-        <DockviewReact
-          components={components}
-          onReady={handleReady}
-          // When a group contains exactly one panel, render its tab
-          // strip full-width — combined with our custom
-          // `defaultTabComponent`, that single tab reads as a panel
-          // header bar (see Editor Design/Entities.png). Multi-panel
-          // groups revert to the narrow-tab look automatically.
-          singleTabMode="fullwidth"
-          // Every panel uses our `DockPanelHeader` renderer for its
-          // tab unless it explicitly specifies a different
-          // `tabComponent`. We pass the component directly (not a
-          // string id) because dockview-react accepts a React function
-          // component for `defaultTabComponent`.
-          defaultTabComponent={DockPanelHeader}
-          // Keep dockview's default tab close button hidden by default —
-          // editor panels are part of the page layout, not user-spawned
-          // documents the user is meant to dismiss. Pages can opt into
-          // closability per-panel by overriding this in their layout JSON.
-          disableDnd={false}
-        />
-      </DockPanelHeaderOrnamentsContext.Provider>
+      <WorkspacePanelContext.Provider value={workspaceCtxValue}>
+        <DockPanelHeaderOrnamentsContext.Provider value={ornaments}>
+          <DockviewReact
+            components={components}
+            onReady={handleReady}
+            // When a group contains exactly one panel, render its tab
+            // strip full-width — combined with our custom
+            // `defaultTabComponent`, that single tab reads as a panel
+            // header bar (see Editor Design/Entities.png). Multi-panel
+            // groups revert to the narrow-tab look automatically.
+            singleTabMode="fullwidth"
+            // Every panel uses our `DockPanelHeader` renderer for its
+            // tab unless it explicitly specifies a different
+            // `tabComponent`. We pass the component directly (not a
+            // string id) because dockview-react accepts a React function
+            // component for `defaultTabComponent`.
+            defaultTabComponent={DockPanelHeader}
+            // Keep dockview's default tab close button hidden by default —
+            // editor panels are part of the page layout, not user-spawned
+            // documents the user is meant to dismiss. Pages can opt into
+            // closability per-panel by overriding this in their layout JSON.
+            disableDnd={false}
+          />
+        </DockPanelHeaderOrnamentsContext.Provider>
+      </WorkspacePanelContext.Provider>
     </div>
   );
 }
