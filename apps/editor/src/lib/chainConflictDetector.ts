@@ -14,9 +14,8 @@
  *
  *   - "asset-path"        — two packs ship the same file path.
  *   - "manifest-sprite"   — same `manifest.sprites[X]` id.
- *   - "manifest-item"     — same `manifest.items[X]` id.
  *   - "manifest-prefab"   — same `manifest.prefabs[X]` id.
- *   - "manifest-sound"    — same `manifest.sounds[X]` id.
+ *   - "manifest-audio"    — same `manifest.audio[X]` id.
  *   - "tile-preset"       — same preset id, defined in JSONC files
  *                           listed under `manifest.tilePresets[]`
  *                           by two packs (or two `__legacy.<id>`
@@ -25,11 +24,21 @@
  *                           `manifest.shaders.postPasses[]` — these
  *                           are pack-author-named materials per the
  *                           PostPassDef schema.
- *   - "manifest-script"   — retired post-WORLD_STATE "world.json
- *                           full-scope" (2026-05-17). Script lists
- *                           now live in `world.json.scripts[]`; a
- *                           follow-up adds the equivalent conflict
- *                           pass against the new field.
+ *
+ * Retired:
+ *   - "manifest-item"   — `manifest.items` was retired when items
+ *                         moved into `data/items.json` (entity-id
+ *                         containers refactor, 2026-05). The
+ *                         equivalent data-layer item conflict pass
+ *                         is a follow-up dispatch.
+ *   - "manifest-sound"  — renamed to "manifest-audio" alongside the
+ *                         `manifest.sounds` → `manifest.audio` rename.
+ *   - "manifest-script" — `manifest.scripts[]` was retired post-
+ *                         WORLD_STATE "world.json full-scope"
+ *                         (2026-05-17). Script lists now live in
+ *                         `world.json.scripts[]`; a follow-up adds
+ *                         the equivalent conflict pass against the
+ *                         new field.
  *
  * Algorithm:
  *
@@ -59,12 +68,10 @@ export interface Conflict {
   kind:
     | "asset-path"
     | "manifest-sprite"
-    | "manifest-item"
     | "manifest-prefab"
-    | "manifest-sound"
+    | "manifest-audio"
     | "tile-preset"
-    | "shader-material"
-    | "manifest-script";
+    | "shader-material";
   /**
    * Path / id that collides. For `kind: "asset-path"` this is the
    * raw pack-relative path (`images/textures/brick.png`). For
@@ -163,10 +170,8 @@ export async function detectConflicts(
     const { url, pack } = entry;
     const manifest = pack.manifest as unknown as {
       sprites?: Record<string, unknown>;
-      items?: Record<string, unknown>;
       prefabs?: Record<string, unknown>;
-      sounds?: Record<string, unknown>;
-      scripts?: string[];
+      audio?: Record<string, unknown>;
       tilePresets?: string[];
       tileTextures?: Record<string | number, unknown>;
       shaders?: { postPasses?: Array<{ name: string }> };
@@ -179,18 +184,17 @@ export async function detectConflicts(
       bump("asset-path", p, url);
     }
 
-    // ── 2. Manifest sprites / items / prefabs / sounds. ──
+    // ── 2. Manifest sprites / prefabs / audio. (Items moved to
+    //      data/items.json — the data-layer item conflict pass is a
+    //      follow-up dispatch.) ──
     for (const id of Object.keys(manifest.sprites ?? {})) {
       bump("manifest-sprite", id, url);
-    }
-    for (const id of Object.keys(manifest.items ?? {})) {
-      bump("manifest-item", id, url);
     }
     for (const id of Object.keys(manifest.prefabs ?? {})) {
       bump("manifest-prefab", id, url);
     }
-    for (const id of Object.keys(manifest.sounds ?? {})) {
-      bump("manifest-sound", id, url);
+    for (const id of Object.keys(manifest.audio ?? {})) {
+      bump("manifest-audio", id, url);
     }
 
     // ── 3. `manifest.scripts[]` was retired in WORLD_STATE

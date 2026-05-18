@@ -702,12 +702,10 @@ function ConflictPill({
 const CONFLICT_KIND_LABEL: Record<Conflict["kind"], string> = {
   "asset-path": "asset",
   "manifest-sprite": "sprite",
-  "manifest-item": "item",
   "manifest-prefab": "prefab",
-  "manifest-sound": "sound",
+  "manifest-audio": "audio",
   "tile-preset": "preset",
   "shader-material": "material",
-  "manifest-script": "script",
 };
 
 function ConflictDetailsPanel({

@@ -189,14 +189,20 @@ export const BUILT_IN_COMPONENT_SCHEMAS: ComponentSchema[] = [
     defaultData: { lastFireTime: -100, walkPhase: 0, wasFiring: false, reloadStart: -Infinity },
   },
   {
+    // Generic container component — entity-id slots. Used by hotbar /
+    // backpack / chest entities. `slots` holds entity ids (or 0 for
+    // empty); `capacity` caps the slot count. See the post-2026-05
+    // entity-id containers refactor.
     name: "Inventory",
-    fields: [],
-    defaultData: { bag: [], hotbar: [], equipment: {}, activeHotbarIndex: 0 },
+    fields: [
+      { key: "capacity", kind: "number", min: 0, step: 1, hint: "Slot count cap" },
+    ],
+    defaultData: { slots: [], capacity: 0 },
   },
   {
     name: "Pickup",
     fields: [
-      { key: "itemId", kind: "string", hint: "Item id from manifest.items" },
+      { key: "itemId", kind: "string", hint: "Item id from data/items.json" },
       { key: "count", kind: "number", min: 1, step: 1 },
     ],
     defaultData: { itemId: "", count: 1 },

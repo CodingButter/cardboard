@@ -2,11 +2,17 @@
  * Smoke test for `lib/chainConflictDetector.ts` + `lib/resolveDepChain.ts`.
  *
  * Builds two synthetic `.apg` packs in a tmpdir, each declaring some
- * deliberately-overlapping content (texture path, sprite id, item id,
- * preset id, post-pass name, prefab id, sound id, script path).
- * Resolves them via the engine's ChainResolver (file:// URLs work
- * under Bun), runs `detectConflicts`, and asserts the resulting
- * report flags every overlap with the correct winner/loser.
+ * deliberately-overlapping content (texture path, sprite id, preset id,
+ * post-pass name, prefab id, sound id, script path). Resolves them via
+ * the engine's ChainResolver (file:// URLs work under Bun), runs
+ * `detectConflicts`, and asserts the resulting report flags every
+ * overlap with the correct winner/loser.
+ *
+ * NOTE: `manifest.items` was retired when items moved to `data/items.json`
+ * (engine-pack-split, 2026-05). The "manifest-item" conflict kind was
+ * dropped along with it — cross-pack item conflict detection now lives
+ * in the data-layer pass (TODO follow-up) so this smoke no longer asserts
+ * on item collisions.
  *
  * Also covers:
  *   - flipping declaration order swaps winner/loser
@@ -94,13 +100,10 @@ const packAManifest: PackManifest = {
     zombie: { image: "images/zombie.png" },
     aOnly: { image: "images/aonly.png" },
   },
-  items: {
-    health: { name: "Health A", image: "images/health.png", type: "misc" },
-  },
   prefabs: {
     spawner: { name: "spawner", components: {} },
   },
-  sounds: {
+  audio: {
     boom: { file: "audio/boom.ogg" },
   },
   // `manifest.scripts[]` was retired post-WORLD_STATE; the
@@ -145,13 +148,10 @@ const packBManifest: PackManifest = {
     zombie: { image: "images/zombie.png" }, // CONFLICT with pack-a
     bOnly: { image: "images/bonly.png" },
   },
-  items: {
-    health: { name: "Health B", image: "images/health.png", type: "misc" }, // CONFLICT
-  },
   prefabs: {
     spawner: { name: "spawner", components: {} }, // CONFLICT
   },
-  sounds: {
+  audio: {
     boom: { file: "audio/boom.ogg" }, // CONFLICT
   },
   // `manifest.scripts[]` retired — see pack-a comment above.
@@ -207,9 +207,8 @@ console.log("\n[1] detectConflicts on [A, B] reports B as the winner");
     `at least 6 asset-path conflicts (got ${byKind["asset-path"] ?? 0})`,
   );
   assertEqual(byKind["manifest-sprite"] ?? 0, 1, "1 sprite conflict (zombie)");
-  assertEqual(byKind["manifest-item"] ?? 0, 1, "1 item conflict (health)");
   assertEqual(byKind["manifest-prefab"] ?? 0, 1, "1 prefab conflict (spawner)");
-  assertEqual(byKind["manifest-sound"] ?? 0, 1, "1 sound conflict (boom)");
+  assertEqual(byKind["manifest-audio"] ?? 0, 1, "1 audio conflict (boom)");
   // `manifest-script` was retired post-WORLD_STATE — scripts now live
   // in `world.json.scripts[]`. The asset-path conflict on
   // `scripts/shared.js` still fires from the file-level path-collision
