@@ -7,6 +7,7 @@
     "dev": "bun --hot server.ts",
     "clean": "rm -rf dist",
     "build": "bun run clean && bun build index.html --outdir dist --splitting",
+    "build:pages": "bun run scripts/build-pages.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

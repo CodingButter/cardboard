@@ -19,12 +19,19 @@
       for both manifest and icons). Mirrors apps/game/index.html.
     -->
     <script>
+      // Inject manifest + icon links, prefixed with the deploy base
+      // path so they resolve under GitHub Pages (`/cardboard/`) as
+      // well as under the dev server (`/`).
       (function () {
         var head = document.head;
+        // Mirror the inference in apps/editor/src/lib/assetUrl.ts —
+        // recognise the known Pages subpath, otherwise root.
+        var path = window.location.pathname;
+        var base = path.indexOf("/cardboard/") === 0 ? "/cardboard" : "";
         function add(rel, href, extra) {
           var l = document.createElement("link");
           l.rel = rel;
-          l.href = href;
+          l.href = base + href;
           if (extra) for (var k in extra) l.setAttribute(k, extra[k]);
           head.appendChild(l);
         }
