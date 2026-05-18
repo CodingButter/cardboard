@@ -498,6 +498,89 @@ function ShellChrome({
     });
   }, []);
 
+  // ── Shell-level Home commands. These are always discoverable in the
+  // palette (regardless of which tab is active) because the shell is
+  // mounted for the entire session. Each `run` first navigates to Home
+  // and then triggers the corresponding action via a custom event the
+  // HomeScreen subscribes to. This pattern works for any "open this
+  // modal that lives in a particular view" command — the shell does
+  // the navigation, the view handles the action.
+  const navigateHomeRef = React.useRef(() => {
+    if (typeof window !== "undefined") {
+      window.location.hash = "#/";
+    }
+  });
+  React.useEffect(() => {
+    const fireOnHome = (eventName: string) => {
+      navigateHomeRef.current();
+      // Defer one frame so HomeScreen has mounted (and registered its
+      // listener) by the time we dispatch.
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent(eventName));
+      });
+    };
+    const unregs = [
+      registerCommand({
+        id: "homescreen.newProject",
+        title: "New Project",
+        category: "File",
+        keywords: ["new", "create", "project", "scaffold", "start"],
+        run: () => fireOnHome("cardboard:home-new-project"),
+      }),
+      registerCommand({
+        id: "homescreen.openUrlPack",
+        title: "Open Pack from URL",
+        category: "File",
+        keywords: ["open", "url", "import", "pack", "fetch", "remote"],
+        run: () => fireOnHome("cardboard:home-open-url-pack"),
+      }),
+    ];
+    return () => unregs.forEach((u) => u());
+  }, []);
+
+  // ── Shell-level dynamic project-list commands. We load the project
+  // list once at the shell so `homescreen.openProject.<id>` palette
+  // entries are available from any tab — not just Home. The list
+  // refreshes whenever the shell hears a `cardboard:projects-changed`
+  // event (HomeScreen dispatches this on create/rename/delete).
+  const [allProjects, setAllProjects] = React.useState<ProjectMeta[]>([]);
+  const onOpenProjectRef = React.useRef(onOpenProject);
+  React.useEffect(() => {
+    onOpenProjectRef.current = onOpenProject;
+  }, [onOpenProject]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await EditorProjectStore.listProjects();
+        if (!cancelled) setAllProjects(list);
+      } catch {
+        // ignore — empty list is a fine fallback
+      }
+    };
+    void refresh();
+    const onChanged = () => void refresh();
+    window.addEventListener("cardboard:projects-changed", onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("cardboard:projects-changed", onChanged);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const unregs = allProjects.map((p) =>
+      registerCommand({
+        id: `homescreen.openProject.${p.id}`,
+        title: `Open Project: ${p.name}`,
+        category: "File",
+        keywords: ["open", "project", p.name, p.id],
+        run: () => onOpenProjectRef.current(p.id),
+      }),
+    );
+    return () => unregs.forEach((u) => u());
+  }, [allProjects]);
+
   // ── Global keyboard handler. Mounts at the window level so a focus
   // anywhere in the editor can still reach the palette. Keybindings
   // attached to registered commands are wired automatically — each

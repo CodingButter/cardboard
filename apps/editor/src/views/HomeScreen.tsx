@@ -183,6 +183,42 @@ export function HomeScreen({
     return () => setSections([]);
   }, [projects, setSections]);
 
+  // ─── Command registry wiring ────────────────────────────────────────
+  // HomeScreen-owned commands. The static `homescreen.newProject` /
+  // `homescreen.openUrlPack` and the dynamic `homescreen.openProject.<id>`
+  // commands are registered at the SHELL level (EditorShell) so they're
+  // discoverable from ANY tab, not just Home. The shell dispatches the
+  // events below and HomeScreen reacts:
+  //   - cardboard:home-new-project    → opens the create-project modal
+  //   - cardboard:home-open-url-pack  → opens the URL-import modal
+  // Both events also navigate to the Home tab before firing (the shell's
+  // command handler takes care of that), so the modal is always visible
+  // when the action triggers. HomeScreen in turn fires
+  // `cardboard:projects-changed` when its project list mutates so the
+  // shell can refresh the per-project palette entries.
+
+  // Subscribe to the shell-level command events.
+  React.useEffect(() => {
+    const onNew = () => setCreateOpen(true);
+    const onUrl = () => setUrlOpen(true);
+    window.addEventListener("cardboard:home-new-project", onNew);
+    window.addEventListener("cardboard:home-open-url-pack", onUrl);
+    return () => {
+      window.removeEventListener("cardboard:home-new-project", onNew);
+      window.removeEventListener("cardboard:home-open-url-pack", onUrl);
+    };
+  }, []);
+
+  // Notify the shell whenever HomeScreen mutates the project list so
+  // it can refresh its own `homescreen.openProject.<id>` registration.
+  // The shell owns those commands so they're discoverable from any
+  // tab; HomeScreen only fires the change event.
+  React.useEffect(() => {
+    if (!loading) {
+      window.dispatchEvent(new CustomEvent("cardboard:projects-changed"));
+    }
+  }, [projects.length, loading]);
+
   // ─── Project name uniqueness helper ─────────────────────────────────
   // Tiny case-insensitive compare so "Untitled" and "untitled" clash.
   const nameTaken = React.useCallback(
