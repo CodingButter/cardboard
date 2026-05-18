@@ -12,7 +12,6 @@ import {
   DockPanelHeaderOrnamentsContext,
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
-import { useCtrlDragHostListeners } from "./useCtrlDragFloatToggle";
 import { assetUrl } from "../../lib/assetUrl";
 
 /**
@@ -89,6 +88,13 @@ export interface DockPanelDef {
    *  through dockview as `params.controls`. When omitted the
    *  header paints a muted chevron placeholder instead. */
   readonly controls?: React.ReactNode;
+  /** When true (the default), wrap the panel body in a raised surface
+   *  card (--color-bg-panel-surface + border-strong + rounded-md). The
+   *  inner panel body still uses h-full w-full. Set explicitly to
+   *  `false` for panels that should sit flush on the dock content
+   *  background (e.g. MapCanvasPanel, where the painter fills the
+   *  entire dock content area with no chrome). */
+  readonly surface?: boolean;
 }
 
 export interface DockShellProps {
@@ -301,6 +307,30 @@ function sanitizeLayout(layout: SerializedDockview): SerializedDockview {
   return next;
 }
 
+/**
+ * PanelSurface — raised-card wrapper for dock panels that opt into the
+ * `surface: true` flag on their `DockPanelDef`. Renders a
+ * --color-bg-panel-surface card with a strong border and rounded
+ * corners, sized to fill the dock content container's padded interior
+ * (the 8px padding lives on `.dv-content-container` itself, not here).
+ *
+ * Crucially this wrapper adds NO padding — the panel body decides
+ * what internal padding it wants. That keeps a panel free to render
+ * a tight grid (ToolPalette) or an edge-to-edge canvas (a future
+ * mini-map) without fighting an opinionated container.
+ */
+function PanelSurface({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="h-full w-full bg-(--color-bg-panel-surface) border border-(--color-border-strong) rounded-md">
+      {children}
+    </div>
+  );
+}
+
 export function DockShell({
   storageKey,
   panels,
@@ -314,11 +344,31 @@ export function DockShell({
   // Build the panel-id → React component map dockview consumes. Stable
   // across renders for a given `panels` array — the registry rarely
   // changes after first render, so keying by identity is fine.
+  //
+  // Panels default to `surface: true` — wrapped in `<PanelSurface/>`
+  // (--color-bg-panel-surface + border-strong + rounded-md). Panels
+  // that need to fill the dock content area flush (canvas painter,
+  // future fullscreen previews) opt out by setting `surface: false`
+  // explicitly. The dock content container's universal `p-2` provides
+  // 8px breathing room either way.
   const components = React.useMemo(() => {
     const map: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
       {};
     for (const p of panels) {
-      map[p.id] = p.component;
+      if (p.surface === false) {
+        map[p.id] = p.component;
+      } else {
+        const Inner = p.component;
+        const Wrapped: React.FunctionComponent<IDockviewPanelProps> = (
+          props,
+        ) => (
+          <PanelSurface>
+            <Inner {...props} />
+          </PanelSurface>
+        );
+        Wrapped.displayName = `PanelSurface(${p.id})`;
+        map[p.id] = Wrapped;
+      }
     }
     return map;
   }, [panels]);
@@ -328,12 +378,6 @@ export function DockShell({
   // share the same api), populate that too.
   const internalApiRef = React.useRef<DockviewApi | null>(null);
   const apiRef = externalApiRef ?? internalApiRef;
-
-  // Mount the global Ctrl-key listeners that arm the Ctrl-drag float
-  // toggle. The handlers themselves live on `DockPanelHeader` (each
-  // tab has its own pointerdown/up); this hook is purely the
-  // keyboard tracker + body-attribute toggle for visual feedback.
-  useCtrlDragHostListeners();
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {

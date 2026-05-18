@@ -1,10 +1,6 @@
 import React from "react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { cn } from "../../lib/cn";
-import {
-  findDockGroupElementAt,
-  getCtrlPressed,
-} from "./useCtrlDragFloatToggle";
 
 /**
  * Ornaments — non-serialisable React-node decorations the header
@@ -27,20 +23,18 @@ export const DockPanelHeaderOrnamentsContext = React.createContext<
 
 /**
  * DockPanelHeader — custom tab renderer for dockview that styles the
- * tab as a panel-header bar matching `Editor Design/Entities.png`.
+ * tab as a thin panel-header drag handle.
  *
  * dockview's API surface used:
  *   - `<DockviewReact defaultTabComponent={DockPanelHeader} />` — wires
  *     this React component as the tab renderer for every panel that
- *     does not specify a `tabComponent` override (see
- *     `dockview/dist/esm/dockview/dockview.d.ts` — IDockviewReactProps).
+ *     does not specify a `tabComponent` override.
  *   - `singleTabMode: 'fullwidth'` on the DockviewReact options forces
  *     groups containing exactly one panel to render their tab strip
- *     full-width (see options.d.ts). When combined with this renderer,
- *     a single-panel group looks like a panel-header bar; when the
- *     user drags a second panel into the same group, dockview
- *     automatically reverts to its narrow-tab look — that's correct
- *     fallback behaviour.
+ *     full-width. With this renderer, a single-panel group looks like
+ *     a panel-header bar; when the user drags a second panel into the
+ *     same group, dockview automatically reverts to its narrow-tab
+ *     look — that's correct fallback behaviour.
  *
  * Header shape:
  *   - 22px bar (driven by --dv-tabs-and-actions-container-height)
@@ -49,44 +43,19 @@ export const DockPanelHeaderOrnamentsContext = React.createContext<
  *   - small-caps uppercase title, text-[11px] tracking-wider
  *   - optional right controls slot (params.controls — a node) for
  *     inline filter chips, dropdowns, etc. Nothing rendered when
- *     absent (no placeholder chevron — non-functional UI was
- *     confusing users).
- *   - clicking-and-dragging the bar still feeds dockview's native
- *     reorder/split/popout machinery (dockview attaches its DnD
- *     listeners to the element this component renders).
- *
- * Ctrl+drag popout toggle (DockShell wires the keyboard listener):
- *   - Ctrl+drag from a docked tab → release in empty space spawns
- *     the panel in a popout browser window. The window opens at the
- *     pointer's screen position (ev.screenX/Y), so the popout lands
- *     under the cursor. When the editor is installed as a PWA, the
- *     popout window inherits standalone display mode — chrome-less
- *     by default.
- *   - To dock a popout back, drag its tab onto the main window's
- *     dock zones (dockview's native cross-window drag handles this —
- *     no Ctrl required, no cross-window event plumbing on our side).
- *   - Ctrl+drag on a legacy in-page floating panel → dock back into
- *     the group under the release point. The in-page floating
- *     concept was retired; this branch only exists to keep older
- *     persisted layouts (with floating groups) recoverable.
- *
- *   When Ctrl is NOT held, dockview's native drag behaviour is
- *   untouched. The pointerdown handler explicitly does NOT
- *   `preventDefault()` unless Ctrl is held, so non-Ctrl drags hand
- *   off to dockview's HTML5 DnD code cleanly. When Ctrl IS held, we
- *   call `preventDefault()` to suppress dockview's native drag and
- *   take pointer capture ourselves, then trigger the popout/dock
- *   action on the eventual pointerup.
+ *     absent.
+ *   - clicking-and-dragging the bar feeds dockview's native
+ *     reorder / split / drag-out-to-popout machinery. Dragging the
+ *     tab off the editor window spawns a popout browser window
+ *     (chrome-less in the installed PWA) via dockview's HTML5 DnD
+ *     pipeline — that is the canonical popout gesture. No custom
+ *     Ctrl-modifier here; an earlier Ctrl+drag prototype proved
+ *     fragile across browser-tab vs PWA contexts and was removed.
  */
-
-const CTRL_DRAG_THRESHOLD_PX = 6;
-const CTRL_DRAG_POPOUT_W = 480;
-const CTRL_DRAG_POPOUT_H = 360;
-
 export function DockPanelHeader(
   props: IDockviewPanelHeaderProps,
 ): React.JSX.Element | null {
-  const { api, containerApi } = props;
+  const { api } = props;
   // Subscribe to title changes — dockview can update the title at
   // runtime via api.setTitle() so we mirror that into local state.
   const [title, setTitle] = React.useState<string>(api.title ?? "");
@@ -103,228 +72,8 @@ export function DockPanelHeader(
   // field is still consumed by DocksModal (panel-discovery card grid).
   const controls = own.controls ?? null;
 
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
-
-  // Ctrl+drag pointer handlers. We keep state in refs because the
-  // gesture is a pure DOM interaction; React state would trigger
-  // re-renders on every move which would chew CPU on a dense layout
-  // with many tabs.
-  const ctrlDragRef = React.useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    started: boolean;
-    wasFloating: boolean;
-  } | null>(null);
-
-  const clearCtrlDragVisual = React.useCallback(() => {
-    if (rootRef.current) {
-      rootRef.current.removeAttribute("data-ctrl-drag");
-    }
-  }, []);
-
-  const onPointerDown = React.useCallback(
-    (ev: React.PointerEvent<HTMLDivElement>) => {
-      // Only left button. Other buttons fall through to dockview /
-      // browser-default context menus.
-      if (ev.button !== 0) return;
-      if (!getCtrlPressed()) return;
-      // Capture before stopping propagation so dockview's drag-start
-      // handler (registered on the same element) doesn't kick in. We
-      // can't actually cancel dockview's listener — it's attached
-      // separately — but stopping propagation and preventing the
-      // native HTML5 drag is enough since dockview's drag handle
-      // relies on a `dragstart` it never receives once we suppress
-      // pointer-based interaction.
-      ev.preventDefault();
-      ev.stopPropagation();
-
-      const target = ev.currentTarget;
-      try {
-        target.setPointerCapture(ev.pointerId);
-      } catch {
-        // ignore — some browsers refuse capture mid-pointerdown
-      }
-
-      ctrlDragRef.current = {
-        pointerId: ev.pointerId,
-        startX: ev.clientX,
-        startY: ev.clientY,
-        started: false,
-        wasFloating: api.location.type === "floating",
-      };
-    },
-    [api],
-  );
-
-  const onPointerMove = React.useCallback(
-    (ev: React.PointerEvent<HTMLDivElement>) => {
-      const state = ctrlDragRef.current;
-      if (!state) return;
-      if (ev.pointerId !== state.pointerId) return;
-      if (state.started) return;
-      const dx = ev.clientX - state.startX;
-      const dy = ev.clientY - state.startY;
-      if (dx * dx + dy * dy < CTRL_DRAG_THRESHOLD_PX * CTRL_DRAG_THRESHOLD_PX) {
-        return;
-      }
-      state.started = true;
-      // Apply in-progress visual.
-      if (rootRef.current) {
-        rootRef.current.setAttribute("data-ctrl-drag", "active");
-      }
-    },
-    [],
-  );
-
-  const onPointerUp = React.useCallback(
-    (ev: React.PointerEvent<HTMLDivElement>) => {
-      const state = ctrlDragRef.current;
-      if (!state) return;
-      if (ev.pointerId !== state.pointerId) return;
-      const target = ev.currentTarget;
-      try {
-        target.releasePointerCapture(ev.pointerId);
-      } catch {
-        // ignore
-      }
-      ctrlDragRef.current = null;
-      clearCtrlDragVisual();
-
-      // If the pointer never moved past the threshold treat this as
-      // a click — no float/dock action. dockview's tab-click logic
-      // already ran (it listens on the same element via React's
-      // SyntheticEvent system); the panel is already active.
-      if (!state.started) return;
-
-      // Releasing Ctrl mid-drag aborts the gesture — the user
-      // changed their mind about toggling float state. We've
-      // already suppressed dockview's native drag for this pointer
-      // sequence so the panel simply stays put.
-      if (!getCtrlPressed() && !ev.ctrlKey) return;
-
-      // Resolve the live IDockviewPanel via the containerApi — we
-      // can't trust the closure-captured `api` in pathological cases
-      // (e.g. the panel was replaced mid-drag).
-      const panel = containerApi.getPanel(api.id);
-      if (!panel) return;
-
-      if (state.wasFloating) {
-        // Floating → docked. Hit-test the document at the release
-        // point; find the corresponding DockviewGroupPanel via DOM
-        // identity match against api.groups[*].element.
-        const groupEl = findDockGroupElementAt(ev.clientX, ev.clientY);
-        if (!groupEl) return; // no docked target — leave float in place
-        // `containerApi.groups` returns the concrete
-        // `DockviewGroupPanel[]` (the type `panel.api.moveTo` expects
-        // for its `group` field). Each group exposes its container
-        // node via `.element` — we identity-match the hit-tested
-        // element against the group elements to recover the live
-        // group reference.
-        const groups = containerApi.groups;
-        type GroupWithEl = (typeof groups)[number] & { element?: HTMLElement };
-        let targetGroup: (typeof groups)[number] | null = null;
-        for (const g of groups) {
-          const el = (g as GroupWithEl).element;
-          if (!el) continue;
-          if (el === groupEl || el.contains(groupEl) || groupEl.contains(el)) {
-            targetGroup = g;
-            break;
-          }
-        }
-        if (!targetGroup) return;
-        try {
-          panel.api.moveTo({
-            group: targetGroup,
-            position: "center",
-          });
-        } catch {
-          // dockview rejected the move — non-fatal; float stays put.
-        }
-        return;
-      }
-
-      // Docked → popout. dockview's `addPopoutGroup` spawns a new
-      // browser window (via window.open under the hood). Two fixups
-      // around dockview's default behaviour:
-      //
-      // 1. **Position**: dockview's PopoutWindow internally computes
-      //    `final.left = window.screenX + box.left` (see
-      //    dockview-core/popoutWindow). To land the popout under the
-      //    pointer release point, the box.left we pass must be in
-      //    EDITOR-WINDOW coordinates (clientX/Y), not screen coords —
-      //    dockview adds the editor window's screen origin itself.
-      //
-      // 2. **popup=yes**: dockview builds `top=...,left=...,
-      //    width=...,height=...` as window.open features and never
-      //    sets `popup=yes`. Chrome 120+ has been treating this as
-      //    "open in a tab in an existing window" — particularly when
-      //    the editor is itself a PWA, the new window inherits the
-      //    PWA chrome but lands inside a different already-open
-      //    Chrome window as a tab. Wrapping `window.open` for the
-      //    duration of dockview's async open call lets us inject
-      //    `popup=yes` into the features string so Chrome opens a
-      //    real popup window (chrome-less when launched from a PWA,
-      //    minimal-chrome popup otherwise).
-      const localX = Math.max(0, Math.round(ev.clientX - 24));
-      const localY = Math.max(0, Math.round(ev.clientY - 12));
-
-      const win = window as Window & { open: typeof window.open };
-      const origOpen = win.open.bind(window);
-      const wrappedOpen: typeof window.open = (
-        url?: string | URL,
-        target?: string,
-        features?: string,
-      ) => {
-        const enhanced = features ? `${features},popup=yes` : "popup=yes";
-        return origOpen(url, target, enhanced);
-      };
-      win.open = wrappedOpen;
-
-      void containerApi
-        .addPopoutGroup(panel, {
-          position: {
-            left: localX,
-            top: localY,
-            width: CTRL_DRAG_POPOUT_W,
-            height: CTRL_DRAG_POPOUT_H,
-          },
-        })
-        .catch(() => {
-          // Popup blocker or dockview rejection. Non-fatal — the
-          // panel keeps its docked location. Browsers may block the
-          // popup if the gesture chain is broken (e.g. the user took
-          // a long pause between pointerdown and pointerup); the
-          // user can retry.
-        })
-        .finally(() => {
-          // Restore the original window.open as soon as dockview's
-          // async open is done. The actual window.open call inside
-          // dockview happens in the synchronous prelude of the async
-          // function (before any await yields), so by the time this
-          // finally runs the popup has already been launched.
-          if (win.open === wrappedOpen) {
-            win.open = origOpen;
-          }
-        });
-    },
-    [api, clearCtrlDragVisual, containerApi],
-  );
-
-  const onPointerCancel = React.useCallback(
-    (ev: React.PointerEvent<HTMLDivElement>) => {
-      const state = ctrlDragRef.current;
-      if (!state) return;
-      if (ev.pointerId !== state.pointerId) return;
-      ctrlDragRef.current = null;
-      clearCtrlDragVisual();
-    },
-    [clearCtrlDragVisual],
-  );
-
   return (
     <div
-      ref={rootRef}
       className={cn(
         // Header bar geometry — full height of dockview's tab strip
         // (driven by --dv-tabs-and-actions-container-height, currently
@@ -339,24 +88,9 @@ export function DockPanelHeader(
         "text-[11px] font-medium uppercase tracking-wider",
         "select-none",
         "cursor-grab active:cursor-grabbing",
-        // Visual feedback for Ctrl-drag. Two layers:
-        //   - Armed (Ctrl held, no drag yet): a soft amber outline
-        //     hints that Ctrl-drag is available. Driven by a body
-        //     attribute set by useCtrlDragFloatToggle.
-        //   - Active (drag in progress): a stronger amber tint +
-        //     grabbing cursor. Driven by our own data attribute set
-        //     in pointermove once the threshold is crossed.
-        "data-[ctrl-drag=active]:cursor-grabbing",
-        "data-[ctrl-drag=active]:bg-amber-500/30",
       )}
       data-dock-panel-header
-      // Forward a couple of useful identifiers so the popout-gesture
-      // layer can find the right panel from a pointer hit-test.
       data-panel-id={api.id}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
     >
       <span className="dock-panel-header__title flex-1 truncate">{title}</span>
       {controls ? (

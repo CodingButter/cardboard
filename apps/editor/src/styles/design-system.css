@@ -592,8 +592,8 @@
  *   node_modules/dockview/dist/styles/dockview.css → `.dockview-theme-dark`.
  *
  * The mapping:
- *   - group/tab bar background     → --color-bg-tabs   (#272727)
- *   - active panel background      → --color-bg-panel  (#272727)
+ *   - group/tab bar background     → --color-bg-tabs   (#18181b / zinc-900)
+ *   - active panel background      → --color-bg-panel  (#18181b / zinc-900)
  *   - inactive panel/tab tint      → --color-bg-card
  *   - tab text (active / inactive) → zinc-100 / zinc-400 ramp
  *   - active tab underline / accent→ --color-accent    (amber)
@@ -714,11 +714,17 @@
 .dockview-theme-cardboard .dv-content-container,
 .dockview-theme-cardboard .dockview-theme-abyss .dv-content-container {
   /* Page-bg colour — the dock content container is just a positional
-   * wrapper. Each panel body renders the only visible surface
-   * (--color-bg-panel-surface + border + radius), so any dock-level
-   * background would compete with that and create the double-surface
-   * look. */
+   * wrapper. Panels that opt into the raised-card look via
+   * `surface: true` on their DockPanelDef get wrapped in a
+   * `<PanelSurface/>` (--color-bg-panel-surface + border-strong +
+   * rounded-md); panels that don't sit flush on this page-bg surface. */
   background: var(--color-bg-panel);
+  /* Universal 8px breathing room around every panel body. The dock
+   * content container owns this padding so individual panels don't
+   * have to repeat their own outer `p-2` wrapper. PanelSurface (when
+   * present) fills the padded interior; panel bodies decide their
+   * own internal padding. */
+  padding: 0.5rem;
 }
 /* (Both `--dv-group-view-background-color` and panel-body content
  * background are already pinned to `--color-bg-card` in the main

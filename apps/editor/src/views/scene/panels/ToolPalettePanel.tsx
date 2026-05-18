@@ -130,64 +130,73 @@ export function ToolPalettePanel(): React.JSX.Element {
   const tool = findTool(activeTool);
   const subTools = tool?.subTools;
 
+  // Outer container is just the `data-panel` hook. The dock content
+  // container provides the 8px outer padding (universal `p-2` on
+  // `.dv-content-container`), and DockShell wraps this body in
+  // `<PanelSurface/>` because the MapView registry sets
+  // `surface: true` on this panel's DockPanelDef. The inner `p-2 flex
+  // flex-col gap-2` is the panel's own internal padding — the breathing
+  // room inside the raised surface card around the tool grid + sub-tool
+  // strip.
   return (
-    <div data-panel="tool-palette" className="h-full w-full p-2">
-      <div className="h-full w-full bg-(--color-bg-panel-surface) border border-(--color-border-strong) rounded-md p-2 flex flex-col gap-2">
-        <div className="grid grid-cols-3 grid-rows-2 gap-1">
-          {MOCK_TOOLS.map((t) => {
-            const Icon = TOOL_ICON_BY_NAME[t.icon];
-            const active = t.id === activeTool;
+    <div
+      data-panel="tool-palette"
+      className="h-full w-full p-2 flex flex-col gap-2"
+    >
+      <div className="grid grid-cols-3 grid-rows-2 gap-1">
+        {MOCK_TOOLS.map((t) => {
+          const Icon = TOOL_ICON_BY_NAME[t.icon];
+          const active = t.id === activeTool;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              title={t.name}
+              aria-pressed={active}
+              onClick={() => handleToolClick(t.id)}
+              className={[
+                "h-12 w-full rounded",
+                "flex flex-col items-center justify-center gap-0.5",
+                "border transition-colors",
+                active
+                  ? "bg-amber-500 border-amber-500 text-zinc-950"
+                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+              ].join(" ")}
+            >
+              {Icon ? <Icon size={14} aria-hidden="true" /> : null}
+              <span className="text-[8px] uppercase tracking-wider leading-tight">
+                {t.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {subTools && subTools.length > 0 ? (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {subTools.map((s) => {
+            const active = s.id === activeSubTool;
             return (
               <button
-                key={t.id}
+                key={s.id}
                 type="button"
-                title={t.name}
                 aria-pressed={active}
-                onClick={() => handleToolClick(t.id)}
+                title={s.name}
+                onClick={() => handleSubToolClick(s.id)}
                 className={[
-                  "h-12 w-full rounded",
-                  "flex flex-col items-center justify-center gap-0.5",
+                  "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
                   "border transition-colors",
                   active
                     ? "bg-amber-500 border-amber-500 text-zinc-950"
                     : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 ].join(" ")}
               >
-                {Icon ? <Icon size={14} aria-hidden="true" /> : null}
-                <span className="text-[8px] uppercase tracking-wider leading-tight">
-                  {t.name}
-                </span>
+                {s.name}
               </button>
             );
           })}
         </div>
-
-        {subTools && subTools.length > 0 ? (
-          <div className="flex flex-wrap gap-1 pt-1">
-            {subTools.map((s) => {
-              const active = s.id === activeSubTool;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  aria-pressed={active}
-                  title={s.name}
-                  onClick={() => handleSubToolClick(s.id)}
-                  className={[
-                    "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                    "border transition-colors",
-                    active
-                      ? "bg-amber-500 border-amber-500 text-zinc-950"
-                      : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                  ].join(" ")}
-                >
-                  {s.name}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
     </div>
   );
 }

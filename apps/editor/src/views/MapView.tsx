@@ -120,10 +120,14 @@ export interface MapViewProps {
  *  component file so adding a new panel is a one-import operation
  *  here. */
 const PANELS: readonly DockPanelDef[] = [
+  // `surface` defaults to true — every panel gets a raised
+  // PanelSurface card unless it explicitly opts out. MapCanvas opts
+  // out so the painter fills the dock content area flush (no card
+  // chrome around the canvas).
   { ...TOOL_PALETTE_MANIFEST, component: ToolPalettePanel },
   { ...BRUSH_MANIFEST, component: BrushPanel },
   { ...TILE_PRESET_MANIFEST, component: TilePresetPanel },
-  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel },
+  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false },
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
   { ...LAYERS_MANIFEST, component: LayersPanel },
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },

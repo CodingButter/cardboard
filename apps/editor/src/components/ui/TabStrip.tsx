@@ -76,9 +76,9 @@ export function TabStrip<T extends string>({
   // panels inherit `--color-bg-panel` (same value today, kept as a
   // distinct token so the two can diverge later without retuning
   // every panel call site).
-  // border-b uses zinc-700/60 so it actually contrasts with the new
-  // --color-bg-tabs (#272727) — plain border-zinc-800 reads as the
-  // same colour as the tabs-row bg after the theme retune.
+  // border-b uses zinc-700/60 so it actually contrasts with the
+  // --color-bg-tabs (#18181b / zinc-900) — plain border-zinc-800
+  // reads as the same colour as the tabs-row bg after the theme retune.
   const containerClasses =
     variant === "primary"
       ? "flex items-stretch h-12 border-b border-zinc-700/60 bg-(--color-bg-tabs)"
