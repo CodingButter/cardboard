@@ -373,11 +373,19 @@ export function DockShell({
               storageKey,
             },
             position: { direction: "left" },
-            // Rail starts narrow but the user can drag the splitter
-            // wider/narrower (dockview enforces a minimum based on
-            // the panel content's intrinsic measure, typically ~40px).
+            // Rail is locked to a 40px strip on the docked axis from
+            // the moment the panel is created — dockview's gridview
+            // defaults a minimum of ~100px when these aren't set, so
+            // initialWidth alone leaves the rail at 100px. Passing
+            // min + max on the addPanel options bypasses that default.
+            // The opposite axis stays loose (minimum 40, no max) so
+            // the rail still flexes to its container along the long
+            // edge. syncWorkspaceOrientation re-asserts these when
+            // the user drags the rail to a different edge.
             initialWidth: WORKSPACE_DEFAULT_WIDTH,
-            minimumWidth: 40,
+            minimumWidth: WORKSPACE_DEFAULT_WIDTH,
+            maximumWidth: WORKSPACE_DEFAULT_WIDTH,
+            minimumHeight: WORKSPACE_DEFAULT_WIDTH,
           });
         } catch {
           // Adding the panel failed — surface nothing to the user;
@@ -440,8 +448,16 @@ export function DockShell({
         const w = group.api.width;
         const h = group.api.height;
         if (typeof w !== "number" || typeof h !== "number") return;
+        // Skip if the panel hasn't been laid out yet — w or h being
+        // zero means dockview is still bootstrapping. Earlier `w >= h`
+        // returned 0>=0 = true for the initial render, which
+        // incorrectly latched the orientation cache to "landscape"
+        // and pinned height instead of width — left the rail at
+        // dockview's 100px gridview default and the constraints never
+        // recovered.
+        if (w === 0 || h === 0) return;
         const orientation: "landscape" | "portrait" =
-          w >= h ? "landscape" : "portrait";
+          w > h ? "landscape" : "portrait";
         if (orientation === lastOrientation) return;
         lastOrientation = orientation;
         const isLandscape = orientation === "landscape";
