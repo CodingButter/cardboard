@@ -24,7 +24,6 @@ import { ComponentsView } from "../views/ComponentsView";
 import { EditorSettingsModal } from "../views/EditorSettingsModal";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatusBarProvider } from "./StatusBarContext";
-import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 import {
   EditorActionsProvider,
@@ -734,7 +733,6 @@ function ShellChrome({
       {/* `projectId` is intentionally threaded through ShellBody so
           HomeScreen can read it as `currentProjectId` and highlight
           the active project even when rendered without a tab segment. */}
-      <StatusBar projectName={projectName || undefined} />
     </div>
   );
 }
