@@ -13,6 +13,8 @@ import {
 import { cn } from "../lib/cn";
 import { Button } from "../components/ui";
 import { UserAvatar } from "./UserAvatar";
+import { PaletteSearchInput } from "../components/palette/PaletteSearchInput";
+import { registerCommand } from "../state/useCommandStore";
 import logoUrl from "../assets/logo.png" with { type: "file" };
 import type { SaveState } from "../components/ui/TopBar";
 
@@ -68,6 +70,62 @@ export function TopBar({
 }: ShellTopBarProps) {
   const NOT_AVAILABLE_HINT = "Not available in this view.";
 
+  // Register the four TopBar commands once. Each callback closes over
+  // the latest prop via a ref so the registration doesn't need to
+  // re-run on every prop change.
+  const handlersRef = React.useRef({
+    onSave,
+    onExport,
+    onOpenSettings,
+    onTogglePlaytest,
+  });
+  React.useEffect(() => {
+    handlersRef.current = {
+      onSave,
+      onExport,
+      onOpenSettings,
+      onTogglePlaytest,
+    };
+  }, [onSave, onExport, onOpenSettings, onTogglePlaytest]);
+
+  React.useEffect(() => {
+    const unregs = [
+      registerCommand({
+        id: "file.save",
+        title: "Save Project",
+        category: "File",
+        keybinding: "Ctrl+S",
+        keywords: ["save", "write", "persist"],
+        run: () => handlersRef.current.onSave(),
+      }),
+      registerCommand({
+        id: "file.export",
+        title: "Export Pack",
+        category: "File",
+        keywords: ["export", "build", "ship", "apg"],
+        run: () => handlersRef.current.onExport(),
+      }),
+      registerCommand({
+        id: "editor.openSettings",
+        title: "Open Editor Settings",
+        category: "Edit",
+        keywords: ["preferences", "config", "options"],
+        run: () => handlersRef.current.onOpenSettings(),
+      }),
+      registerCommand({
+        id: "playtest.toggle",
+        title: "Toggle Playtest",
+        category: "View",
+        keywords: ["play", "run", "test"],
+        run: () => {
+          const fn = handlersRef.current.onTogglePlaytest;
+          if (fn) fn();
+        },
+      }),
+    ];
+    return () => unregs.forEach((u) => u());
+  }, []);
+
   return (
     <header
       className={cn(
@@ -96,8 +154,14 @@ export function TopBar({
         </div>
       </div>
 
-      {/* Flex spacer — future contextual project meta lives here. */}
-      <div className="flex-1" />
+      {/* Flex spacer — hosts the centred command-palette search box.
+          The button is width-constrained so it never crowds the brand
+          or the right-side actions. */}
+      <div className="flex-1 flex justify-center min-w-0 px-4">
+        <div className="w-full max-w-md">
+          <PaletteSearchInput />
+        </div>
+      </div>
 
       {/* Right-side actions. Top-bar buttons run at h-7 (28px) — denser
           than the default .button-* h-9 to match the chrome rhythm of

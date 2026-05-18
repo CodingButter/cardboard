@@ -33,12 +33,21 @@ import {
 import { ActiveSceneProvider } from "./ActiveSceneContext";
 import {
   PrimaryTabs,
+  PRIMARY_TABS,
   PRIMARY_TAB_ORDER,
   readPersistedTab,
   writePersistedTab,
   type PrimaryTabId,
 } from "./PrimaryTabs";
 import { TabContextSlotProvider } from "../lib/tabContextSlot";
+import { CommandPalette, usePaletteUI } from "../components/palette/CommandPalette";
+import {
+  useCommandStore,
+  registerCommand,
+} from "../state/useCommandStore";
+import { registerSetting } from "../state/useSettingsStore";
+import { useFileIndex, classifyAssetPath } from "../state/useFileIndex";
+import { matchKeybinding } from "../lib/keybinding";
 
 /**
  * localStorage mirror of the current project id, used as a fallback
@@ -243,6 +252,21 @@ export function EditorShell() {
   const [assets, setAssets] = React.useState<AssetMeta[]>([]);
   const [refreshTick, setRefreshTick] = React.useState(0);
 
+  // Sync the file index store as assets change so the command palette
+  // can drive its file-mode search off a single in-memory source. The
+  // palette doesn't re-fetch from IDB on every keystroke — we mirror
+  // the list once per project change here.
+  const setFileIndex = useFileIndex((s) => s.setFiles);
+  React.useEffect(() => {
+    setFileIndex(
+      assets.map((a) => ({
+        id: a.path,
+        path: a.path,
+        type: classifyAssetPath(a.path),
+      })),
+    );
+  }, [assets, setFileIndex]);
+
   React.useEffect(() => {
     if (!projectId) {
       setMeta(null);
@@ -349,6 +373,7 @@ export function EditorShell() {
               the right edge of the tab strip with whatever tab is
               active driving its visibility. */}
           <TabContextSlotProvider>
+            <CommandPalette />
             <ShellChrome
               projectName={projectName}
               tab={tab}
@@ -435,6 +460,97 @@ function ShellChrome({
       },
     });
   }, [register]);
+
+  // ── Navigation commands. One per primary tab; their `run` handlers
+  // close over the live `setTab` setter. Disabled tabs (no open
+  // project) still register so the palette can SHOW them, but invoking
+  // them when no project is open is a no-op via PrimaryTabs' own
+  // `hasProject` gate.
+  const setTabRef = React.useRef(setTab);
+  React.useEffect(() => {
+    setTabRef.current = setTab;
+  }, [setTab]);
+  React.useEffect(() => {
+    const unregs = PRIMARY_TABS.map((tab) =>
+      registerCommand({
+        id: `navigation.open${tab.id.charAt(0).toUpperCase()}${tab.id.slice(1)}`,
+        title: `Go to ${tab.label}`,
+        category: "Navigation",
+        keywords: [tab.id, tab.label, "tab", "open"],
+        run: () => setTabRef.current(tab.id),
+      }),
+    );
+    return () => unregs.forEach((u) => u());
+  }, []);
+
+  // ── Demo setting registration. `editor.userInitials` already flows
+  // through TopBar as a prop; register it here so the settings store
+  // owns the canonical default + scope.
+  React.useEffect(() => {
+    return registerSetting<string>({
+      id: "editor.userInitials",
+      title: "User initials",
+      category: "Account",
+      description: "Two-letter monogram shown in the user avatar chip.",
+      type: "string",
+      default: "JD",
+      scope: "global",
+    });
+  }, []);
+
+  // ── Global keyboard handler. Mounts at the window level so a focus
+  // anywhere in the editor can still reach the palette. Keybindings
+  // attached to registered commands are wired automatically — each
+  // command's `keybinding` string is parsed and matched against every
+  // keydown.
+  const openPalette = usePaletteUI((s) => s.openPalette);
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Don't swallow keys while the user is typing in a real input
+      // EXCEPT for the palette keybindings themselves and any
+      // explicitly-registered command keybindings that include a
+      // modifier (Ctrl/Cmd/Alt) — those are intentional global
+      // shortcuts and should still fire from inside an input.
+      const target = e.target as HTMLElement | null;
+      const inEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          (target as HTMLElement).isContentEditable);
+
+      // Palette open shortcuts.
+      if (matchKeybinding(e, "Ctrl+Shift+P")) {
+        e.preventDefault();
+        e.stopPropagation();
+        openPalette("command");
+        return;
+      }
+      if (matchKeybinding(e, "Ctrl+P")) {
+        e.preventDefault();
+        e.stopPropagation();
+        openPalette("file");
+        return;
+      }
+
+      // Walk registered commands' keybindings. A modifier is required
+      // when firing from inside an editable element to avoid hijacking
+      // plain letter keys mid-typing.
+      const commands = useCommandStore.getState().commands;
+      for (const cmd of Object.values(commands)) {
+        if (!cmd.keybinding) continue;
+        if (!matchKeybinding(e, cmd.keybinding)) continue;
+        const hasModifier =
+          e.ctrlKey || e.metaKey || e.altKey || e.shiftKey;
+        if (inEditable && !hasModifier) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        void useCommandStore.getState().runById(cmd.id);
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openPalette]);
 
   const actions = useEditorActionsState();
 

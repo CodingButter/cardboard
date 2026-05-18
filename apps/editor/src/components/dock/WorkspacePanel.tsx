@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useWorkspaceStore } from "../../state/useWorkspaceStore";
+import { registerCommand } from "../../state/useCommandStore";
 import { Modal } from "../ui/Modal";
 import { LayoutsModal } from "./LayoutsModal";
 import { DocksModal } from "./DocksModal";
@@ -254,7 +255,7 @@ export function WorkspaceRail({
     };
   }, [apiReady, apiRef]);
 
-  const onResetLayout = () => {
+  const onResetLayout = React.useCallback(() => {
     if (!storageKey) return;
     setDockLayout(storageKey, null);
     window.dispatchEvent(
@@ -262,7 +263,42 @@ export function WorkspaceRail({
         detail: { storageKey },
       }),
     );
-  };
+  }, [storageKey, setDockLayout]);
+
+  // Register workspace commands while the rail is mounted. The
+  // commands are page-scoped — they reference the current `storageKey`
+  // via a ref so they keep matching the active page when the user
+  // navigates between tabs. Cleanup on unmount.
+  const resetRef = React.useRef(onResetLayout);
+  React.useEffect(() => {
+    resetRef.current = onResetLayout;
+  }, [onResetLayout]);
+  React.useEffect(() => {
+    const unregs = [
+      registerCommand({
+        id: "workspace.resetLayout",
+        title: "Reset Workspace Layout",
+        category: "Workspace",
+        keywords: ["reset", "layout", "workspace", "panels", "dock"],
+        run: () => resetRef.current(),
+      }),
+      registerCommand({
+        id: "workspace.openLayouts",
+        title: "Open Layouts",
+        category: "Workspace",
+        keywords: ["layouts", "presets", "save layout"],
+        run: () => setLayoutsOpen(true),
+      }),
+      registerCommand({
+        id: "workspace.openDocks",
+        title: "Open Docks",
+        category: "Workspace",
+        keywords: ["docks", "panels", "add panel"],
+        run: () => setDocksOpen(true),
+      }),
+    ];
+    return () => unregs.forEach((u) => u());
+  }, []);
 
   return (
     <aside
