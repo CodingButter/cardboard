@@ -312,6 +312,22 @@ export function WorkspaceRail({
         tabIndex={-1}
         aria-hidden={!dragActive}
         title="Drop here to remove panel"
+        // HTML5 drag-and-drop shows the "not-allowed" cursor by
+        // default UNLESS the drop target preventDefaults dragover.
+        // Without this the browser overrides our cursor styling
+        // with the ⊘ glyph even though our pointer-based handler
+        // does accept the drop. preventDefault on dragover +
+        // setting dropEffect = 'move' tells the browser "yes I
+        // accept this", which gives us the move/copy cursor.
+        onDragOver={(e) => {
+          if (!dragActive) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        }}
+        onDragEnter={(e) => {
+          if (!dragActive) return;
+          e.preventDefault();
+        }}
         className={cn(
           "workspace-rail-icon",
           "h-9 w-9 inline-flex items-center justify-center rounded",

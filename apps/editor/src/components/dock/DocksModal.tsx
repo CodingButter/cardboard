@@ -96,6 +96,14 @@ export function DocksModal({
                 // Some browsers require a text/plain payload for the
                 // drop to fire reliably across windows.
                 e.dataTransfer.setData("text/plain", def.id);
+                // Dismiss the modal so the user can drop into the
+                // dockview area beneath. HTML5 drags survive removal
+                // of the source DOM — the dataTransfer payload is
+                // preserved through dragend regardless of whether the
+                // source element still exists. Without this the modal
+                // backdrop blocks pointer events from reaching
+                // dockview and the drop never fires.
+                onClose();
               }}
               className={cn(
                 "relative flex flex-col items-center justify-center gap-2",
