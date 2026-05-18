@@ -2,14 +2,17 @@
   "name": "two_5_d",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "cd apps/game && bun run dev",
+    "dev": "bun run dev:editor & bun run dev:game & wait",
+    "dev:game": "cd apps/game && bun run dev",
     "dev:editor": "cd apps/editor && bun run dev",
     "docs:dev": "cd apps/docs && bun run dev",
     "docs:build": "cd apps/docs && bun run build",
     "build:game-for-docs": "bun scripts/build-game-for-docs.ts",
-    "build:editor-for-docs": "bun scripts/build-editor-for-docs.ts",
     "build:editor-for-docs": "bun scripts/build-editor-for-docs.ts",
     "build": "cd apps/game && bun run build",
     "build-packs": "cd apps/pack-builder && bun run build-packs",

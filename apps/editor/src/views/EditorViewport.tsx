@@ -108,6 +108,13 @@ export interface EditorViewportProps {
   ) => void;
   onEditPreset?: (id: string) => void;
   onPresetContextMenu?: (id: string, x: number, y: number) => void;
+  /** Hide GridEditor's internal left palette aside. Threaded into
+   *  GridEditor — see its `hidePalette` prop. MapView's §7.2 layout
+   *  sets this so the palette renders in MapView's own left rail. */
+  hidePalette?: boolean;
+  /** Hide GridEditor's internal right inspector aside. MapView's right
+   *  rail carries the inspector instead. */
+  hideInspector?: boolean;
 }
 
 /** Messages the iframe sends back. See EDITOR_IFRAME.md §6. */
@@ -153,6 +160,8 @@ export function EditorViewport({
   onCellContextMenu,
   onEditPreset,
   onPresetContextMenu,
+  hidePalette,
+  hideInspector,
 }: EditorViewportProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror the iframe element through the parent-supplied ref so the
@@ -368,6 +377,8 @@ export function EditorViewport({
             onCellContextMenu={onCellContextMenu}
             onEditPreset={onEditPreset}
             onPresetContextMenu={onPresetContextMenu}
+            hidePalette={hidePalette}
+            hideInspector={hideInspector}
           />
         </div>
       ) : mode === "edit" ? (

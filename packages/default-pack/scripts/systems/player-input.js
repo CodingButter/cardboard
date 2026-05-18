@@ -49,6 +49,15 @@ export default (api) => {
   let wasReloadKeyHeld = false;
   let wasJumpHeld = false;
 
+  // Throttled `player:moved` (EVENTS.md §4.3) — pack-side after
+  // PREFABS_EDITOR_ONLY.md §17. Emit on cell-boundary cross OR every
+  // Nth frame, whichever first. The throttle constant matches the
+  // engine's previous `PLAYER_MOVED_FRAME_THROTTLE`.
+  const PLAYER_MOVED_FRAME_THROTTLE = 10;
+  // Per-entity tracking — multi-player setups (future) keyed by id.
+  const moveTrack = new Map();
+  let frameIndex = 0;
+
   const canStandAt = (x, y, radius, headZ) => {
     const s = api.scene;
     return (
@@ -263,7 +272,44 @@ export default (api) => {
           else if (y > aimMax) y = aimMax;
           aim.screenY = y;
         }
+
+        // Throttled `player:moved` (EVENTS.md §4.3) — emit on cell-
+        // boundary cross OR every Nth frame, whichever first. Velocity
+        // is reconstructed from the Movement component when present.
+        const cellX = Math.floor(newPosition.x);
+        const cellY = Math.floor(newPosition.y);
+        let track = moveTrack.get(entity);
+        const vmag = movement
+          ? movement.speed * (movement.isRunning ? movement.runMultiplier : 1)
+          : 0;
+        if (track === undefined) {
+          track = { cellX, cellY, lastFrame: frameIndex };
+          moveTrack.set(entity, track);
+          api.events.emit("player:moved", {
+            position: newPosition,
+            velocity: new Vec2(vmag, 0),
+            cellX,
+            cellY,
+          });
+        } else {
+          const crossed = cellX !== track.cellX || cellY !== track.cellY;
+          const elapsed =
+            frameIndex - track.lastFrame >= PLAYER_MOVED_FRAME_THROTTLE;
+          if (crossed || elapsed) {
+            track.cellX = cellX;
+            track.cellY = cellY;
+            track.lastFrame = frameIndex;
+            api.events.emit("player:moved", {
+              position: newPosition,
+              velocity: new Vec2(vmag, 0),
+              cellX,
+              cellY,
+            });
+          }
+        }
       },
     );
+
+    frameIndex += 1;
   });
 };

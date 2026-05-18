@@ -2,7 +2,7 @@ import type { AssetPack } from "./AssetPack";
 import { ZipAssetPack } from "./ZipAssetPack";
 
 /** Default pack URL when no `?pack=` is provided. */
-export const DEFAULT_PACK_URL = "/packs/default.apg";
+export const DEFAULT_PACK_URL = "/packs/Cardboard.apg";
 
 /**
  * Load a pack. With no URL, fetches `DEFAULT_PACK_URL` (built by

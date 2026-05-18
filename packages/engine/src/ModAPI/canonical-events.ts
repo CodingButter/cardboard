@@ -52,8 +52,17 @@ export interface CanonicalEvents {
   "scene:willUnload": { name: string };
 
   // --- Entity lifecycle (§4.2) --------------------------------------
-  /** Fires from `ModAPIImpl.spawnPrefab` after the factory returns. Prefab spawns only. */
-  "entity:spawned": { entity: Entity; prefabName?: string };
+  /**
+   * Fires from `Game.spawnSceneEntities` after each `scene.entities[]`
+   * record is materialised, and from pack-script spawn paths that
+   * choose to emit it themselves (e.g. the default-pack player-spawn
+   * boot script). The engine does NOT emit one for every raw
+   * `world.spawn()` — only deliberate "this is a meaningful entity"
+   * spawns carry the event. `name` echoes the scene record's
+   * (optional) name field so subscribers can identify the player /
+   * boss / etc. without scanning component shapes.
+   */
+  "entity:spawned": { entity: Entity; name?: string };
   /** Fires SYNCHRONOUSLY BEFORE `world.despawn` removes the entity, so handlers can read components. */
   "entity:despawned": { entity: Entity };
 

@@ -4,7 +4,6 @@ export type {
   AudioHandle,
   PlayOpts,
   FrameFn,
-  PrefabFn,
   BuiltInComponents,
   ModAPI,
   InputAPI,
@@ -32,7 +31,6 @@ export type { CanonicalEvents } from "./canonical-events";
 export { PLAYER_MOVED_FRAME_THROTTLE } from "./canonical-events";
 export { ComponentRegistry } from "./ComponentRegistry";
 export { SystemRegistry } from "./SystemRegistry";
-export { PrefabRegistry } from "./PrefabRegistry";
 export { InputRegistry } from "./InputRegistry";
 export { ModalsRegistry } from "./ModalsRegistry";
 export { RendererSystemRegistry } from "./RendererSystemRegistry";

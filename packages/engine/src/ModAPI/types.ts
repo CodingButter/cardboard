@@ -10,16 +10,10 @@ import type { PartialGameConfig } from "Settings";
 import {
   Position,
   Facing,
-  Movement,
-  PlayerInput,
   Aim,
   Camera,
-  MinimapMarker,
-  Weapon,
-  Inventory,
   Sprite,
   Animation,
-  Pickup,
   Light,
   Shader,
 } from "Components";
@@ -44,8 +38,13 @@ import { castRayToWall } from "Libs/Raycast";
  *
  * Each script in `manifest.scripts` is loaded as an ES module and called
  * with a single argument — an instance of `ModAPI`. The script registers
- * components, prefabs, and systems through this object; the engine runs
- * them alongside the built-in pipeline.
+ * components and systems through this object; the engine runs them
+ * alongside the built-in pipeline.
+ *
+ * Prefabs are an editor-only concept (see
+ * `docs/plans/PREFABS_EDITOR_ONLY.md`) — scenes ship every entity
+ * pre-flattened in `scene.entities[]` and pack-script spawn loops
+ * call `api.world.spawn()` + `api.world.add(...)` directly.
  *
  * ## Example script
  *
@@ -53,12 +52,12 @@ import { castRayToWall } from "Libs/Raycast";
  * export default (api) => {
  *   const Health = api.defineComponent("Health");
  *
- *   api.registerPrefab("imp", (x, y) => {
+ *   function spawnImp(x, y) {
  *     const e = api.world.spawn();
  *     api.world.add(e, api.components.Position, new api.Vec2(x, y));
  *     api.world.add(e, Health, { hp: 30 });
  *     return e;
- *   });
+ *   }
  *
  *   api.registerSystem((world, dt) => {
  *     world.each(api.components.Position, Health, (e, pos, hp) => {
@@ -66,20 +65,19 @@ import { castRayToWall } from "Libs/Raycast";
  *       if (hp.hp <= 0) world.despawn(e);
  *     });
  *   });
+ *
+ *   api.onWorldReady(() => spawnImp(5, 5));
  * };
  * ```
  *
- * The surface is intentionally small in phase 3 — scripts get the
- * primitives they need to spawn entities and run per-frame logic.
- * Future phases can add hooks (onStart, onCollide, onShot, ...) without
- * breaking existing mods.
+ * The surface is intentionally small — scripts get the primitives
+ * they need to spawn entities and run per-frame logic. Future phases
+ * add hooks (onStart, onCollide, onShot, ...) without breaking
+ * existing mods.
  */
 
 /** Mod-registered per-frame logic. Runs after the built-in update systems. */
 export type FrameFn = (world: World, deltaTime: number) => void;
-
-/** Mod-registered factory. Free-form args; mods document their own signatures. */
-export type PrefabFn = (...args: any[]) => Entity;
 
 /**
  * Render-phase slots a mod-registered renderer system can attach to.
@@ -201,17 +199,27 @@ export interface BindingsAPI {
   label(code: KeyCode): string;
 }
 
-/** Engine-defined components exposed to mods by name. */
+/**
+ * Engine-defined components exposed to mods by name — the slim set
+ * the engine itself reads (render + scene-loader infrastructure).
+ *
+ * Pack-declared components (PlayerInput, Movement, Weapon, Inventory,
+ * MinimapMarker, Pickup, Health, AI, …) are NOT in this type. They
+ * still resolve through `api.components` at runtime — the registry
+ * exposes a Proxy that walks every registered name — but they don't
+ * have a static field on this interface because the engine doesn't
+ * know about them. Pack code that wants compile-time component access
+ * either uses `api.getComponent("Name")` or imports the typed class
+ * the pack itself exports.
+ *
+ * See `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — engine no longer
+ * reads any game-specific component.
+ */
 export interface BuiltInComponents {
   Position: typeof Position;
   Facing: typeof Facing;
-  Movement: typeof Movement;
-  PlayerInput: typeof PlayerInput;
   Aim: typeof Aim;
   Camera: typeof Camera;
-  MinimapMarker: typeof MinimapMarker;
-  Weapon: typeof Weapon;
-  Inventory: typeof Inventory;
   Sprite: typeof Sprite;
   /**
    * Frame-based sprite animation playback state (A1 of
@@ -221,7 +229,6 @@ export interface BuiltInComponents {
    * single-image path).
    */
   Animation: typeof Animation;
-  Pickup: typeof Pickup;
   Light: typeof Light;
   /**
    * Per-entity shader-hook attachment (M1 of MATERIALS.md). Attach a
@@ -229,6 +236,16 @@ export interface BuiltInComponents {
    * for just this entity. Sprites only in M1.
    */
   Shader: typeof Shader;
+  /**
+   * Forward-compat — pack-declared components (`PlayerInput`,
+   * `Movement`, `Weapon`, etc.) resolve through the proxy at runtime
+   * under their string key, so reading `api.components.PlayerInput`
+   * yields the manifest-registered `Component<unknown>`. The index
+   * signature documents that fall-through; consumers cast to the
+   * concrete pack-defined component class when they need stronger
+   * typing.
+   */
+  readonly [name: string]: Component<unknown> | undefined;
 }
 
 /**
@@ -707,15 +724,6 @@ export interface ModAPI {
    * built-in update phase. Returns a function that removes the system.
    */
   registerSystem(fn: FrameFn): () => void;
-
-  /**
-   * Register a named prefab factory. The factory's args + return value
-   * are documented by the mod that defines it.
-   */
-  registerPrefab(name: string, factory: PrefabFn): void;
-
-  /** Invoke a named prefab. Throws if no prefab with that name exists. */
-  spawn(name: string, ...args: unknown[]): Entity;
 
   /**
    * Register a callback that fires once, after the engine has spawned

@@ -50,12 +50,20 @@ import {
   PropertyRow,
   ScrollArea,
   Select,
+  Slider,
   StatsBlock,
   ToggleSwitch,
   IconButton,
 } from "../components/ui/index";
 import { Button } from "../components/ui";
-import { MoreVertical, Pencil } from "lucide-react";
+import {
+  MoreVertical,
+  Pencil,
+  PaintBucket,
+  Replace as ReplaceIcon,
+  Eraser as EraserIcon,
+  Trash2,
+} from "lucide-react";
 
 /**
  * MapView — R4b re-skin of the Map workflow tab.
@@ -254,6 +262,26 @@ export function MapView({
   //    user's open/close preferences survive selection changes).
   const [inspectorOpen, setInspectorOpen] = React.useState(true);
   const [sceneSettingsOpen, setSceneSettingsOpen] = React.useState(false);
+  // Scene-settings local placeholders — preview-only until the engine
+  // exposes per-scene render config (ambient / fog / brightness).
+  // Persisted to localStorage so the values survive reloads even
+  // before the engine plumbs them through. R4f flips these to read
+  // from `editScene.renderConfig` (TBD).
+  const [sceneAmbient, setSceneAmbient] = useLocalStorage(
+    "editor.scene.ambient",
+    50,
+    (v): v is number => typeof v === "number",
+  );
+  const [sceneBrightness, setSceneBrightness] = useLocalStorage(
+    "editor.scene.brightness",
+    100,
+    (v): v is number => typeof v === "number",
+  );
+  const [sceneFog, setSceneFog] = useLocalStorage(
+    "editor.scene.fog",
+    false,
+    (v): v is boolean => typeof v === "boolean",
+  );
   const [autoRotate, setAutoRotate] = useLocalStorage(
     "editor.cellPreview.autoRotate",
     true,
@@ -614,6 +642,24 @@ export function MapView({
     [],
   );
 
+  // ── Quick Tools card (mockup §7.2 card 4) ────────────────────────
+  // Fill-Area / Replace / Erase / Clear are layer-scoped scene
+  // mutations the engine doesn't yet expose as first-class ops. Each
+  // logs + carries a WIRING comment so the follow-up that lands them
+  // is one grep away. The card stays in the layout because the
+  // mockup's four-card right-rail rhythm is part of §7.2.
+  const handleQuickTool = React.useCallback(
+    (kind: "fill" | "replace" | "erase" | "clear") => {
+      // eslint-disable-next-line no-console
+      console.log("[MapView] quick-tool", kind, {
+        layer: mapLayer,
+        activePresetId,
+        selected: selection?.selected ?? null,
+      });
+    },
+    [mapLayer, activePresetId, selection],
+  );
+
   // ── #284 — palette context-menu state + actions.
   //
   // Usage count for the right-clicked preset, scoped to the CURRENT
@@ -934,38 +980,48 @@ export function MapView({
           : "relative grid h-full grid-cols-[var(--rail-left)_1fr_var(--rail-right)] gap-section min-h-0 bg-[var(--color-bg-app)] p-[var(--gap-section)]"
       }
     >
-      {/* LEFT rail — per §7.2: Scene picker (top) → Tile preset palette
-          → anonymous-preset toggle (within MapPalette). Composed via
-          R2 primitives (PanelHeader, CollapsibleSection, ScrollArea
-          inside MapPalette, ToggleSwitch inside MapPalette) so the
-          rail visually matches the rest of the editor's shell. */}
+      {/* LEFT rail — per §7.2 + Map.png mockup. The mockup puts TOOLS at
+          the very top, then BRUSH, then tile categories. In our build
+          the tool palette currently lives in the centre toolbar
+          (MapToolbar — see GridEditor's `toolbarSlot` plumbing), so the
+          left rail here carries:
+            1. Active-Scene header strip — slim, label + path. The
+               TopBar dropdown is the canonical scene switcher (§6.2);
+               this is a read-only context anchor.
+            2. Tile preset palette (MapPalette) — fills the remaining
+               height. It owns its own PanelHeader("Tile Presets") +
+               filter input + ToggleSwitch (show-anonymous) +
+               ScrollArea so the rail matches the rest of the shell. */}
       <aside
-        className="panel-surface flex flex-col gap-section min-h-0 rounded-card overflow-hidden"
+        className="panel-surface flex flex-col min-h-0 rounded-card overflow-hidden"
         hidden={playtestActive}
       >
-        {/* Scene-picker section — read-only summary of the active scene
-            (the TopBar dropdown is the canonical switcher per §6.2). */}
-        <CollapsibleSection title="Scene" defaultOpen>
-          <div className="text-[11px] text-zinc-400">
-            {scenePath ? (
+        {/* Active-Scene header strip — replaces the previous
+            CollapsibleSection at the top of the rail. Uses PanelHeader
+            so it visually rhymes with MapPalette's own header
+            immediately below — two slim header bands stacked. */}
+        <PanelHeader
+          title="Scene"
+          action={
+            scenePath ? (
               <span
-                className="font-mono text-zinc-300 break-all"
+                className="text-[10px] font-mono text-zinc-300 truncate max-w-[160px]"
                 title={scenePath}
               >
                 {scenePath.replace(/^scenes\//, "")}
               </span>
             ) : (
-              <span className="text-zinc-500">No scene loaded</span>
-            )}
-          </div>
-        </CollapsibleSection>
+              <span className="text-[10px] text-zinc-500">no scene</span>
+            )
+          }
+        />
 
         {/* Tile preset palette — hoisted out of GridEditor into its own
             component so the left rail honours the §6.5 three-rail
             grammar. MapPalette owns the PanelHeader("Tile Presets") +
             filter input + ToggleSwitch (show-anonymous) + ScrollArea
             internally. */}
-        <div className="flex-1 min-h-0 flex flex-col card-surface overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <MapPalette
             projectId={projectId}
             activePresetId={activePresetId}
@@ -1167,9 +1223,14 @@ export function MapView({
       >
         <ScrollArea fade={false} className="h-full">
           <div className="p-[var(--gap-panel)] flex flex-col gap-section">
-            {/* ── Cell Preview ──────────────────────────────────── */}
+            {/* ── 3D Preview (mockup §7.2 card 1) ──────────────────
+                The mockup labels this card "3D PREVIEW" with a "LIVE"
+                Badge in the trailing slot. We keep the engine-driven
+                CellPreview body (room-context preview that mirrors the
+                in-game renderer) — only the wrapper title changes for
+                Scene-tab fidelity. */}
             <CollapsibleSection
-              title="Cell Preview"
+              title="3D Preview"
               defaultOpen
               trailing={
                 <Badge variant="emerald" outlined>
@@ -1428,18 +1489,102 @@ export function MapView({
             {/* Scene list was removed in cleanup — the shell TopBar's
                 scene dropdown is the canonical scene selector. */}
 
-            {/* ── Scene settings (placeholder card — full impl R4f) ── */}
+            {/* ── Scene settings (mockup §7.2 card 3) ──
+                The mockup shows Ambient Light Slider + Brightness
+                Slider + Fog ToggleSwitch. The engine doesn't yet
+                expose per-scene render config (only baked lightmaps +
+                per-light controls inside GridEditor's light tool), so
+                the controls here are visually-correct placeholders
+                wired to local state. They land for real in R4f when
+                the per-scene render config plumbs through. */}
             <CollapsibleSection
               title="Scene Settings"
               open={sceneSettingsOpen}
               onOpenChange={setSceneSettingsOpen}
             >
-              <p className="text-xs text-zinc-500">
-                Ambient light, fog, brightness — surface lands once
-                the engine exposes per-scene render config (currently
-                only baked lightmaps + per-light controls inside
-                GridEditor's light tool).
-              </p>
+              <div className="space-y-2">
+                <PropertyRow label="Ambient">
+                  <Slider
+                    value={sceneAmbient}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onChange={setSceneAmbient}
+                    valueLabel={`${sceneAmbient}%`}
+                  />
+                </PropertyRow>
+                <PropertyRow label="Brightness">
+                  <Slider
+                    value={sceneBrightness}
+                    min={0}
+                    max={200}
+                    step={1}
+                    onChange={setSceneBrightness}
+                    valueLabel={`${sceneBrightness}%`}
+                  />
+                </PropertyRow>
+                <PropertyRow label="Fog">
+                  <ToggleSwitch
+                    aria-label="Scene fog"
+                    size="sm"
+                    checked={sceneFog}
+                    onChange={setSceneFog}
+                  />
+                </PropertyRow>
+                <p className="text-[10px] text-zinc-500 pt-1 leading-snug">
+                  Preview-only — engine wiring lands when per-scene
+                  render config (ambient / fog / brightness) ships.
+                </p>
+              </div>
+            </CollapsibleSection>
+
+            {/* ── Quick Tools (mockup §7.2 card 4) ──
+                2×2 grid of secondary buttons. The engine doesn't yet
+                expose Fill-Area / Replace-Preset / Erase-Layer /
+                Clear-Layer as first-class scene mutations — they sit
+                behind WIRING comments so the follow-up that lands
+                them is one grep away. The card stays in the layout
+                because the visual rhythm of the right rail (four
+                stacked cards) is part of the §7.2 spec. */}
+            <CollapsibleSection title="Quick Tools" defaultOpen={false}>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleQuickTool("fill")}
+                  className="justify-start"
+                >
+                  <PaintBucket size={12} className="mr-1.5" />
+                  Fill Area
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleQuickTool("replace")}
+                  className="justify-start"
+                >
+                  <ReplaceIcon size={12} className="mr-1.5" />
+                  Replace
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleQuickTool("erase")}
+                  className="justify-start"
+                >
+                  <EraserIcon size={12} className="mr-1.5" />
+                  Erase
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleQuickTool("clear")}
+                  className="justify-start"
+                >
+                  <Trash2 size={12} className="mr-1.5" />
+                  Clear
+                </Button>
+              </div>
             </CollapsibleSection>
           </div>
         </ScrollArea>

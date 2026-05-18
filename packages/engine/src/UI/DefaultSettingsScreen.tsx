@@ -2,7 +2,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { GameConfig } from "GameConfig";
 import type { KeyCode } from "Controllers/KeyboardController";
-import type { KeyBindings } from "Components";
+import type { KeyBindings } from "Controllers/Bindings";
 import type { PartialGameConfig } from "Settings";
 import type { BindingsAPI, SettingsAPI } from "ModAPI";
 

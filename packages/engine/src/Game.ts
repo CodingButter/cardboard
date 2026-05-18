@@ -18,15 +18,11 @@ import {
 } from "Systems";
 import ModalRegistry from "ModalRegistry";
 import type { PartialGameConfig } from "Settings";
-import { Aim, Camera, Facing, Movement, PlayerInput, Position } from "Components";
+import { Aim, Camera, Facing, Position } from "Components";
 import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
-import {
-  registerDeclarativePrefabs,
-  registerDeclarativePrefabsAsync,
-} from "AssetPack/registerDeclarativePrefabs";
-import { ModAPIImpl, PLAYER_MOVED_FRAME_THROTTLE } from "ModAPI";
+import { ModAPIImpl } from "ModAPI";
 import ItemImages from "ItemImages";
 import { installPreactRuntime } from "PreactRuntime";
 import { installDefaultSettings } from "UI/DefaultSettingsSystem";
@@ -99,10 +95,10 @@ export class Game {
   private readonly canvas: HTMLCanvasElement;
   /**
    * `true` when this `Game` instantiated a brand-new `World` (no HMR
-   * snapshot was handed back in). `spawnInitialEntities()` reads it to
-   * decide whether to spawn the player — across HMR reloads the player
-   * entity already exists in the preserved world and re-spawning would
-   * duplicate it.
+   * snapshot was handed back in). `spawnInitialEntities()` reads it
+   * to decide whether to walk `scene.entities[]` — across HMR
+   * reloads the world already carries the previous spawn, so a
+   * second pass would duplicate every record.
    */
   private readonly freshWorld: boolean;
 
@@ -110,7 +106,7 @@ export class Game {
    * Monotonic frame counter — incremented at the top of `update`.
    * Threaded into `frame:before` / `frame:after` payloads (EVENTS.md
    * §4.7) so subscribers can detect frame deltas / build their own
-   * throttles. Also gates `player:moved` (every Nth frame, §4.3).
+   * throttles.
    */
   private frameIndex = 0;
 
@@ -122,18 +118,6 @@ export class Game {
    * by `loadScene` + `reloadScene`.
    */
   private currentScenePath: string = "";
-
-  /**
-   * Per-player tracking for the throttled `player:moved` event.
-   * Stores last-emitted cell + frame index per entity so we can emit
-   * on cell-boundary cross OR every Nth frame, whichever first
-   * (EVENTS.md §4.3). Entity-keyed so multi-player setups (future)
-   * track each independently.
-   */
-  private readonly playerMoveTrack: Map<
-    number,
-    { cellX: number; cellY: number; lastFrame: number }
-  > = new Map();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -198,11 +182,13 @@ export class Game {
     // call because the renderer didn't exist yet).
     this.fitCanvasToWindow();
 
-    // Reuse devices and the world across HMR reloads. On the first ever
-    // load, build a fresh world; the player (and any other content
-    // entities) is spawned from a pack-registered prefab via
+    // Reuse devices and the world across HMR reloads. On the first
+    // ever load, build a fresh world; scene-shipped entities (per
+    // `PREFABS_EDITOR_ONLY.md` §4.2) and pack-script boot loops
+    // (`player-spawn.js` et al.) populate the world via
     // `spawnInitialEntities()`, which `main()` calls AFTER
-    // `runPackScripts()` has had a chance to register prefabs.
+    // `runPackScripts()` has registered systems + `onWorldReady`
+    // callbacks.
     this.keyboard = previous?.keyboard ?? new KeyboardController();
     this.mouse = previous?.mouse ?? new MouseController(canvas);
     this.freshWorld = previous?.world === undefined;
@@ -329,18 +315,6 @@ export class Game {
         console.error(`Script ${path}: failed to load —`, err);
       }
     }
-    // Editor-authored declarative prefabs land AFTER JS scripts have
-    // had their crack at the ModAPI — that way prefabs can reference
-    // components defined by `api.defineComponent(...)` in scripts.
-    // EDITOR.md §6.3 + `registerDeclarativePrefabs.ts`.
-    //
-    // Phase #196: we use the async variant during boot so any
-    // `prefab.initScript` referenced by a declarative prefab is
-    // pre-warmed (fetched + module-loaded) before the first spawn.
-    // That keeps the contract — spawn → entity carries init-attached
-    // components synchronously — even for the first spawn of a session.
-    await this.registerDeclarativePrefabsFromManifestAsync();
-
     // Engine-shipped universal modals — Settings today, Console (#199)
     // soon. Per `docs/plans/EDITOR_REDESIGN.md` §12 Q4, the engine
     // owns the universal-to-every-game UI surfaces (every cardboard
@@ -350,37 +324,6 @@ export class Game {
     // in their own scripts — and because pack scripts run BEFORE this
     // line, the pack's component wins via the `has`-guarded install.
     installDefaultSettings(this.api);
-  }
-
-  /**
-   * Walk `pack.manifest.prefabs` and register each entry as a
-   * declarative prefab. Per EDITOR.md §6.3 these coexist with the
-   * JS-based `api.registerPrefab(...)` path; the prefab registry warns
-   * on collisions and the later registration wins.
-   *
-   * Called from `runPackScripts()` (after scripts) and from the editor
-   * when the user "Save & Test"s a manifest with new prefabs without a
-   * full engine reload. Idempotent — re-registering with the same name
-   * just replaces the factory.
-   *
-   * The synchronous form here keeps backwards-compat with the editor's
-   * existing call site. The async sibling below pre-warms `initScript`
-   * modules so the first spawn doesn't pay a cold-start cost; the boot
-   * path uses that variant.
-   */
-  registerDeclarativePrefabsFromManifest(): void {
-    if (!this.pack.manifest.prefabs) return;
-    registerDeclarativePrefabs(this.api, this.pack.manifest, this.pack);
-  }
-
-  /** Phase #196 — async variant; pre-loads any referenced initScripts. */
-  async registerDeclarativePrefabsFromManifestAsync(): Promise<void> {
-    if (!this.pack.manifest.prefabs) return;
-    await registerDeclarativePrefabsAsync(
-      this.api,
-      this.pack.manifest,
-      this.pack,
-    );
   }
 
   /**
@@ -432,21 +375,61 @@ export class Game {
   }
 
   /**
+   * Walk `scene.entities[]` and spawn one entity per record per
+   * `PREFABS_EDITOR_ONLY.md` §4.2. Each component name resolves
+   * through the shared `ComponentRegistry`; unknown components log a
+   * warning and are skipped (one bad entry doesn't take the rest
+   * down). `_*`-prefixed keys are editor-only metadata and ignored.
+   *
+   * Per-entity `Position` data is materialised into a `Vec2` instance
+   * because the engine's `Position` component stores `Vec2` values
+   * (the renderer reads `.x` / `.y` off the instance). Other
+   * components pass through verbatim.
+   *
+   * Emits `entity:spawned` (Ev1 §4.2) per record with the entity id
+   * and the optional `name` field so subscribers can identify
+   * meaningful entities (`player`, `boss`, etc.) without scanning
+   * component shapes.
+   */
+  private spawnSceneEntities(): void {
+    const records = this.scene.entities;
+    if (records.length === 0) return;
+    for (const record of records) {
+      const components = record.components;
+      if (!components || typeof components !== "object") continue;
+      const entity = this.world.spawn();
+      for (const [name, rawValue] of Object.entries(components)) {
+        if (name.startsWith("_")) continue;
+        const c = this.api.getComponent(name);
+        if (c === undefined) {
+          console.warn(
+            `[scene-entity] unknown component "${name}" — skipping ` +
+              "(declare it in manifest.components[] or via api.defineComponent)",
+          );
+          continue;
+        }
+        const value = name === "Position" ? materialisePosition(rawValue) : rawValue;
+        this.world.add(entity, c, value as unknown);
+      }
+      this.api.events.emit("entity:spawned", { entity, name: record.name });
+    }
+  }
+
+  /**
    * Spawn the entities the scene + engine expect to exist before the
-   * first frame renders. Today that's just the player — assembled by
-   * the default pack's `"player"` prefab against `scene.spawn`.
+   * first frame renders. Walks `scene.entities[]` per
+   * `PREFABS_EDITOR_ONLY.md` §4.2 and spawns one entity per record,
+   * resolving each component name through the shared
+   * `ComponentRegistry`. Pack-script boot logic (the default pack's
+   * `player-spawn.js`) runs through `onWorldReady` and is free to
+   * spawn additional entities from JS — the engine no longer hosts
+   * a runtime prefab registry.
    *
-   * Must be called AFTER `runPackScripts()` so the pack has had a
-   * chance to register the prefab. Skipped when this `Game` inherited
-   * a world from an HMR snapshot — that world already has the player.
-   *
-   * Throws a clear message if the pack didn't register `"player"`
-   * (typically: wrong pack loaded, or the pack's boot scripts didn't
-   * run before scene load).
+   * Skipped when this `Game` inherited a world from an HMR snapshot —
+   * that world already has the entities.
    */
   async spawnInitialEntities(): Promise<void> {
     if (!this.freshWorld) return;
-    const { x, y, facing } = this.scene.spawn;
     // Boot scene's name comes from the manifest's startScene; main.ts
     // can override it, but in either case the path is the canonical
     // identifier for `scene:loaded` event listeners.
@@ -469,7 +452,11 @@ export class Game {
     // entity so `api.sceneController.components` is populated by the
     // time `onWorldReady` callbacks fire.
     this.spawnSceneController();
-    this.api.spawnPrefab("player", { x, y, facing });
+    // PREFABS_EDITOR_ONLY.md §4.2 — walk pre-flattened scene entity
+    // records and materialise each as a live entity. Empty grids are
+    // the common case today (default-pack scenes don't carry an
+    // `entities` array); the loop short-circuits.
+    this.spawnSceneEntities();
     // Fire any pack-registered `onWorldReady` callbacks now that the
     // player + scene entities exist. Scripts use this to locate named
     // entities and attach extra components without "if entity exists
@@ -796,11 +783,10 @@ export class Game {
       // mod that calls `api.anim.play(...)` reacting to input sees
       // its `play` reset land BEFORE this tick's frame advance.
       this.animationSystem.update(this.world, deltaTime);
-      // Throttled `player:moved` (EVENTS.md §4.3) — emit when the
-      // player crosses a cell boundary OR every Nth frame, whichever
-      // first. Skipped while paused so handlers don't fire during
-      // modal screens.
-      this.emitPlayerMoved();
+      // `player:moved` (EVENTS.md §4.3) is now emitted pack-side from
+      // the input system — the engine doesn't know about `PlayerInput`
+      // / `Movement` anymore. See `packages/default-pack/scripts/
+      // systems/player-input.js` for the throttled emit.
     }
     // Reconcile pack-registered modal components (Preact) against the
     // engine's open-modal set. Runs every frame so live-prop callbacks
@@ -828,56 +814,6 @@ export class Game {
       frameIndex: this.frameIndex,
     });
   };
-
-  /**
-   * Throttled `player:moved` emit (EVENTS.md §4.3). Walks the player
-   * entity (`PlayerInput + Position`) and fires when the player
-   * crosses a cell boundary OR every Nth frame, whichever first.
-   * Velocity is reconstructed from the `Movement` component when
-   * present; future versions can feed the input system's per-frame
-   * intent vector directly.
-   */
-  private emitPlayerMoved(): void {
-    const e = this.world.first(PlayerInput, Position);
-    if (e === undefined) return;
-    const pos = Position.getOrThrow(e);
-    const cellX = Math.floor(pos.x);
-    const cellY = Math.floor(pos.y);
-    let track = this.playerMoveTrack.get(e);
-    if (track === undefined) {
-      track = { cellX, cellY, lastFrame: this.frameIndex };
-      this.playerMoveTrack.set(e, track);
-      this.fireMoved(e, pos, cellX, cellY, track);
-      return;
-    }
-    const crossed = cellX !== track.cellX || cellY !== track.cellY;
-    const elapsed =
-      this.frameIndex - track.lastFrame >= PLAYER_MOVED_FRAME_THROTTLE;
-    if (!crossed && !elapsed) return;
-    this.fireMoved(e, pos, cellX, cellY, track);
-  }
-
-  private fireMoved(
-    entity: number,
-    pos: Vec2,
-    cellX: number,
-    cellY: number,
-    track: { cellX: number; cellY: number; lastFrame: number },
-  ): void {
-    track.cellX = cellX;
-    track.cellY = cellY;
-    track.lastFrame = this.frameIndex;
-    const mv = Movement.get(entity);
-    const vmag = mv
-      ? mv.speed * (mv.isRunning ? mv.runMultiplier : 1)
-      : 0;
-    this.api.events.emit("player:moved", {
-      position: pos,
-      velocity: new Vec2(vmag, 0),
-      cellX,
-      cellY,
-    });
-  }
 
   private readonly render = (deltaTime: number): void => {
     // WORLD_STATE.md §7.2 — drive the `Systems`-component scheduler's
@@ -937,4 +873,24 @@ export class Game {
     //    here in registration order.
     this.api.runRendererPhase("hud", this.renderer, deltaTime);
   };
+}
+
+/**
+ * Materialise a JSON `{ x, y, z? }` blob into a `Vec2` instance — the
+ * shape the engine's `Position` component stores. `z` rides as an
+ * extra property when present so callers that read `pos.z` (camera
+ * eye-height math, etc.) see it without changing `Vec2`'s shape.
+ * Defensive: non-numeric / missing fields default to `0`. Already-
+ * `Vec2`-shaped values pass through untouched so the loader is
+ * idempotent.
+ */
+function materialisePosition(value: unknown): unknown {
+  if (value instanceof Vec2) return value;
+  if (typeof value !== "object" || value === null) return value;
+  const obj = value as Record<string, unknown>;
+  const x = typeof obj.x === "number" ? obj.x : 0;
+  const y = typeof obj.y === "number" ? obj.y : 0;
+  const v = new Vec2(x, y);
+  if (typeof obj.z === "number") (v as unknown as Record<string, unknown>).z = obj.z;
+  return v;
 }

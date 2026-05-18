@@ -37,20 +37,6 @@ export default (api) => {
     });
   });
 
-  // Example prefab. Doesn't get called automatically — but other
-  // scripts (or a later command-line hook) can `api.spawn("marker", x, y)`.
-  api.registerPrefab("marker", (x, y) => {
-    const e = api.world.spawn();
-    api.world
-      .add(e, api.components.Position, new api.Vec2(x, y))
-      .add(e, api.components.MinimapMarker, {
-        color: "#ffcc00",
-        radius: 0.15,
-        drawForwardRay: false,
-      });
-    return e;
-  });
-
   // ── M1 of MATERIALS.md — per-entity shader smoke test ─────────────
   // When the pack ships a `materialsSmokeTest: true` flag in its
   // manifest, every other ammo pickup gets a `Shader` component

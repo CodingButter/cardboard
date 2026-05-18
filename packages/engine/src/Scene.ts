@@ -193,6 +193,26 @@ export interface SceneControllerJSON {
   [editorOnly: `_${string}`]: unknown;
 }
 
+/**
+ * Entity record stamped into a scene by the editor (or hand-authored).
+ * PREFABS_EDITOR_ONLY.md §4.1: every entity the engine ever sees ships
+ * pre-flattened in `scene.entities[]` (or gets spawned by a regular
+ * pack script). The engine walks the array at scene-load, spawns a
+ * fresh entity per record, looks each component up via
+ * `api.getComponent(name)`, and attaches it.
+ *
+ * `_*`-prefixed keys are editor metadata (`_prefabSource`,
+ * `_prefabSourceHash`, etc.) — engine ignores them entirely.
+ */
+export interface SceneEntityJSON {
+  /** Optional human-readable name — round-trips; surface in editor UI. */
+  name?: string;
+  /** componentName → componentData. */
+  components: Record<string, unknown>;
+  /** Editor-only metadata; engine ignores `_*` keys. */
+  [editorOnly: `_${string}`]: unknown;
+}
+
 const DEFAULT_SPAWN: SceneSpawn = { x: 1.5, y: 1.5, facing: 0 };
 
 /* --- Layer-array input format ------------------------------------------- */
@@ -424,6 +444,12 @@ export class Scene {
    * `spawn` field.
    */
   readonly controller: { components: Readonly<Record<string, unknown>> };
+  /**
+   * Per-scene entity records — pre-flattened component bundles the
+   * engine spawns at scene-load. PREFABS_EDITOR_ONLY.md §4.1. Empty
+   * array when the scene JSON omits `entities`.
+   */
+  readonly entities: ReadonlyArray<SceneEntityJSON>;
   /** Authored static light sources (post-default-normalised). */
   readonly lights: ReadonlyArray<Required<LightDef>>;
   /**
@@ -466,9 +492,15 @@ export class Scene {
      * empty for legacy scenes.
      */
     controllerComponents: Readonly<Record<string, unknown>> | undefined = undefined,
+    /**
+     * Per-scene entity records — pre-flattened component bundles the
+     * engine spawns at scene-load (`PREFABS_EDITOR_ONLY.md` §4.1).
+     */
+    entities: ReadonlyArray<SceneEntityJSON> = [],
   ) {
     this.spawn = spawn;
     this.shaders = shaders;
+    this.entities = entities;
     this.controller = {
       components: controllerComponents ?? synthesiseControllerFromSpawn(spawn),
     };
@@ -801,6 +833,7 @@ export class Scene {
       data.shaders,
       cellPresets,
       controllerComponents,
+      data.entities ?? [],
     );
   }
 }
@@ -1104,6 +1137,15 @@ export interface SceneJSON {
    * `spawn` field.
    */
   controller?: SceneControllerJSON;
+  /**
+   * Per-scene entity records — `PREFABS_EDITOR_ONLY.md` §4.1. Each
+   * entry is a fully-flattened component bundle the engine walks at
+   * scene-load to spawn entities. Optional — scenes without an
+   * `entities` array spawn nothing here, and pack scripts are free to
+   * spawn whatever they want from boot scripts / `onWorldReady`
+   * handlers (the default-pack player today).
+   */
+  entities?: SceneEntityJSON[];
   /**
    * Static light sources to bake into the scene's lightmap at
    * `bun run build-packs` time. Each one contributes

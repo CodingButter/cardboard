@@ -259,23 +259,17 @@ export type ShaderHookRole = "skyHooks" | "worldHooks" | "spriteHooks";
 export type ShaderEntry = ShaderRole | ShaderHookRole;
 
 /**
- * Editor-authored declarative prefab — a manifest-side counterpart to
- * the JS-based `api.registerPrefab(...)` flow used by `default-pack`'s
- * `scripts/prefabs/player.js`.
+ * Editor-authored declarative prefab — pure component bundle used at
+ * authoring time as a reusable template. Prefabs are EDITOR-ONLY per
+ * `docs/plans/PREFABS_EDITOR_ONLY.md`: the engine never reads
+ * `manifest.prefabs` or this shape. The editor stores templates here
+ * (or under `pack/prefabs/*.json`) and stamps the flattened component
+ * data into `scene.entities[]` records at save time.
  *
- * `components` is `componentName → componentData` where the data must
- * match the component's schema. At pack-load time the engine walks
- * `manifest.prefabs[]` (after `runPackScripts()` so any pack-defined
- * components are already registered) and registers a factory that:
- *
- *  - spawns a fresh entity in the world,
- *  - adds each declared component with its data,
- *  - merges any spawn-time `opts` (e.g. `api.spawn("zombie", { x, y })`
- *    overrides `Position.x` / `Position.y`).
- *
- * Editor-authored prefabs coexist with JS-based prefabs; a name
- * collision logs a "replacing" warning per `PrefabRegistry` semantics.
- * See `docs/plans/EDITOR.md` §6.3.
+ * `components` is `componentName → componentData`. At authoring time
+ * the editor validates the data against each component's schema; the
+ * shape round-trips into scene records verbatim and the engine reads
+ * those records via its scene-entity load loop.
  */
 export interface DeclarativePrefab {
   /** Prefab id — same as the Record key. Kept on the value for clarity. */
@@ -286,29 +280,6 @@ export interface DeclarativePrefab {
   tags?: string[];
   /** Optional one-liner shown in the editor's prefab list. */
   description?: string;
-  /**
-   * @deprecated PREFABS_EDITOR_ONLY (#290): prefabs become pure
-   * component bundles. The `initScript` hybrid surface goes away —
-   * dynamic spawn-time setup migrates to either a `Systems`/`Scripts`
-   * component on the spawned entity (WORLD_STATE.md §7 + §8) or a
-   * pack boot script that does `world.spawn() + world.add(...)`
-   * directly. Default-pack's `player.initScript` is the last consumer
-   * and still ships pending the PE1–PE5 migration; remove this field
-   * + `registerDeclarativePrefabs`'s init-script code path once that
-   * lands. TODO(#290): drop after default-pack player migrates.
-   *
-   * Authoring conventions (transitional):
-   *  - The script is a regular pack-script (`.js` / `.ts` / `.tsx`)
-   *    that default-exports `function(entity, opts, api): void`.
-   *  - `.ts` / `.tsx` paths are compiled to `.js` by the pack
-   *    builder (same pipeline as `manifest.scripts[]`) and the
-   *    manifest entry is rewritten to the compiled `.js` path.
-   *  - Errors thrown from the init script are logged and the spawn
-   *    still returns the (partially-initialized) entity with its
-   *    static components attached. One bad initScript shouldn't
-   *    take down a session.
-   */
-  initScript?: string;
 }
 
 /**

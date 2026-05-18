@@ -290,7 +290,8 @@ killer) to stop a stale dev server.
 | Image Lab IL1 + IL2 | ✅ Plan + runtime shipped. IL3–IL7 pending (#229–#233) |
 | Sound Lab SL1 | ✅ Plan shipped. SL2 runtime in progress (#236). SL3–SL7 pending (#237–#241) |
 | WORLD_STATE — data-first engine overhaul (#294) | ✅ Scaffolding + initial migration landed. Next phase #293 |
-| Prefabs editor-only (PE1–PE3) | ✅ Shipped — declarative-only prefabs; no `initScript` |
+| Prefabs editor-only (PE1–PE3) | ✅ Shipped — declarative-only prefabs; no `initScript`. Re-implemented 2026-05-17 after the recovery wipe; see `PREFABS_EDITOR_ONLY.md` §17 |
+| Engine unopinionated — game-specific components moved to pack | ✅ 2026-05-17 — `PlayerInput` / `Movement` / `Weapon` / `Inventory` / `MinimapMarker` / `Pickup` deleted from engine built-ins, instantiated from `manifest.components[]`. `api.components` is a proxy that resolves through the full registry. Engine built-ins slimmed to render/lifecycle infra only (Position/Facing/Aim/Camera/Sprite/Animation/Light/Shader). Scene-entity load loop in `Game.spawnSceneEntities`. `player:moved` emission moved pack-side. See `PREFABS_EDITOR_ONLY.md` §17 + `WORLD_STATE.md` §11.6 |
 | Docs site (apps/docs — Fumadocs + GH Pages) | ✅ Live at https://codingbutter.github.io/cardboard/ — guides, plan-doc mirror, API ref, playable iframe |
 | Recovery 2026-05-17 | ✅ ~60 files reconstructed via transcript-replay engine across commits `4d3c1e9` → `93fb93d` (+ dedup) after sandbox reset incident wiped tracked-file modifications |
 

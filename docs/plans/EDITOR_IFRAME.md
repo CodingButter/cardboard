@@ -524,14 +524,18 @@ painful.
 - Existing `?pack=URL` flow still works (verified manually +
   smoke tests pass).
 
-### I2 — telemetry + camera marker + pause-step (future)
+### I2 — telemetry + camera marker + pause-step (partial)
 
-- Iframe posts throttled `player-state` (~10 Hz). Editor draws a
+- ✅ Engine stats telemetry — iframe posts throttled `engine-stats`
+  ({ fps, frameMs, entityCount, lightCount, … }) at 10 Hz via
+  `apps/game/src/editor-bridge.ts` so the editor's Playtest panel
+  can render a stable HUD. Resolves Q5 of `EDITOR_REDESIGN.md` §12.
+- ⏳ Iframe posts throttled `player-state` (~10 Hz). Editor draws a
   marker on GridEditor in edit mode.
-- `set-mode {edit-camera}` puts the engine in a "free-fly camera"
+- ⏳ `set-mode {edit-camera}` puts the engine in a "free-fly camera"
   state that ignores `PlayerInput`. Editor's GridEditor can
   reposition the player by drag-and-drop while in edit mode.
-- `pause` / `resume` semantics for editor stepping.
+- ⏳ `pause` / `resume` semantics for editor stepping.
 
 ### I3 — script + manifest hot-reload (future)
 

@@ -74,6 +74,17 @@
   --gap-panel: 1rem;
   --gap-inspector: 1.25rem;
   --gap-section: 1.5rem;
+
+  /* Shell-body rail widths — per §6.5. Used by view containers that
+     compose the 3-column shell-body grammar (Map / Entities / etc).
+     `--rail-left` covers the auxiliary picker / palette rail; the
+     wider `--rail-right` carries inspectors + preview cards. */
+  --rail-left: 18rem;
+  --rail-right: 22rem;
+}
+
+@utility gap-section {
+  gap: var(--gap-section);
 }
 
 @utility uppercase-label {

@@ -38,7 +38,6 @@ import type {
   ItemImagesAPI,
   ModAPI,
   ModalsAPI,
-  PrefabFn,
   ProceduralAudioAPI,
   ProceduralPlayInstrumentOpts,
   RaycastAPI,
@@ -52,7 +51,6 @@ import type {
 import { ProceduralAPIImpl, type ProceduralAPI } from "Procedural";
 import { ComponentRegistry } from "./ComponentRegistry";
 import { SystemRegistry } from "./SystemRegistry";
-import { PrefabRegistry } from "./PrefabRegistry";
 import { InputRegistry } from "./InputRegistry";
 import { ModalsRegistry } from "./ModalsRegistry";
 import { RendererSystemRegistry } from "./RendererSystemRegistry";
@@ -100,7 +98,6 @@ export class ModAPIImpl implements ModAPI {
 
   private readonly componentRegistry = new ComponentRegistry();
   private readonly systemRegistry = new SystemRegistry();
-  private readonly prefabRegistry = new PrefabRegistry();
   private readonly rendererSystemRegistry = new RendererSystemRegistry();
 
   readonly components: BuiltInComponents = this.componentRegistry.builtIns;
@@ -336,39 +333,6 @@ export class ModAPIImpl implements ModAPI {
     this.uiRegistry.flush();
   }
 
-  /**
-   * Throwing wrapper around `spawn` for engine-internal call sites that
-   * expect a specific prefab to exist (e.g. `Game` invoking `"player"`
-   * after pack scripts run). Provides a more actionable error than the
-   * generic registry miss.
-   */
-  spawnPrefab(name: string, ...args: unknown[]): Entity {
-    if (!this.prefabRegistry.has(name)) {
-      throw new Error(
-        `pack didn't register a '${name}' prefab — is this the default pack? ` +
-          `Did boot scripts run before scene load?`,
-      );
-    }
-    return this.runPrefabAndEmit(name, args);
-  }
-
-  /**
-   * Shared prefab-invocation path for `spawnPrefab` (engine internals)
-   * and `spawn` (pack-facing). Centralises the canonical
-   * `entity:spawned` emit (Ev1 §4.2) so both entry points produce
-   * exactly one event per spawn. Raw `world.spawn()` from inside a
-   * prefab factory does NOT emit a second time — only the outermost
-   * prefab call generates the event, per EVENTS.md §12 open Q8.
-   *
-   * The fast-path `Map.get + size === 0` check in
-   * `EventsRegistry.emit` keeps this ~free when nothing's subscribed.
-   */
-  private runPrefabAndEmit(name: string, args: unknown[]): Entity {
-    const entity = this.prefabRegistry.spawn(name, ...args);
-    this.events.emit("entity:spawned", { entity, prefabName: name });
-    return entity;
-  }
-
   /** Live binding — reads see whatever's in `CONFIG` right now. */
   get config(): GameConfig {
     return CONFIG;
@@ -384,14 +348,6 @@ export class ModAPIImpl implements ModAPI {
 
   registerSystem(fn: FrameFn): () => void {
     return this.systemRegistry.registerSystem(fn);
-  }
-
-  registerPrefab(name: string, factory: PrefabFn): void {
-    this.prefabRegistry.registerPrefab(name, factory);
-  }
-
-  spawn(name: string, ...args: unknown[]): Entity {
-    return this.runPrefabAndEmit(name, args);
   }
 
   onWorldReady(fn: (api: ModAPI) => void): void {

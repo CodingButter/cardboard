@@ -3,6 +3,29 @@ import type KeyboardController from "Controllers/KeyboardController";
 import type MouseController from "Controllers/MouseController";
 
 /**
+ * Action → physical-key mapping. Each slot accepts multiple codes so
+ * "either shift" / "either WASD or arrows" works without special-
+ * casing. Lives in the engine because the settings UI (universal,
+ * engine-owned per `docs/plans/EDITOR_REDESIGN.md` §12 Q4) needs the
+ * shape to type its overlay.
+ *
+ * The component that *carries* a player's bindings (`PlayerInput`) is
+ * a pack concept now — packs declare it via `manifest.components[]`
+ * and attach it to whatever entity they consider the player. This
+ * type just lives in the engine so the universal Settings UI and any
+ * pack's per-player input system can share one vocabulary.
+ */
+export interface KeyBindings {
+  forward: readonly KeyCode[];
+  backward: readonly KeyCode[];
+  strafeLeft: readonly KeyCode[];
+  strafeRight: readonly KeyCode[];
+  run: readonly KeyCode[];
+  jump: readonly KeyCode[];
+  crouch: readonly KeyCode[];
+}
+
+/**
  * Unified "any of these codes pressed" check that dispatches keyboard
  * vs mouse based on the code's prefix. Bindings declared as `"Mouse2"`
  * route through the `MouseController`; everything else routes through

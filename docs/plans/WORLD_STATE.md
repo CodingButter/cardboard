@@ -788,6 +788,33 @@ default-pack ships its existing systems via `manifest.scripts[]`.
      understands the file shape; the default-pack ships none.
      Mod authors can opt-in.
 
+### 11.6 Engine is now maximally unopinionated (2026-05-17)
+
+Following the PE2/PE3 re-implementation (see
+`PREFABS_EDITOR_ONLY.md` §17), the engine's built-in component set
+is the slim render/lifecycle infrastructure only: `Position`,
+`Facing`, `Aim`, `Camera`, `Sprite`, `Animation`, `Light`,
+`Shader`. These are the components engine code reads directly
+(camera math, sprite billboards, light upload, shader-hook
+attachment, animation advance).
+
+Every other component the default-pack player uses —
+`PlayerInput`, `Movement`, `Weapon`, `Inventory`, `MinimapMarker`,
+`Pickup` — is now declared in `manifest.components[]` and
+instantiated as `Component<unknown>` at boot. Pack code accesses
+them through the `api.components` proxy under their string name
+(`api.components.PlayerInput`) which resolves through the full
+`ComponentRegistry` (built-ins + manifest entries +
+`defineComponent` calls).
+
+This is the practical realisation of §2 principle 4 ("Engine
+provides primitives, packs ship gameplay"): the engine no longer
+ships any *gameplay* components, only the rendering/lifecycle
+infrastructure components that engine code itself must touch.
+The `Systems`-component scheduler stays engine-side (§7) along
+with `AnimationSystem` (§11.4) for now; both are pack-facing
+surfaces the engine drives, not gameplay logic the engine owns.
+
 ---
 
 ## 12. Open questions

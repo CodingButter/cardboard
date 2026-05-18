@@ -29,6 +29,8 @@ export type {
   SceneOptions,
   SceneLightmap,
   SceneLightmapJSON,
+  SceneEntityJSON,
+  SceneControllerJSON,
   Cell,
   WallSegment,
   WallSegmentInput,
@@ -78,13 +80,6 @@ export type {
   SoundGroup,
   DeclarativePrefab,
 } from "./AssetPack";
-export {
-  registerDeclarativePrefabs,
-  registerDeclarativePrefabsAsync,
-  _resetInitScriptCache,
-} from "./AssetPack";
-export type { PrefabInitScript } from "./AssetPack";
-
 // Inventory types — pack-side modal UIs (InventoryScreen) need
 // `InventoryShape` so they can type the inventory component they
 // receive as a prop. The helper functions stay engine-internal; pack
@@ -117,7 +112,7 @@ export type { PartialGameConfig } from "./Settings";
 export type { GameConfig } from "./GameConfig";
 
 // KeyBindings + KeyCode — settings UI iterates bindings and binds keys.
-export type { KeyBindings } from "./Components";
+export type { KeyBindings } from "./Controllers/Bindings";
 export type { KeyCode } from "./Controllers/KeyboardController";
 
 // Raycast helpers used by the bake script.

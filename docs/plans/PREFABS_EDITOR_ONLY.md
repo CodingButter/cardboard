@@ -755,3 +755,58 @@ the only one we ship, and `hello.js` is the only consumer of
     in this dispatch per constraints).
 
 ---
+
+## 17. Re-implementation note (2026-05-17)
+
+PE2 + PE3 were originally landed on 2026-05-17 and recorded as
+shipped in §11. The sandbox-reset incident the same day (see
+`docs/SESSION_STATE.md` §2 / `docs/PLAN.md` row "Recovery
+2026-05-17") wiped the in-engine code while leaving this plan doc's
+phase-status table intact. A follow-up dispatch the same day
+re-executed PE2 + PE3 cleanly and extended scope so the engine is
+maximally unopinionated:
+
+- **Engine built-ins slimmed** to the render / lifecycle set the
+  engine code itself reads: `Position`, `Facing`, `Aim`, `Camera`,
+  `Sprite`, `Animation`, `Light`, `Shader`. Game-specific
+  components (`PlayerInput`, `Movement`, `Weapon`, `Inventory`,
+  `MinimapMarker`, `Pickup`) are deleted from `packages/engine/src/
+  Components/` and instantiated as opaque `Component<unknown>`
+  instances from `manifest.components[]` at boot.
+- **`api.components` is now a Proxy** that resolves every registered
+  name through `ComponentRegistry.getComponent(name)` — pack code
+  that reads `api.components.PlayerInput` still works because the
+  proxy walks the full registry (built-ins + manifest entries +
+  `defineComponent` calls).
+- **Scene-entity load loop** (`PREFABS_EDITOR_ONLY.md §4.2`)
+  implemented in `Game.spawnSceneEntities()`. `SceneJSON.entities[]`
+  + `SceneEntityJSON` types added; `_*` editor metadata stripped;
+  `Position` materialised to `Vec2`.
+- **`player:moved` emission** moved pack-side. The engine's
+  `Game.emitPlayerMoved` / `fireMoved` / `playerMoveTrack` are
+  gone; `packages/default-pack/scripts/systems/player-input.js`
+  owns the throttled emit with the same `PLAYER_MOVED_FRAME_THROTTLE
+  = 10` cadence.
+- **`KeyBindings`** relocated to `packages/engine/src/Controllers/
+  Bindings.ts` so the engine's universal Settings UI can type
+  bindings without depending on a `PlayerInput` component class.
+- **`DefaultSettingsSystem`** no longer iterates `PlayerInput`
+  entities to propagate binding changes — that propagation lives
+  in the pack's `settings-screen.tsx` (which already had a parallel
+  copy). Engine persists the overlay + re-applies to CONFIG;
+  per-player propagation is a pack concern.
+- **Pack-builder** drops the `prefab.initScript` discovery branch
+  (the field is gone from `DeclarativePrefab`).
+- **Default-pack** manifest drops `prefabs.player` entirely;
+  `scripts/prefabs/player-init.js` deleted (empty dir removed);
+  `scripts/systems/player-spawn.js` added to `manifest.scripts[]`
+  as the first entry; `scripts/hello.js` no longer calls
+  `api.registerPrefab("marker", …)`.
+
+Verification: `bun run typecheck` clean across engine + game +
+pack-builder + editor (one pre-existing `sharp` missing-dep error
+in pack-builder is unrelated). `bun run build-packs` produces
+`apps/game/public/packs/default.apg` (46 files, 27.3 MB). `bun
+run build` (apps/game) bundles 197 modules clean.
+
+---

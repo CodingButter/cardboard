@@ -21,6 +21,8 @@ import {
   Search,
   FileText,
   Save as SaveIcon,
+  Copy,
+  Check,
 } from "lucide-react";
 import type {
   DeclarativePrefab,
@@ -37,7 +39,7 @@ import {
   findComponentSchema,
   type ComponentFieldSpec,
 } from "../lib/componentSchemas";
-import { Button, Input, Label, Textarea } from "../components/ui";
+import { Button, Input, Label, Modal, Textarea } from "../components/ui";
 import {
   Badge,
   CollapsibleSection,
@@ -45,6 +47,7 @@ import {
   EmptyState,
   FilePicker,
   IconButton,
+  KeyValueList,
   PanelHeader,
   PropertyRow,
   ScrollArea,
@@ -65,31 +68,36 @@ import { useEditorActions } from "../shell/EditorActionsContext";
 import type { StatusBarSection } from "../components/ui/StatusBar";
 
 /**
- * E-ENT — Entities workflow tab. EDITOR_REDESIGN.md §7.3 (R4c).
+ * E-ENT — "Prefabs" workflow tab (file kept as EntitiesEditor for
+ * historical reasons; the PrimaryTab label was renamed). Lays out
+ * the per-EDITOR_REDESIGN.md §7.3 + PREFABS_EDITOR_ONLY.md surface.
  *
- * Declarative prefab authoring. The user composes a prefab from
- * components (Position, Sprite, Light, ...) by filling schema-driven
- * forms; on save the prefab lands in `manifest.prefabs[id]` and the
- * engine's `registerDeclarativePrefabs` walks that block at boot to
- * register the prefab via the same `api.registerPrefab` path the
- * JS-based prefabs (e.g. `default-pack/scripts/prefabs/player.js`)
- * use. Editor-authored prefabs coexist with JS-authored ones — the
- * left rail lists both, but JS prefabs are read-only.
+ * Prefabs are editor-only authoring templates — pure bundles of
+ * component data, no runtime registry, no `api.spawn(name)` path.
+ * Save writes the bundle into `manifest.prefabs` for editor consumption;
+ * the engine ignores that field at runtime (see PREFABS_EDITOR_ONLY.md
+ * §4). The "JS prefabs" legacy code path is preserved so existing
+ * `api.registerPrefab(...)` calls in pack scripts still surface in the
+ * list as read-only entries with a "Convert to declarative" affordance.
  *
- * R4c layout (4-section shell grammar, §7.3):
+ * Layout — strict 3-column grid (§7.3):
  *
  *   ┌──────────────┬───────────────────────────────┬──────────────┐
- *   │ Prefab list  │ Prefab name + component stack │ Per-tab      │
- *   │ + Component  │  (CollapsibleSection per      │ Assets rail  │
- *   │ palette      │   component, PropertyRows     │ (sprites +   │
- *   │              │   inside)                     │ sub-prefabs) │
+ *   │ Prefab list  │ Header strip (name + tags +   │ JSON preview │
+ *   │ (left rail)  │  "+ Add component")           │ + Save +     │
+ *   │  + palette   │ Component stack:              │ Save & Test  │
+ *   │  + import    │  CollapsibleSection per       │ (right rail) │
+ *   │              │  component, SchemaField rows  │              │
  *   └──────────────┴───────────────────────────────┴──────────────┘
- *   │ Bottom strip: validation / save status / preview thumbnail   │
- *   └──────────────────────────────────────────────────────────────┘
  *
- * The view registers a `save` action via EditorActionsContext (used by
- * the shell TopBar) and pushes three StatusBar sections — prefab-count,
- * prefab-name, prefab-validation.
+ * R2 primitives used throughout: PanelHeader, CollapsibleSection,
+ * PropertyRow, Slider, ToggleSwitch, Select, ColorChip, FilePicker,
+ * ScrollArea, Button, Badge, IconButton, EmptyState, Tooltip,
+ * StatusPill, KeyValueList, Modal (delete confirm).
+ *
+ * The view registers a `save` action via EditorActionsContext (the
+ * shell TopBar) and pushes three StatusBar sections — prefab-count,
+ * prefab-name, prefab-validation — via useStatusBar.
  */
 export interface EntitiesEditorProps {
   projectId: string;
@@ -151,8 +159,6 @@ export function EntitiesEditor({
   const [dirty, setDirty] = useState(false);
   /** Filter text for the prefab list. */
   const [filter, setFilter] = useState("");
-  /** Filter text for the per-tab Assets rail. */
-  const [assetFilter, setAssetFilter] = useState("");
   /**
    * Phase #196 — converter modal open state. When non-null, the modal
    * is open against the named JS prefab + script path.
@@ -162,6 +168,8 @@ export function EntitiesEditor({
   >(null);
   /** Per-project "keep as JS" suppression set. */
   const [keepAsJs, setKeepAsJs] = useState<ReadonlySet<string>>(new Set());
+  /** Prefab id pending delete-confirmation Modal. null when modal is closed. */
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -366,15 +374,6 @@ export function EntitiesEditor({
     return manifest?.sprites ?? {};
   }, [manifest]);
 
-  /** Sub-prefab choices for the Assets rail — every prefab the user
-   *  could reference. Filters out the currently-edited prefab so the
-   *  list doesn't suggest "drag me into myself". */
-  const subPrefabIds = useMemo<ReadonlyArray<string>>(() => {
-    return [...declarativeRows.map((r) => r.name), ...jsRows.map((r) => r.name)]
-      .filter((n) => n !== activeId)
-      .sort();
-  }, [declarativeRows, jsRows, activeId]);
-
   // ── Validation (very lightweight; placeholder for richer rules) ─
   //
   // WIRING: a richer validation system is planned (link from the
@@ -452,9 +451,13 @@ export function EntitiesEditor({
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full min-h-[640px] bg-zinc-950 text-zinc-100">
-      <div className="flex flex-1 min-h-0">
-        {/* ─── Left rail: prefab list + component palette ─── */}
+    <div className="h-full min-h-[640px] bg-zinc-950 text-zinc-100">
+      {/* ─── 3-column grid: prefab list │ component editor │ JSON preview ─── */}
+      <div
+        className="grid h-full min-h-0"
+        style={{ gridTemplateColumns: "300px minmax(0,1fr) 380px" }}
+      >
+        {/* ─── LEFT — prefab list (+ palette + import) ─── */}
         <PrefabListRail
           declarative={filteredDeclarative}
           jsRows={filteredJs}
@@ -465,7 +468,7 @@ export function EntitiesEditor({
           onFilterChange={setFilter}
           onSelect={setActiveId}
           onNewPrefab={handleNewPrefab}
-          onDelete={handleDelete}
+          onRequestDelete={setPendingDelete}
           onImportFiles={handleImportFiles}
           paletteEnabled={
             activeRow?.kind === "declarative" && activeRow.data !== undefined
@@ -478,8 +481,8 @@ export function EntitiesEditor({
           onAddComponent={addComponent}
         />
 
-        {/* ─── Center: prefab editor ─── */}
-        <section className="flex-1 min-w-0 overflow-hidden flex flex-col bg-zinc-950/20">
+        {/* ─── CENTER — component editor ─── */}
+        <section className="min-w-0 overflow-hidden flex flex-col bg-zinc-950/20 border-r border-zinc-800">
           {activeRow ? (
             activeRow.kind === "declarative" ? (
               <DeclarativeForm
@@ -512,40 +515,70 @@ export function EntitiesEditor({
               />
             )
           ) : (
-            <div className="h-full flex items-center justify-center">
+            <div className="h-full flex items-center justify-center p-6">
               <EmptyState
                 icon={<Cuboid size={28} />}
                 title="No prefab selected"
-                description='Pick a prefab on the left or click "+ New" to author one. A prefab is a reusable bundle of components scripts can spawn via api.spawn("id").'
+                description='Pick a prefab on the left or click "+ New" to author one. A prefab is a reusable bundle of components — engine-ignored at runtime, stamped onto entities at scene-save time.'
                 tutorial="entities-intro"
               />
             </div>
           )}
         </section>
 
-        {/* ─── Right rail: per-tab Assets (sprites + sub-prefabs) ─── */}
-        <AssetsRail
-          spriteIds={spriteIds}
-          spritesById={spritesById}
-          subPrefabIds={subPrefabIds}
-          filter={assetFilter}
-          onFilterChange={setAssetFilter}
-          targetEnabled={activeRow?.kind === "declarative"}
+        {/* ─── RIGHT — JSON preview + Save ─── */}
+        <JsonPreviewRail
+          active={activeRow}
+          dirty={dirty}
+          saving={saving}
+          savedAt={savedAt}
+          error={error}
+          validationIssues={validationIssues}
+          onSave={() => handleSave(false)}
+          onSaveAndTest={() => handleSave(true)}
+          manifestReady={!!manifest}
         />
       </div>
 
-      {/* ─── Bottom strip: validation + save status + preview thumb ─── */}
-      <BottomStrip
-        active={activeRow}
-        dirty={dirty}
-        saving={saving}
-        savedAt={savedAt}
-        error={error}
-        validationIssues={validationIssues}
-        onSave={() => handleSave(false)}
-        onSaveAndTest={() => handleSave(true)}
-        manifestReady={!!manifest}
-      />
+      {/* ─── Delete-confirm Modal ─── */}
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title={
+          <span className="flex items-center gap-2">
+            <Trash2 size={16} className="text-red-400" /> Delete prefab?
+          </span>
+        }
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPendingDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (pendingDelete) handleDelete(pendingDelete);
+                setPendingDelete(null);
+              }}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-zinc-300">
+          This will remove{" "}
+          <code className="font-mono text-amber-300">{pendingDelete}</code>{" "}
+          from the prefab list. Existing entities stamped from this
+          prefab keep their component data — only the template is
+          removed.
+        </p>
+      </Modal>
 
       {converterTarget ? (
         <PrefabConverterModal
@@ -582,7 +615,8 @@ interface PrefabListRailProps {
   onFilterChange: (next: string) => void;
   onSelect: (id: string) => void;
   onNewPrefab: () => void;
-  onDelete: (id: string) => void;
+  /** Opens the delete-confirm Modal in the parent. */
+  onRequestDelete: (id: string) => void;
   onImportFiles: (files: File[]) => void;
   paletteEnabled: boolean;
   presentComponents: ReadonlyArray<string>;
@@ -599,27 +633,29 @@ function PrefabListRail({
   onFilterChange,
   onSelect,
   onNewPrefab,
-  onDelete,
+  onRequestDelete,
   onImportFiles,
   paletteEnabled,
   presentComponents,
   onAddComponent,
 }: PrefabListRailProps) {
   return (
-    <aside className="w-72 shrink-0 border-r border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+    <aside className="min-w-0 border-r border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
       <PanelHeader
-        title="Entities"
+        title="Prefabs"
         action={
           <>
             <Badge variant="zinc">{totalCount}</Badge>
             <Tooltip content="New declarative prefab" side="bottom">
-              <IconButton
-                icon={<Plus size={14} />}
-                tooltip="New prefab"
+              <Button
                 variant="primary"
                 size="sm"
                 onClick={onNewPrefab}
-              />
+                className="h-7 px-2 text-[11px]"
+              >
+                <Plus size={12} className="mr-1" />
+                New
+              </Button>
             </Tooltip>
           </>
         }
@@ -649,6 +685,14 @@ function PrefabListRail({
               {filter
                 ? "No prefabs match that search."
                 : 'No prefabs yet. Click "+ New" to author one.'}
+            </li>
+          ) : null}
+
+          {declarative.length > 0 ? (
+            <li className="px-3 mt-1 mb-1">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                User prefabs
+              </div>
             </li>
           ) : null}
 
@@ -696,9 +740,7 @@ function PrefabListRail({
                     size="sm"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (confirm(`Delete prefab "${row.name}"?`)) {
-                        onDelete(row.name);
-                      }
+                      onRequestDelete(row.name);
                     }}
                     className="opacity-0 group-hover:opacity-100"
                   />
@@ -708,8 +750,10 @@ function PrefabListRail({
           })}
 
           {jsRows.length > 0 ? (
-            <li className="px-3 mt-2 mb-1">
-              <PanelHeader title="From scripts" size="sm" />
+            <li className="px-3 mt-3 mb-1">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                From scripts
+              </div>
             </li>
           ) : null}
           {jsRows.map((row) => {
@@ -749,10 +793,13 @@ function PrefabListRail({
         </ul>
       </ScrollArea>
 
-      {/* Component palette — visible when a declarative prefab is active. */}
-      <div className="border-t border-zinc-800">
-        <PanelHeader title="Component palette" size="sm" />
-        <div className="px-3 py-2 max-h-[40%] overflow-auto">
+      {/* Component palette + import — collapsible sections so they
+       *  don't crowd the prefab list. */}
+      <div className="shrink-0 border-t border-zinc-800">
+        <CollapsibleSection
+          title="Component palette"
+          defaultOpen={paletteEnabled}
+        >
           {paletteEnabled ? (
             <div className="grid grid-cols-2 gap-1.5">
               {BUILT_IN_COMPONENT_SCHEMAS.map((s) => {
@@ -789,225 +836,30 @@ function PrefabListRail({
               Select a declarative prefab to add components.
             </p>
           )}
-        </div>
-      </div>
+        </CollapsibleSection>
 
-      {/* FilePicker dropzone for prefab JSON imports. */}
-      <div className="border-t border-zinc-800 p-2">
-        <FilePicker
-          mode="dropzone"
-          accept="application/json,.json"
-          multiple
-          onFiles={onImportFiles}
-          className="!py-3 !px-2"
-        >
-          <FileText size={18} className="text-zinc-500" />
-          <div className="text-[11px] text-zinc-400 leading-tight">
-            Drag &amp; drop prefab JSON
-          </div>
-        </FilePicker>
+        <CollapsibleSection title="Import" defaultOpen={false}>
+          <FilePicker
+            mode="dropzone"
+            accept="application/json,.json"
+            multiple
+            onFiles={onImportFiles}
+            className="!py-3 !px-2"
+          >
+            <FileText size={18} className="text-zinc-500" />
+            <div className="text-[11px] text-zinc-400 leading-tight">
+              Drag &amp; drop prefab JSON
+            </div>
+          </FilePicker>
+        </CollapsibleSection>
       </div>
     </aside>
   );
 }
 
-// ── Right rail: per-tab Assets ─────────────────────────────────────────
+// ── Right rail: JSON preview + Save (§7.3) ─────────────────────────────
 
-interface AssetsRailProps {
-  spriteIds: ReadonlyArray<string>;
-  spritesById: Readonly<Record<string, SpriteDef>>;
-  subPrefabIds: ReadonlyArray<string>;
-  filter: string;
-  onFilterChange: (next: string) => void;
-  targetEnabled: boolean;
-}
-
-/**
- * Per-tab Assets rail (§7.3): contextual sprite + sub-prefab browser.
- *
- * Drag semantics — each tile sets `text/plain` to the asset id and a
- * custom `application/x-cardboard-prefab-asset` MIME with `{kind,id}`.
- * WIRING: the matching `onDrop` handlers inside component sub-forms
- * (e.g. drop a sprite onto Sprite.imageId, drop a prefab onto a slot
- * that accepts a prefab id) land in a follow-up — R4c ships the rail
- * + drag source, R4c+ wires the drop targets per-component.
- */
-function AssetsRail({
-  spriteIds,
-  spritesById,
-  subPrefabIds,
-  filter,
-  onFilterChange,
-  targetEnabled,
-}: AssetsRailProps) {
-  const filteredSprites = useMemo(() => {
-    if (!filter.trim()) return spriteIds;
-    const f = filter.trim().toLowerCase();
-    return spriteIds.filter((id) => id.toLowerCase().includes(f));
-  }, [spriteIds, filter]);
-  const filteredPrefabs = useMemo(() => {
-    if (!filter.trim()) return subPrefabIds;
-    const f = filter.trim().toLowerCase();
-    return subPrefabIds.filter((id) => id.toLowerCase().includes(f));
-  }, [subPrefabIds, filter]);
-
-  return (
-    <aside className="w-72 shrink-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
-      <PanelHeader
-        title="Assets"
-        action={
-          <Badge variant="zinc">
-            {filteredSprites.length + filteredPrefabs.length}
-          </Badge>
-        }
-      />
-      <div className="px-3 py-2 border-b border-zinc-800">
-        <div className="relative">
-          <Search
-            size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
-          />
-          <Input
-            value={filter}
-            onChange={(e) => onFilterChange(e.target.value)}
-            placeholder="Filter sprites &amp; prefabs…"
-            className="h-8 pl-7 text-xs"
-          />
-        </div>
-      </div>
-
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="px-3 py-2 space-y-3">
-          {/* Sprites section. */}
-          <section>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
-                Sprites
-              </div>
-              <Badge variant="zinc">{filteredSprites.length}</Badge>
-            </div>
-            {filteredSprites.length === 0 ? (
-              <p className="text-[11px] text-zinc-500">
-                {spriteIds.length === 0
-                  ? "No sprites in manifest. Add via the Assets tab."
-                  : "No sprites match that filter."}
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {filteredSprites.map((id) => {
-                  const def = spritesById[id];
-                  const anims = def?.animations
-                    ? Object.keys(def.animations).length
-                    : 0;
-                  return (
-                    <li
-                      key={id}
-                      draggable={targetEnabled}
-                      onDragStart={(e) => {
-                        // WIRING — drop targets inside Sprite.imageId
-                        // PropertyRow are stubbed; for now the drag
-                        // source carries the id on `text/plain`. The
-                        // user can also click-pick via the existing
-                        // <Select> inside Sprite's editor.
-                        e.dataTransfer.setData("text/plain", id);
-                        e.dataTransfer.setData(
-                          "application/x-cardboard-prefab-asset",
-                          JSON.stringify({ kind: "sprite", id }),
-                        );
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
-                      className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 rounded border border-zinc-800",
-                        "bg-zinc-900/40",
-                        targetEnabled
-                          ? "cursor-grab hover:border-amber-500/60 hover:bg-amber-500/5"
-                          : "opacity-60 cursor-default",
-                      )}
-                      title={
-                        targetEnabled
-                          ? `Drag onto a Sprite component to wire ${id}`
-                          : "Select a declarative prefab to drag this in"
-                      }
-                    >
-                      <ImageIcon size={14} className="text-sky-400 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs text-zinc-100 truncate font-mono">
-                          {id}
-                        </div>
-                        {def?.image ? (
-                          <div className="text-[10px] text-zinc-500 truncate">
-                            {def.image}
-                          </div>
-                        ) : null}
-                      </div>
-                      {anims > 0 ? (
-                        <Badge variant="amber">{anims}a</Badge>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          {/* Sub-prefabs section. */}
-          <section>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
-                Sub-prefabs
-              </div>
-              <Badge variant="zinc">{filteredPrefabs.length}</Badge>
-            </div>
-            {filteredPrefabs.length === 0 ? (
-              <p className="text-[11px] text-zinc-500">
-                {subPrefabIds.length === 0
-                  ? "No other prefabs yet."
-                  : "No prefabs match that filter."}
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {filteredPrefabs.map((id) => (
-                  <li
-                    key={id}
-                    draggable={targetEnabled}
-                    onDragStart={(e) => {
-                      // WIRING — sub-prefab drop targets (Weapon.bullet,
-                      // Pickup.contents, etc.) are stubbed. Drag source
-                      // ready; consumer-side drop wiring lands per
-                      // component as needed.
-                      e.dataTransfer.setData("text/plain", id);
-                      e.dataTransfer.setData(
-                        "application/x-cardboard-prefab-asset",
-                        JSON.stringify({ kind: "prefab", id }),
-                      );
-                      e.dataTransfer.effectAllowed = "copy";
-                    }}
-                    className={cn(
-                      "flex items-center gap-2 px-2 py-1.5 rounded border border-zinc-800",
-                      "bg-zinc-900/40",
-                      targetEnabled
-                        ? "cursor-grab hover:border-amber-500/60 hover:bg-amber-500/5"
-                        : "opacity-60 cursor-default",
-                    )}
-                  >
-                    <Cuboid size={14} className="text-purple-400 shrink-0" />
-                    <span className="text-xs text-zinc-100 truncate font-mono flex-1">
-                      {id}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
-      </ScrollArea>
-    </aside>
-  );
-}
-
-// ── Bottom strip ───────────────────────────────────────────────────────
-
-interface BottomStripProps {
+interface JsonPreviewRailProps {
   active: PrefabRow | undefined;
   dirty: boolean;
   saving: boolean;
@@ -1019,7 +871,13 @@ interface BottomStripProps {
   manifestReady: boolean;
 }
 
-function BottomStrip({
+/**
+ * Right inspector (§7.3): JSON PREVIEW card with a read-only monospace
+ * block of the resolved prefab JSON, a KeyValueList readout of prefab
+ * stats (component count, tag count, validation), and the SAVE +
+ * SAVE & TEST action buttons at the bottom.
+ */
+function JsonPreviewRail({
   active,
   dirty,
   saving,
@@ -1029,92 +887,160 @@ function BottomStrip({
   onSave,
   onSaveAndTest,
   manifestReady,
-}: BottomStripProps) {
-  // WIRING — Preview thumbnail is intentionally a tiny composed glyph
-  // for R4c; the real per-prefab thumbnail bake (using the existing
-  // sprite atlas + first-frame composite) lands as a follow-up. For
-  // now the slot shows a Cuboid icon over the prefab name so the
-  // strip layout is stable.
-  const saveState: "saved" | "saving" | "dirty" | "error" | "idle" =
-    error ? "error"
-      : saving ? "saving"
-      : dirty ? "dirty"
-      : savedAt ? "saved"
-      : "idle";
+}: JsonPreviewRailProps) {
+  const [copied, setCopied] = useState(false);
+  const json = useMemo(() => {
+    if (!active) return "// No prefab selected.";
+    if (active.kind === "js") {
+      return `// JS prefab (read-only) — registered via api.registerPrefab\n// in ${active.scriptPath ?? "?"}.`;
+    }
+    return JSON.stringify(active.data ?? {}, null, 2);
+  }, [active]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard?.writeText(json);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* ignore — non-secure context fallback would go here */
+    }
+  };
+
+  const compCount =
+    active?.kind === "declarative"
+      ? Object.keys(active.data?.components ?? {}).length
+      : 0;
+  const tagCount =
+    active?.kind === "declarative" ? (active.data?.tags?.length ?? 0) : 0;
+
+  const saveState: "saved" | "saving" | "dirty" | "error" | "idle" = error
+    ? "error"
+    : saving
+    ? "saving"
+    : dirty
+    ? "dirty"
+    : savedAt
+    ? "saved"
+    : "idle";
+
+  const savePill: React.ReactNode =
+    saveState === "saving" ? (
+      <StatusPill variant="info">Saving…</StatusPill>
+    ) : saveState === "dirty" ? (
+      <StatusPill variant="warn">Unsaved changes</StatusPill>
+    ) : saveState === "error" ? (
+      <StatusPill variant="error">Save failed</StatusPill>
+    ) : saveState === "saved" ? (
+      <StatusPill variant="ok">
+        Saved {savedAt ? new Date(savedAt).toLocaleTimeString() : ""}
+      </StatusPill>
+    ) : (
+      <StatusPill variant="neutral" noDot>
+        Ready
+      </StatusPill>
+    );
+
+  const validationPill: React.ReactNode =
+    active?.kind === "declarative" ? (
+      validationIssues.length === 0 ? (
+        <StatusPill variant="ok">OK</StatusPill>
+      ) : (
+        <Tooltip content={validationIssues.join(" · ")} side="top">
+          <StatusPill variant="warn">
+            {validationIssues.length} warning
+            {validationIssues.length === 1 ? "" : "s"}
+          </StatusPill>
+        </Tooltip>
+      )
+    ) : active?.kind === "js" ? (
+      <StatusPill variant="neutral">read-only</StatusPill>
+    ) : (
+      <StatusPill variant="neutral">—</StatusPill>
+    );
 
   return (
-    <footer
-      className={cn(
-        "shrink-0 border-t border-zinc-800 bg-zinc-950/60",
-        "flex items-center gap-4 px-4 py-2 min-h-[48px]",
-      )}
-    >
-      {/* Preview thumb slot. */}
-      <div
-        className={cn(
-          "shrink-0 w-10 h-10 rounded border border-zinc-800 bg-zinc-900",
-          "flex items-center justify-center text-zinc-500",
-        )}
-        title="Prefab preview (WIRING — thumbnail bake lands later)"
-      >
-        <Cuboid size={20} />
+    <aside className="min-w-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+      <PanelHeader
+        title="JSON Preview"
+        action={
+          <Tooltip
+            content={copied ? "Copied!" : "Copy JSON to clipboard"}
+            side="bottom"
+          >
+            <IconButton
+              icon={
+                copied ? (
+                  <Check size={14} className="text-green-400" />
+                ) : (
+                  <Copy size={14} />
+                )
+              }
+              tooltip={copied ? "Copied" : "Copy JSON"}
+              variant="ghost"
+              size="sm"
+              onClick={copy}
+              disabled={!active || active.kind !== "declarative"}
+            />
+          </Tooltip>
+        }
+      />
+
+      {/* Stats readout — KeyValueList (R2 primitive). */}
+      <div className="px-3 py-2 border-b border-zinc-800">
+        <KeyValueList
+          density="dense"
+          divided={false}
+          rows={[
+            {
+              label: "Prefab",
+              value: (
+                <span className="font-mono text-zinc-200 truncate">
+                  {active?.name ?? "—"}
+                </span>
+              ),
+            },
+            {
+              label: "Kind",
+              value: (
+                <Badge variant={active?.kind === "js" ? "amber" : "zinc"}>
+                  {active?.kind ?? "—"}
+                </Badge>
+              ),
+            },
+            { label: "Components", value: String(compCount) },
+            { label: "Tags", value: String(tagCount) },
+            { label: "Validation", value: validationPill },
+            { label: "Save", value: savePill },
+          ]}
+        />
       </div>
 
-      {/* Validation summary. */}
-      <div className="flex-1 min-w-0 flex items-center gap-3 text-xs">
-        {active?.kind === "declarative" ? (
-          validationIssues.length === 0 ? (
-            <StatusPill variant="ok">Validation OK</StatusPill>
-          ) : (
-            <Tooltip
-              content={validationIssues.join(" · ")}
-              side="top"
-            >
-              <StatusPill variant="warn">
-                {validationIssues.length} warning
-                {validationIssues.length === 1 ? "" : "s"}
-              </StatusPill>
-            </Tooltip>
-          )
-        ) : active?.kind === "js" ? (
-          <StatusPill variant="neutral">JS prefab (read-only)</StatusPill>
-        ) : (
-          <StatusPill variant="neutral">No prefab selected</StatusPill>
-        )}
+      {/* JSON body — monospace, read-only, scrollable. */}
+      <div className="flex-1 min-h-0 p-3">
+        <div className="h-full rounded-md border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+          <ScrollArea className="h-full">
+            <pre className="px-3 py-2.5 text-[11px] font-mono text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+              {json}
+            </pre>
+          </ScrollArea>
+        </div>
+      </div>
+
+      {/* Save action footer. */}
+      <div className="shrink-0 border-t border-zinc-800 p-3 flex flex-col gap-2 bg-zinc-950/60">
         {error ? (
-          <span className="text-red-300 truncate">{error}</span>
+          <div className="text-[11px] text-red-300 leading-snug">{error}</div>
         ) : null}
-      </div>
-
-      {/* Save status pill. */}
-      <div className="shrink-0">
-        {saveState === "saving" ? (
-          <StatusPill variant="info">Saving…</StatusPill>
-        ) : saveState === "dirty" ? (
-          <StatusPill variant="warn">Unsaved changes</StatusPill>
-        ) : saveState === "error" ? (
-          <StatusPill variant="error">Save failed</StatusPill>
-        ) : saveState === "saved" ? (
-          <StatusPill variant="ok">
-            Saved {savedAt ? new Date(savedAt).toLocaleTimeString() : ""}
-          </StatusPill>
-        ) : (
-          <StatusPill variant="neutral" noDot>
-            Ready
-          </StatusPill>
-        )}
-      </div>
-
-      {/* Save buttons. */}
-      <div className="shrink-0 flex items-center gap-2">
         <Tooltip content="Save the current prefab edits" side="top">
           <Button
             variant="primary"
-            size="sm"
+            size="md"
             disabled={saving || !dirty || !manifestReady}
             onClick={onSave}
+            className="w-full h-10 text-sm"
           >
-            <SaveIcon size={14} className="mr-1" />
+            <SaveIcon size={14} className="mr-1.5" />
             Save
           </Button>
         </Tooltip>
@@ -1124,15 +1050,16 @@ function BottomStrip({
         >
           <Button
             variant="secondary"
-            size="sm"
+            size="md"
             disabled={saving || !manifestReady}
             onClick={onSaveAndTest}
+            className="w-full"
           >
             Save &amp; Test
           </Button>
         </Tooltip>
       </div>
-    </footer>
+    </aside>
   );
 }
 
@@ -1198,27 +1125,38 @@ function DeclarativeForm({
       <div className="p-5 space-y-5 max-w-3xl mx-auto">
         {/* ─── Prefab header card ─── */}
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <Cuboid size={18} className="text-amber-400 shrink-0" />
-              <Input
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={() => {
-                  const trimmed = nameDraft.trim();
-                  if (trimmed && trimmed !== prefab.name) onRename(trimmed);
-                  else setNameDraft(prefab.name);
-                }}
-                placeholder="zombie"
-                className="font-mono text-sm bg-transparent border-0 shadow-none px-1 focus-visible:bg-zinc-900"
-              />
+          <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-3">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="h-8 w-8 rounded-md bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Cuboid size={16} className="text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium leading-none mb-1">
+                  Editing prefab
+                </div>
+                <Input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={() => {
+                    const trimmed = nameDraft.trim();
+                    if (trimmed && trimmed !== prefab.name) onRename(trimmed);
+                    else setNameDraft(prefab.name);
+                  }}
+                  placeholder="zombie"
+                  className="h-7 font-mono text-sm bg-transparent border-0 shadow-none px-0 focus-visible:bg-zinc-900 focus-visible:px-2 -ml-0.5"
+                />
+              </div>
             </div>
-            <div className="shrink-0">
+            <div className="shrink-0 flex items-center gap-2">
+              <Badge variant="zinc" outlined>
+                {Object.keys(prefab.components).length} comp
+                {Object.keys(prefab.components).length === 1 ? "" : "s"}
+              </Badge>
               {availableToAdd.length > 0 ? (
                 <Select
                   size="sm"
                   options={[
-                    { value: "", label: "+ Add component…" },
+                    { value: "", label: "+ Add component" },
                     ...availableToAdd.map((n) => ({ value: n, label: n })),
                   ]}
                   value=""
@@ -1229,15 +1167,17 @@ function DeclarativeForm({
                       e.target.value = "";
                     }
                   }}
-                  className="!w-44"
+                  className="!w-40"
                 />
               ) : (
-                <Badge variant="zinc">All built-ins attached</Badge>
+                <Badge variant="amber" outlined>
+                  All built-ins attached
+                </Badge>
               )}
             </div>
           </div>
 
-          <div className="px-4 py-3 space-y-3">
+          <div className="px-4 py-3 space-y-1 divide-y divide-zinc-800/60">
             <PropertyRow
               label="Description"
               stacked
@@ -1862,7 +1802,13 @@ function PrefabConverterModal({
         components: preview.staticComponents,
       };
       if (preview.residualLines.trim().length > 0) {
-        newPrefab.initScript = initPath;
+        // `initScript` was deprecated by PREFABS_EDITOR_ONLY (#290) and
+        // removed from the `DeclarativePrefab` type. The converter UI
+        // is preserved verbatim for legacy JS-prefab round-trips — the
+        // residual init body still gets written to disk so authors can
+        // fold the leftover logic into a Systems component manually.
+        (newPrefab as DeclarativePrefab & { initScript?: string }).initScript =
+          initPath;
         await EditorProjectStore.saveAsset(projectId, initPath, initBody);
       }
       const nextScripts = (manifest.scripts ?? []).filter(

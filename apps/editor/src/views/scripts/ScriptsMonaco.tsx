@@ -1,9 +1,8 @@
 import React from "react";
-import { X, Save as SaveIcon } from "lucide-react";
+import { X } from "lucide-react";
 import * as monaco from "monaco-editor";
 import Editor, { loader, type OnMount } from "@monaco-editor/react";
 import { cn } from "../../lib/cn";
-import { IconButton, Tooltip } from "../../components/ui/index";
 import { MOD_API_TYPES, MOD_API_TYPES_PATH } from "./modApiTypes";
 
 /**
@@ -207,6 +206,8 @@ export interface ScriptsMonacoHandle {
   insertAtCursor: (text: string) => void;
   /** Focus the editor pane (e.g. after picking a file from the rail). */
   focus: () => void;
+  /** Run Monaco's built-in `editor.action.formatDocument` on the active file. */
+  formatDocument: () => void;
 }
 
 export const ScriptsMonaco = React.forwardRef<
@@ -278,6 +279,11 @@ export const ScriptsMonaco = React.forwardRef<
       focus() {
         editorRef.current?.focus();
       },
+      formatDocument() {
+        const ed = editorRef.current;
+        if (!ed) return;
+        void ed.getAction("editor.action.formatDocument")?.run();
+      },
     }),
     [],
   );
@@ -343,18 +349,6 @@ export const ScriptsMonaco = React.forwardRef<
           })
         )}
         <div className="flex-1" />
-        {active?.dirty && (
-          <div className="flex items-center px-2">
-            <Tooltip content="Save (Ctrl/Cmd+S)">
-              <IconButton
-                icon={<SaveIcon size={13} />}
-                tooltip="Save"
-                variant="primary"
-                onClick={onSaveActive}
-              />
-            </Tooltip>
-          </div>
-        )}
       </div>
 
       {/* Editor surface. When no file is active we render a minimal

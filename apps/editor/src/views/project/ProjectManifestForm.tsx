@@ -4,15 +4,20 @@ import type { AssetMeta } from "../../lib/EditorProjectStore";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   Button,
   Input,
   Textarea,
+  Label,
 } from "../../components/ui";
-import { PropertyRow, Select, Badge, EmptyState } from "../../components/ui/index";
-import { Scroll } from "lucide-react";
+import {
+  PropertyRow,
+  Select,
+  Badge,
+  EmptyState,
+  PanelHeader,
+  CollapsibleSection,
+} from "../../components/ui/index";
+import { Scroll, RefreshCw } from "lucide-react";
 
 /**
  * ProjectManifestForm — R4f Project tab → Manifest sub-view.
@@ -75,12 +80,34 @@ export interface ProjectManifestFormProps {
   manifest: PackManifest;
   assets: ReadonlyArray<AssetMeta>;
   onSave: (next: PackManifest) => Promise<void>;
+  /** Notify parent when draft diverges from saved manifest — drives the
+   *  StatusBar "manifest dirty" badge in ProjectTabView. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Exposes the form's save handler so parent EditorActions can flush
+   *  the manifest from the TopBar Save button. */
+  saveRef?: React.MutableRefObject<(() => Promise<void>) | null>;
+}
+
+function fieldsEqual(a: ManifestFormFields, b: ManifestFormFields): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.version === b.version &&
+    a.engine === b.engine &&
+    a.description === b.description &&
+    a.author === b.author &&
+    a.homepage === b.homepage &&
+    a.license === b.license &&
+    a.startScene === b.startScene
+  );
 }
 
 export function ProjectManifestForm({
   manifest,
   assets,
   onSave,
+  onDirtyChange,
+  saveRef,
 }: ProjectManifestFormProps) {
   const [form, setForm] = useState<ManifestFormFields>(() => pickFields(manifest));
   const [saving, setSaving] = useState(false);
@@ -89,6 +116,13 @@ export function ProjectManifestForm({
   useEffect(() => {
     setForm(pickFields(manifest));
   }, [manifest]);
+
+  const baseline = useMemo(() => pickFields(manifest), [manifest]);
+  const dirty = useMemo(() => !fieldsEqual(form, baseline), [form, baseline]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const sceneAssets = useMemo(
     () => assets.filter((a) => a.path.startsWith("scenes/")),
@@ -106,6 +140,17 @@ export function ProjectManifestForm({
       setSaving(false);
     }
   };
+
+  // Expose the save handler so the parent's EditorActions registration
+  // can call it from the TopBar's Save button.
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = handleSave;
+    return () => {
+      saveRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveRef, form, manifest]);
 
   // Build the scene select's options. Preserve a `(not in pack)` entry
   // if the manifest currently points at a missing scene, so the user
@@ -126,153 +171,217 @@ export function ProjectManifestForm({
     }
   }
 
+  // "Reload Running Game" footer button (per ProjectSettings.png) —
+  // broadcasts a reset message to every reachable iframe (mirrors the
+  // `Save & Test` flow used by EntitiesEditor). The button is harmless
+  // when no playtest frame is open.
+  const handleReloadRunningGame = () => {
+    try {
+      for (const f of Array.from(window.parent.frames)) {
+        try {
+          f.postMessage({ type: "reset" }, "*");
+        } catch {
+          // Frames we don't own throw — ignore.
+        }
+      }
+    } catch {
+      // No frame parent — also fine.
+    }
+  };
+
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4 max-w-5xl">
+      {/* Manifest card — 2-column form layout matches ProjectSettings.png:
+       *  left column carries pack identity (id, name, version, engine,
+       *  description); right column carries the entry-point scene + the
+       *  attribution fields (author, homepage, license).
+       */}
       <Card>
-        <CardHeader>
-          <CardTitle>Identity</CardTitle>
-          <CardDescription>
-            Pack metadata that ships with the manifest. The `id` field is
-            the globally-unique handle used by the dep resolver — change
-            with care.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 divide-y divide-zinc-800/60">
-          <PropertyRow label="Pack id" hint="Globally unique handle.">
-            <Input
-              value={form.id}
-              onChange={(e) => setForm({ ...form, id: e.target.value })}
-              placeholder="my-pack"
-            />
-          </PropertyRow>
-          <PropertyRow label="Name">
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="My Pack"
-            />
-          </PropertyRow>
-          <PropertyRow label="Version" hint="Semver — bump on every export.">
-            <Input
-              value={form.version}
-              onChange={(e) => setForm({ ...form, version: e.target.value })}
-              placeholder="0.1.0"
-            />
-          </PropertyRow>
-          <PropertyRow label="Engine range" hint="Semver range — '*' means any.">
-            <Input
-              value={form.engine}
-              onChange={(e) => setForm({ ...form, engine: e.target.value })}
-              placeholder="*"
-            />
-          </PropertyRow>
-          <PropertyRow label="Description" stacked>
-            <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={3}
-              placeholder="One-paragraph summary surfaced on the home screen."
-            />
-          </PropertyRow>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Attribution</CardTitle>
-          <CardDescription>
-            Author + license info. Empty fields are stripped from the
-            exported manifest.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 divide-y divide-zinc-800/60">
-          <PropertyRow label="Author">
-            <Input
-              value={form.author}
-              onChange={(e) => setForm({ ...form, author: e.target.value })}
-              placeholder="@codingbutter"
-            />
-          </PropertyRow>
-          <PropertyRow label="Homepage">
-            <Input
-              value={form.homepage}
-              onChange={(e) => setForm({ ...form, homepage: e.target.value })}
-              placeholder="https://…"
-            />
-          </PropertyRow>
-          <PropertyRow label="License" hint="SPDX identifier (e.g. MIT, CC-BY-4.0).">
-            <Input
-              value={form.license}
-              onChange={(e) => setForm({ ...form, license: e.target.value })}
-              placeholder="MIT"
-            />
-          </PropertyRow>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Entry point</CardTitle>
-          <CardDescription>
-            Scene loaded at boot. Drives the Map view's default selection
-            and what the runtime renders on cold start.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <PropertyRow label="Start scene" stacked>
-            <Select
-              value={form.startScene}
-              onChange={(e) => setForm({ ...form, startScene: e.target.value })}
-              options={sceneSelectOptions}
-            />
-          </PropertyRow>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>Scripts</CardTitle>
-              <CardDescription>
-                Display-only — script authoring lives in the Scripts tab
-                (#193). Listed in load order.
-              </CardDescription>
+        <PanelHeader
+          title="Manifest"
+          action={
+            <>
+              {dirty ? (
+                <Badge variant="amber" outlined>
+                  Dirty
+                </Badge>
+              ) : (
+                <Badge variant="emerald" outlined>
+                  Clean
+                </Badge>
+              )}
+              {savedAt ? (
+                <span className="text-[11px] text-zinc-500">
+                  Saved {new Date(savedAt).toLocaleTimeString()}
+                </span>
+              ) : null}
+            </>
+          }
+        />
+        <CardContent className="pt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-1">
+            {/* ── Left column: pack identity ── */}
+            <div className="space-y-1 divide-y divide-zinc-800/60">
+              <div className="pb-2">
+                <Label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Pack identity
+                </Label>
+              </div>
+              <PropertyRow label="Pack id" stacked hint="Globally unique handle.">
+                <Input
+                  value={form.id}
+                  onChange={(e) => setForm({ ...form, id: e.target.value })}
+                  placeholder="my-pack"
+                />
+              </PropertyRow>
+              <PropertyRow label="Name" stacked>
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="My Pack"
+                />
+              </PropertyRow>
+              <PropertyRow
+                label="Version"
+                stacked
+                hint="Semver — bump on every export."
+              >
+                <Input
+                  value={form.version}
+                  onChange={(e) => setForm({ ...form, version: e.target.value })}
+                  placeholder="0.1.0"
+                />
+              </PropertyRow>
+              <PropertyRow
+                label="Engine range"
+                stacked
+                hint="Semver range — '*' means any."
+              >
+                <Input
+                  value={form.engine}
+                  onChange={(e) => setForm({ ...form, engine: e.target.value })}
+                  placeholder="*"
+                />
+              </PropertyRow>
+              <PropertyRow label="Description" stacked>
+                <Textarea
+                  value={form.description}
+                  onChange={(e) =>
+                    setForm({ ...form, description: e.target.value })
+                  }
+                  rows={4}
+                  placeholder="One-paragraph summary surfaced on the home screen."
+                />
+              </PropertyRow>
             </div>
-            {scriptsList.length > 0 ? (
-              <Badge variant="zinc">{scriptsList.length}</Badge>
-            ) : null}
+
+            {/* ── Right column: attribution + entry-point ── */}
+            <div className="space-y-1 divide-y divide-zinc-800/60">
+              <div className="pb-2">
+                <Label className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Attribution &amp; entry point
+                </Label>
+              </div>
+              <PropertyRow label="Author" stacked>
+                <Input
+                  value={form.author}
+                  onChange={(e) => setForm({ ...form, author: e.target.value })}
+                  placeholder="@codingbutter"
+                />
+              </PropertyRow>
+              <PropertyRow label="Homepage" stacked>
+                <Input
+                  value={form.homepage}
+                  onChange={(e) => setForm({ ...form, homepage: e.target.value })}
+                  placeholder="https://…"
+                />
+              </PropertyRow>
+              <PropertyRow
+                label="License"
+                stacked
+                hint="SPDX identifier (e.g. MIT, CC-BY-4.0)."
+              >
+                <Input
+                  value={form.license}
+                  onChange={(e) => setForm({ ...form, license: e.target.value })}
+                  placeholder="MIT"
+                />
+              </PropertyRow>
+              <PropertyRow label="Start scene" stacked>
+                <Select
+                  value={form.startScene}
+                  onChange={(e) =>
+                    setForm({ ...form, startScene: e.target.value })
+                  }
+                  options={sceneSelectOptions}
+                />
+              </PropertyRow>
+              <div className="pt-3">
+                <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200/90 leading-relaxed">
+                  These settings shape your project&apos;s identity and
+                  entry point. Bump the version before exporting an
+                  update.
+                </div>
+              </div>
+            </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          {scriptsList.length === 0 ? (
-            <EmptyState
-              icon={<Scroll size={26} />}
-              title="No manifest scripts"
-              description="Add scripts from the Scripts tab — they will appear here once registered."
-              tutorial="project-scripts"
-            />
-          ) : (
-            <ul className="rounded border border-zinc-800 bg-zinc-950/40 divide-y divide-zinc-800 text-xs font-mono">
-              {scriptsList.map((p) => (
-                <li key={p} className="px-3 py-1.5 text-zinc-200">
-                  {p}
-                </li>
-              ))}
-            </ul>
-          )}
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-end gap-3 pt-2">
-        {savedAt ? (
-          <span className="text-xs text-emerald-400">
-            Saved {new Date(savedAt).toLocaleTimeString()}
-          </span>
-        ) : null}
-        <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : "Save manifest"}
+      <CollapsibleSection
+        title="Scripts"
+        defaultOpen={scriptsList.length > 0}
+        trailing={
+          scriptsList.length > 0 ? (
+            <Badge variant="zinc">{scriptsList.length}</Badge>
+          ) : null
+        }
+      >
+        {scriptsList.length === 0 ? (
+          <EmptyState
+            icon={<Scroll size={26} />}
+            title="No manifest scripts"
+            description="Add scripts from the Scripts tab — they will appear here once registered."
+            tutorial="project-scripts"
+          />
+        ) : (
+          <ul className="rounded border border-zinc-800 bg-zinc-950/40 divide-y divide-zinc-800 text-xs font-mono">
+            {scriptsList.map((p) => (
+              <li key={p} className="px-3 py-1.5 text-zinc-200">
+                {p}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CollapsibleSection>
+
+      {/* Footer action row — matches the ProjectSettings.png "Reload
+       *  Running Game" (left) + Cancel / Done (right) layout. */}
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleReloadRunningGame}
+          title="Broadcast a reset to any open playtest frames"
+        >
+          <RefreshCw size={14} className="mr-1.5" />
+          Reload Running Game
         </Button>
+        <div className="flex items-center gap-3">
+          {savedAt ? (
+            <span className="text-xs text-emerald-400">
+              Saved {new Date(savedAt).toLocaleTimeString()}
+            </span>
+          ) : null}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={saving || !dirty}
+          >
+            {saving ? "Saving…" : dirty ? "Save manifest" : "Saved"}
+          </Button>
+        </div>
       </div>
     </div>
   );

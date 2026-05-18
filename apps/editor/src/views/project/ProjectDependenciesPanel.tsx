@@ -4,9 +4,6 @@ import { clearChainCache } from "@two_5_d/engine";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   Button,
   Input,
   Modal,
@@ -19,6 +16,7 @@ import {
   ToggleSwitch,
   EmptyState,
   Tooltip,
+  PanelHeader,
 } from "../../components/ui/index";
 import { cn } from "../../lib/cn";
 import {
@@ -311,17 +309,10 @@ export function ProjectDependenciesPanel({
   return (
     <div className="space-y-4 max-w-5xl">
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>manifest.requires[]</CardTitle>
-              <CardDescription>
-                Bottom = highest precedence (last-in-chain wins per
-                PACK_CHAIN.md § 4). Disabled entries are skipped by the
-                resolver. Drag to reorder.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
+        <PanelHeader
+          title="manifest.requires[]"
+          action={
+            <>
               <StatusPill variant={conflictPill.variant}>{conflictPill.label}</StatusPill>
               <Button
                 variant="secondary"
@@ -340,10 +331,15 @@ export function ProjectDependenciesPanel({
                 <Plus size={14} className="mr-1" />
                 Add dependency
               </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+            </>
+          }
+        />
+        <CardContent className="pt-3">
+          <p className="text-xs text-zinc-500 mb-3">
+            Bottom = highest precedence (last-in-chain wins per
+            PACK_CHAIN.md §4). Disabled entries are skipped by the
+            resolver. Drag to reorder.
+          </p>
           {scanError ? (
             <div className="mb-3 rounded border border-amber-700/60 bg-amber-900/20 px-3 py-2 text-xs text-amber-200">
               {scanError}

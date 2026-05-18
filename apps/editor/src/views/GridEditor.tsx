@@ -240,6 +240,19 @@ export interface GridEditorProps {
   onEditPreset?: (id: string) => void;
   /** Palette right-click — opens MapView's preset context menu. */
   onPresetContextMenu?: (id: string, x: number, y: number) => void;
+  /**
+   * Hide GridEditor's internal left preset palette aside. MapView's
+   * Scene-tab rebuild renders the palette in its own left rail (using
+   * R2 primitives — see `MapPalette.tsx`) and asks GridEditor to give
+   * up its embedded copy so the shell's 3-rail grammar is honoured.
+   */
+  hidePalette?: boolean;
+  /**
+   * Hide GridEditor's internal right inspector aside. The §7.2 Scene
+   * layout owns its own Cell Inspector inside MapView's right rail;
+   * the embedded copy would visually duplicate it.
+   */
+  hideInspector?: boolean;
 }
 
 /** Reasonable default-pack prefabs surfaced when the editor hasn't
@@ -583,6 +596,8 @@ export function GridEditor({
   onCellContextMenu,
   onEditPreset,
   onPresetContextMenu,
+  hidePalette = false,
+  hideInspector = false,
 }: GridEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1587,7 +1602,10 @@ export function GridEditor({
 
   return (
     <div className="flex h-full w-full bg-zinc-950 text-zinc-100">
-      {/* Left: preset palette. */}
+      {/* Left: preset palette. Hidden in §7.2 Scene layout — MapView
+          owns its own palette rail. The legacy ProjectView entrypoints
+          (no host palette) still render this. */}
+      {!hidePalette ? (
       <aside className="w-56 shrink-0 border-r border-zinc-800 flex flex-col">
         <div className="px-3 py-2 border-b border-zinc-800">
           <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1">
@@ -1685,6 +1703,7 @@ export function GridEditor({
           })}
         </div>
       </aside>
+      ) : null}
 
       {/* Middle: canvas + toolbar. */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -1883,7 +1902,10 @@ export function GridEditor({
         </div>
       </div>
 
-      {/* Right: inspector — switches form on selection kind. */}
+      {/* Right: inspector — switches form on selection kind. Hidden in
+          §7.2 Scene layout — MapView's right rail carries the cell /
+          entity / light inspectors directly using R2 primitives. */}
+      {!hideInspector ? (
       <aside className="w-72 shrink-0 border-l border-zinc-800 flex flex-col text-xs">
         <div className="px-3 py-2 border-b border-zinc-800">
           <div className="uppercase tracking-wide text-zinc-400">
@@ -1968,6 +1990,7 @@ export function GridEditor({
           )}
         </div>
       </aside>
+      ) : null}
     </div>
   );
 }

@@ -12,6 +12,22 @@ Date of last update: **2026-05-17**.
 
 Chronological since 2026-05-15:
 
+0. **(uncommitted, 2026-05-17)** — engine maximally-unopinionated
+   pass + PE2/PE3 re-implementation after the recovery wipe.
+   Engine built-ins slimmed to render/lifecycle infrastructure
+   (Position/Facing/Aim/Camera/Sprite/Animation/Light/Shader);
+   PlayerInput/Movement/Weapon/Inventory/MinimapMarker/Pickup
+   moved to `manifest.components[]` (instantiated as
+   `Component<unknown>` at boot, resolved through `api.components`
+   proxy under their string name). Prefab runtime deleted —
+   `registerDeclarativePrefabs`, `PrefabRegistry`,
+   `api.registerPrefab/spawn/spawnPrefab`, `DeclarativePrefab.initScript`
+   all gone. `Game.spawnInitialEntities` now walks
+   `scene.entities[]` (PREFABS_EDITOR_ONLY.md §4.2);
+   default-pack ships `scripts/systems/player-spawn.js` wired
+   into `manifest.scripts[]`. `player:moved` emission moved
+   pack-side (player-input.js owns the throttled emit).
+   `KeyBindings` type relocated to `Controllers/Bindings.ts`.
 1. **`0b3118f`** — EDITOR_REDESIGN R1 plan doc (full editor visual
    overhaul).
 2. **`af30aa7`** — editor-redesign decisions resolved (Q1–Q4) +

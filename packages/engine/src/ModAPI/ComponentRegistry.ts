@@ -2,16 +2,10 @@ import { Component } from "ECS";
 import {
   Position,
   Facing,
-  Movement,
-  PlayerInput,
   Aim,
   Camera,
-  MinimapMarker,
-  Weapon,
-  Inventory,
   Sprite,
   Animation,
-  Pickup,
   Light,
   Shader,
 } from "Components";
@@ -49,33 +43,78 @@ export interface ComponentMetadata {
  * pack-manifest declarations (WORLD_STATE.md §4), and components
  * created by pack scripts via `api.defineComponent`. `getComponent`
  * resolves names across all three sources.
+ *
+ * **Engine built-ins are the slim set the renderer / scene-loader
+ * touches directly**: `Position`, `Facing`, `Aim`, `Camera`, `Sprite`,
+ * `Animation`, `Light`, `Shader`. Everything else (player input,
+ * weapons, inventory, gameplay tags) is pack-declared per
+ * `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — the registry instantiates
+ * those as opaque `Component<unknown>` at boot from
+ * `manifest.components[]`.
  */
 export class ComponentRegistry {
-  readonly builtIns: BuiltInComponents = {
-    Position,
-    Facing,
-    Movement,
-    PlayerInput,
-    Aim,
-    Camera,
-    MinimapMarker,
-    Weapon,
-    Inventory,
-    Sprite,
-    Animation,
-    Pickup,
-    Light,
-    Shader,
+  /**
+   * Engine-shipped components — the storage instances the renderer +
+   * scene loader read directly. Keep this list tight: every entry is
+   * a coupling between engine code and a specific component shape.
+   */
+  private readonly engineBuiltIns: Record<string, Component<unknown>> = {
+    Position: Position as unknown as Component<unknown>,
+    Facing: Facing as unknown as Component<unknown>,
+    Aim: Aim as unknown as Component<unknown>,
+    Camera: Camera as unknown as Component<unknown>,
+    Sprite: Sprite as unknown as Component<unknown>,
+    Animation: Animation as unknown as Component<unknown>,
+    Light: Light as unknown as Component<unknown>,
+    Shader: Shader as unknown as Component<unknown>,
   };
 
   private readonly customComponents = new Map<string, Component<unknown>>();
   private readonly metadata = new Map<string, ComponentMetadata>();
 
+  /**
+   * Lookup proxy exposed on `api.components`. Reads dispatch through
+   * `getComponent` so manifest-declared / script-defined components
+   * resolve under their string name (`api.components.PlayerInput`)
+   * regardless of whether they're an engine built-in or a pack add.
+   *
+   * Typed as `BuiltInComponents` so static-typed pack code that reads
+   * `api.components.Position` still gets the precise `Component<Vec2>`
+   * shape for engine built-ins; everything else falls through to the
+   * proxy at runtime.
+   */
+  readonly builtIns: BuiltInComponents;
+
   constructor() {
-    // Seed metadata for built-ins — editor pickers + serialize use it.
-    for (const name of Object.keys(this.builtIns) as Array<keyof BuiltInComponents>) {
+    // Seed metadata for engine built-ins.
+    for (const name of Object.keys(this.engineBuiltIns)) {
       this.metadata.set(name, { name, source: "engine" });
     }
+    const registry = this;
+    this.builtIns = new Proxy({} as unknown as BuiltInComponents, {
+      get(_target, prop): unknown {
+        if (typeof prop !== "string") return undefined;
+        return registry.getComponent(prop);
+      },
+      has(_target, prop): boolean {
+        if (typeof prop !== "string") return false;
+        return registry.getComponent(prop) !== undefined;
+      },
+      ownKeys(): string[] {
+        return registry.allNames();
+      },
+      getOwnPropertyDescriptor(_target, prop): PropertyDescriptor | undefined {
+        if (typeof prop !== "string") return undefined;
+        const c = registry.getComponent(prop);
+        if (c === undefined) return undefined;
+        return {
+          enumerable: true,
+          configurable: true,
+          writable: false,
+          value: c,
+        };
+      },
+    });
   }
 
   /**
@@ -94,10 +133,7 @@ export class ComponentRegistry {
 
   /** Look up a previously defined component (built-in or mod). */
   getComponent(name: string): Component<unknown> | undefined {
-    return (
-      this.customComponents.get(name) ??
-      (this.builtIns as unknown as Record<string, Component<unknown>>)[name]
-    );
+    return this.customComponents.get(name) ?? this.engineBuiltIns[name];
   }
 
   /**
@@ -126,7 +162,7 @@ export class ComponentRegistry {
         console.warn(`[components] ${packLabel}: skipping entry without a name`);
         continue;
       }
-      const builtIn = (this.builtIns as unknown as Record<string, Component<unknown>>)[name];
+      const builtIn = this.engineBuiltIns[name];
       const existing = this.metadata.get(name);
       if (builtIn !== undefined) {
         // Built-in: keep the live Component; record the
@@ -177,7 +213,7 @@ export class ComponentRegistry {
 
   /** Snapshot every registered component name (sorted, dedup-free). */
   allNames(): string[] {
-    const names = new Set<string>(Object.keys(this.builtIns));
+    const names = new Set<string>(Object.keys(this.engineBuiltIns));
     for (const name of this.customComponents.keys()) names.add(name);
     return [...names].sort();
   }
@@ -185,8 +221,8 @@ export class ComponentRegistry {
   /** Snapshot every registered Component instance (for serialize). */
   allComponents(): Component<unknown>[] {
     const out: Component<unknown>[] = [];
-    for (const name of Object.keys(this.builtIns)) {
-      out.push((this.builtIns as unknown as Record<string, Component<unknown>>)[name]!);
+    for (const name of Object.keys(this.engineBuiltIns)) {
+      out.push(this.engineBuiltIns[name]!);
     }
     for (const c of this.customComponents.values()) out.push(c);
     return out;

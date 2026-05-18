@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PackManifest } from "@two_5_d/engine";
 import {
   EditorProjectStore,
@@ -15,65 +15,56 @@ import {
   ProjectExportPanel,
   DEFAULT_EXPORT_CONFIG,
   type ExportConfig,
+  type ExportLogEntry,
 } from "./ProjectExportPanel";
 import {
   ProjectAdvancedPanel,
   DEFAULT_ADVANCED_CONFIG,
   type AdvancedConfig,
 } from "./ProjectAdvancedPanel";
-import {
-  ProjectValidationPanel,
-  type ValidationRun,
-  type ValidationIssue,
+import type {
+  ValidationRun,
+  ValidationIssue,
 } from "./ProjectValidationPanel";
-import { ProjectLogPanel, type ProjectLogEntry } from "./ProjectLogPanel";
 import {
   FileText,
   Link as LinkIcon,
   Package,
   Sliders,
-  ShieldCheck,
-  Terminal,
+  Settings as SettingsIcon,
 } from "lucide-react";
 
 /**
- * ProjectTabView — R4f.
+ * ProjectTabView — R4f / EDITOR_REDESIGN §7.6.
  *
- * Top-level surface for the Project primary tab. Absorbs the old
- * ProjectSettingsModal into a paginated view with six sub-tabs:
+ * Top-level surface for the Project primary tab. Replaces the legacy
+ * `ProjectSettingsModal` per §7.6, paginating its content into four
+ * tabs driven by the R2 `TabStrip` primitive:
  *
- *   1. Manifest     — pack metadata.
+ *   1. Manifest     — pack metadata + identity + entry point.
  *   2. Dependencies — chain + URL-import + integrity (#194, #195).
- *   3. Export       — build / export config (#192).
- *   4. Advanced     — feature flags, validation thresholds, debug.
- *   5. Validation   — run-now + recent-pass log.
- *   6. Log          — combined build / export / validation stream.
+ *   3. Export       — build / export config (#192) + progress + log.
+ *   4. Advanced     — feature flags, validation thresholds + run, debug.
  *
  * Per §12 Q2 this is the canonical project-config surface; the cog
  * icon opens EditorSettingsModal for editor-scoped prefs only.
  *
  * EditorActions: registers `save` (persist manifest + config) and
- * `export` (run the export pipeline — stubbed pending #192).
+ * `export` (run the export pipeline — stubbed pending #192). The Save
+ * handler delegates to the ManifestForm's draft so the TopBar's Save
+ * button always flushes the user's pending edits.
  *
- * StatusBar: pushes three sections — project-name / dep-count /
- * validation status.
+ * StatusBar: pushes project-name / dep-count / manifest-dirty
+ * sections (Badge variant flips amber → emerald when clean).
  */
 
-type SubTab =
-  | "manifest"
-  | "dependencies"
-  | "export"
-  | "advanced"
-  | "validation"
-  | "log";
+type SubTab = "manifest" | "dependencies" | "export" | "advanced";
 
 const SUB_TABS: ReadonlyArray<TabDescriptor<SubTab>> = [
   { id: "manifest", label: "Manifest", icon: <FileText size={14} /> },
   { id: "dependencies", label: "Dependencies", icon: <LinkIcon size={14} /> },
   { id: "export", label: "Export", icon: <Package size={14} /> },
   { id: "advanced", label: "Advanced", icon: <Sliders size={14} /> },
-  { id: "validation", label: "Validation", icon: <ShieldCheck size={14} /> },
-  { id: "log", label: "Log", icon: <Terminal size={14} /> },
 ];
 
 // WIRING: localStorage keys persist sub-tab + draft configs across
@@ -94,11 +85,19 @@ function loadSubTab(projectId: string): SubTab {
       v === "manifest" ||
       v === "dependencies" ||
       v === "export" ||
-      v === "advanced" ||
-      v === "validation" ||
-      v === "log"
+      v === "advanced"
     ) {
       return v;
+    }
+    // Migrate legacy values (`validation`, `log`) — Advanced absorbs
+    // validation; Export absorbs the log.
+    if (v === "validation") {
+      try { localStorage.setItem(subTabKey(projectId), "advanced"); } catch { /* ignore */ }
+      return "advanced";
+    }
+    if (v === "log") {
+      try { localStorage.setItem(subTabKey(projectId), "export"); } catch { /* ignore */ }
+      return "export";
     }
   } catch {
     // sandboxed contexts — ignore
@@ -155,7 +154,15 @@ export function ProjectTabView({
   const [latestRun, setLatestRun] = useState<ValidationRun | null>(null);
   const [runHistory, setRunHistory] = useState<ValidationRun[]>([]);
   const [running, setRunning] = useState(false);
-  const [logEntries, setLogEntries] = useState<ProjectLogEntry[]>([]);
+  const [exportLog, setExportLog] = useState<ExportLogEntry[]>([]);
+  const [exportProgress, setExportProgress] = useState<
+    { value: number; caption?: string } | null
+  >(null);
+  const [manifestDirty, setManifestDirty] = useState(false);
+
+  // Ref the ManifestForm fills in so the EditorActions `save` handler
+  // can flush the in-flight draft from the TopBar Save button.
+  const manifestSaveRef = useRef<(() => Promise<void>) | null>(null);
 
   // Persist sub-tab + draft configs.
   useEffect(() => {
@@ -209,14 +216,18 @@ export function ProjectTabView({
     [projectId, onManifestChanged],
   );
 
-  const pushLog = useCallback((entry: Omit<ProjectLogEntry, "id" | "time">) => {
-    const e: ProjectLogEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      time: new Date().toLocaleTimeString(),
-      ...entry,
-    };
-    setLogEntries((prev) => [...prev.slice(-499), e]);
-  }, []);
+  const pushLog = useCallback(
+    (entry: { type: ExportLogEntry["type"]; message: React.ReactNode }) => {
+      const e: ExportLogEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        time: new Date().toLocaleTimeString(),
+        type: entry.type,
+        message: entry.message,
+      };
+      setExportLog((prev) => [...prev.slice(-499), e]);
+    },
+    [],
+  );
 
   // ── Validation handler ──
   //
@@ -228,9 +239,8 @@ export function ProjectTabView({
     if (!manifest) return;
     setRunning(true);
     pushLog({
-      source: "validation",
       type: "info",
-      message: "Validation pass started",
+      message: "[validation] Validation pass started",
     });
     const started = Date.now();
     try {
@@ -268,29 +278,36 @@ export function ProjectTabView({
       setLatestRun(run);
       setRunHistory((prev) => [run, ...prev].slice(0, 20));
       pushLog({
-        source: "validation",
         type: counts.error > 0 ? "error" : counts.warning > 0 ? "warn" : "success",
         message:
           counts.error + counts.warning + counts.info === 0
-            ? "Validation passed — no issues."
-            : `Validation finished: ${counts.error} error / ${counts.warning} warning / ${counts.info} info.`,
+            ? "[validation] Validation passed — no issues."
+            : `[validation] Validation finished: ${counts.error} error / ${counts.warning} warning / ${counts.info} info.`,
       });
     } catch (err) {
       pushLog({
-        source: "validation",
         type: "error",
-        message: `Validation failed: ${(err as Error).message}`,
+        message: `[validation] Validation failed: ${(err as Error).message}`,
       });
     } finally {
       setRunning(false);
     }
   }, [manifest, assets, pushLog]);
 
-  // ── Save handler — persist manifest + draft configs ──
+  // ── Save handler — flush manifest draft + persist configs ──
+  //
+  // The Manifest tab's form holds the in-flight edits as local React
+  // state; this handler delegates to its `handleSave` (exposed via
+  // `manifestSaveRef`) so a TopBar Ctrl-S always lands the user's
+  // pending edits, regardless of which sub-tab is active.
   const handleSave = useCallback(async () => {
     if (!manifest) return;
     try {
-      await EditorProjectStore.saveManifest(projectId, manifest);
+      if (manifestSaveRef.current) {
+        await manifestSaveRef.current();
+      } else {
+        await EditorProjectStore.saveManifest(projectId, manifest);
+      }
       try {
         localStorage.setItem(exportCfgKey(projectId), JSON.stringify(exportCfg));
         localStorage.setItem(
@@ -301,16 +318,14 @@ export function ProjectTabView({
         // ignore — best-effort persistence
       }
       pushLog({
-        source: "system",
         type: "success",
-        message: "Project saved.",
+        message: "[system] Project saved.",
       });
       onManifestChanged?.();
     } catch (err) {
       pushLog({
-        source: "system",
         type: "error",
-        message: `Save failed: ${(err as Error).message}`,
+        message: `[system] Save failed: ${(err as Error).message}`,
       });
     }
   }, [manifest, projectId, exportCfg, advancedCfg, pushLog, onManifestChanged]);
@@ -324,15 +339,13 @@ export function ProjectTabView({
   const handleExport = useCallback(async () => {
     if (!manifest) return;
     pushLog({
-      source: "export",
       type: "info",
-      message: `Export requested — mode=${exportCfg.mode}, target=${exportCfg.target}.`,
+      message: `[export] Export requested — mode=${exportCfg.mode}, target=${exportCfg.target}.`,
     });
     pushLog({
-      source: "export",
       type: "warn",
       message:
-        "Export pipeline (#192) not yet wired into the editor. Configuration was logged for review.",
+        "[export] Export pipeline (#192) not yet wired into the editor. Configuration was logged for review.",
     });
   }, [manifest, exportCfg, pushLog]);
 
@@ -364,6 +377,16 @@ export function ProjectTabView({
         value: `${depCount}`,
       },
       {
+        id: "manifest-dirty",
+        label: "Manifest",
+        // Drives the §7.6 "manifest dirty" indicator — flips amber when
+        // the form has unsaved edits and a hint when the manifest is
+        // clean. The chip variant is picked up by StatusBar's
+        // status-string colour ramp.
+        value: manifestDirty ? "● Unsaved" : "Saved",
+        align: "right" as const,
+      },
+      {
         id: "validation",
         label: "Validation",
         value: latestRun
@@ -378,7 +401,7 @@ export function ProjectTabView({
     ];
     setSections(sections);
     return () => setSections([]);
-  }, [manifest, depCount, latestRun, setSections]);
+  }, [manifest, depCount, latestRun, manifestDirty, setSections]);
 
   if (!manifest) {
     return (
@@ -388,8 +411,36 @@ export function ProjectTabView({
     );
   }
 
+  const packId = (manifest as unknown as { id?: string }).id ?? "";
+
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-zinc-100">
+      {/* Project header banner — establishes context above the sub-tabs.
+       *  Matches the ProjectSettings.png "PROJECT SETTINGS" header strip:
+       *  uppercase eyebrow + project name + version + monospace pack id.
+       */}
+      <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/30 flex items-center gap-3">
+        <div className="h-9 w-9 rounded-md bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+          <SettingsIcon size={16} className="text-amber-400" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium leading-none mb-1">
+            Project Settings
+          </div>
+          <div className="text-sm font-semibold text-zinc-100 truncate">
+            {manifest.name || "(untitled pack)"}
+            <span className="ml-2 text-xs font-mono text-zinc-500">
+              v{manifest.version || "0.0.0"}
+            </span>
+          </div>
+        </div>
+        {packId ? (
+          <div className="shrink-0 text-[11px] text-zinc-500 font-mono truncate max-w-[260px]">
+            {packId}
+          </div>
+        ) : null}
+      </div>
+
       {/* Sub-tab strip */}
       <TabStrip
         variant="secondary"
@@ -420,6 +471,8 @@ export function ProjectTabView({
               manifest={manifest}
               assets={assets}
               onSave={handleManifestSaved}
+              onDirtyChange={setManifestDirty}
+              saveRef={manifestSaveRef}
             />
           ) : subTab === "dependencies" ? (
             <ProjectDependenciesPanel
@@ -433,23 +486,18 @@ export function ProjectTabView({
               config={exportCfg}
               onChange={setExportCfg}
               onExport={handleExport}
+              exportProgress={exportProgress}
+              logEntries={exportLog}
+              onClearLog={() => setExportLog([])}
             />
-          ) : subTab === "advanced" ? (
+          ) : (
             <ProjectAdvancedPanel
               config={advancedCfg}
               onChange={setAdvancedCfg}
-            />
-          ) : subTab === "validation" ? (
-            <ProjectValidationPanel
-              latest={latestRun}
-              history={runHistory}
-              onRun={handleRunValidation}
-              running={running}
-            />
-          ) : (
-            <ProjectLogPanel
-              lines={logEntries}
-              onClear={() => setLogEntries([])}
+              validationLatest={latestRun}
+              validationHistory={runHistory}
+              onRunValidation={handleRunValidation}
+              validationRunning={running}
             />
           )}
         </div>

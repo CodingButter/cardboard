@@ -3,9 +3,6 @@ import type { PackManifest } from "@two_5_d/engine";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   Button,
   Input,
 } from "../../components/ui";
@@ -16,7 +13,14 @@ import {
   ToggleSwitch,
   ProgressBar,
   Badge,
+  PanelHeader,
+  CollapsibleSection,
+  LogPanel,
+  EmptyState,
+  type LogLine,
+  type LogLineType,
 } from "../../components/ui/index";
+import { Package } from "lucide-react";
 
 /**
  * ProjectExportPanel — R4f Project tab → Export sub-view.
@@ -74,6 +78,13 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   target: "browser",
 };
 
+export interface ExportLogEntry {
+  id: string;
+  type: LogLineType;
+  time: string;
+  message: React.ReactNode;
+}
+
 export interface ProjectExportPanelProps {
   manifest: PackManifest;
   config: ExportConfig;
@@ -85,6 +96,10 @@ export interface ProjectExportPanelProps {
   /** Reported by the export pipeline once it streams progress. WIRING:
    *  hooked up alongside #192. Until then the bar is hidden. */
   exportProgress?: { value: number; caption?: string } | null;
+  /** Export run output. Empty array → EmptyState. */
+  logEntries?: ReadonlyArray<ExportLogEntry>;
+  /** Optional clear handler — surfaced as the LogPanel's clear button. */
+  onClearLog?: () => void;
 }
 
 export function ProjectExportPanel({
@@ -93,6 +108,8 @@ export function ProjectExportPanel({
   onChange,
   onExport,
   exportProgress,
+  logEntries = [],
+  onClearLog,
 }: ProjectExportPanelProps) {
   const update = <K extends keyof ExportConfig>(key: K, value: ExportConfig[K]) =>
     onChange({ ...config, [key]: value });
@@ -103,29 +120,29 @@ export function ProjectExportPanel({
     .replace("{name}", manifest.name || "pack")
     .replace("{version}", manifest.version || "0.0.0");
 
+  const logLines: LogLine[] = React.useMemo(
+    () =>
+      logEntries.map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        time: entry.time,
+        message: entry.message,
+      })),
+    [logEntries],
+  );
+
   return (
     <div className="space-y-4 max-w-4xl">
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>Export mode</CardTitle>
-              <CardDescription>
-                <strong className="text-zinc-300">Build full</strong> packages
-                every asset including the chain — runs anywhere with no
-                external fetches.{" "}
-                <strong className="text-zinc-300">Extend</strong> only ships
-                this pack's deltas and references parent packs by URL +
-                integrity (smaller, but requires a live network at boot).
-                Tracked as <code>#192</code>.
-              </CardDescription>
-            </div>
+        <PanelHeader
+          title="Export mode"
+          action={
             <Badge variant="amber" outlined>
               {config.mode === "build-full" ? "FULL" : "EXTEND"}
             </Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
+          }
+        />
+        <CardContent className="space-y-3 pt-3">
           <PropertyRow label="Mode" hint="Build full is the safe default.">
             <SegmentedControl<ExportMode>
               options={[
@@ -153,13 +170,8 @@ export function ProjectExportPanel({
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Output</CardTitle>
-          <CardDescription>
-            Where exported `.apg` files land + filename pattern.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+        <PanelHeader title="Output" />
+        <CardContent className="space-y-3 pt-3">
           <PropertyRow label="Output directory" hint="Relative to project root.">
             <Input
               value={config.outputDir}
@@ -186,15 +198,8 @@ export function ProjectExportPanel({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Optimisation</CardTitle>
-          <CardDescription>
-            All defaults are safe — disable only if you know what you're
-            doing.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 divide-y divide-zinc-800/60">
+      <CollapsibleSection title="Optimisation" defaultOpen={true}>
+        <div className="space-y-2 divide-y divide-zinc-800/60">
           <PropertyRow label="Minify assets" hint="Strip whitespace + comments from JSON.">
             <ToggleSwitch
               checked={config.minify}
@@ -248,37 +253,27 @@ export function ProjectExportPanel({
               aria-label="Compress audio"
             />
           </PropertyRow>
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Engine pin</CardTitle>
-          <CardDescription>
-            Range of engine versions this pack is known to work with. The
-            launcher refuses to load packs that target an incompatible
-            engine.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <PropertyRow label="Engine version" hint="Semver range — '*' means any.">
-            <Select
-              value={config.enginePin}
-              onChange={(e) => update("enginePin", e.target.value)}
-              options={[
-                { value: "*", label: "* (any)" },
-                { value: "^0.1.0", label: "^0.1.0 (compatible 0.1.x)" },
-                { value: "~0.1.0", label: "~0.1.0 (patch-only 0.1.0)" },
-                { value: "0.1.0", label: "0.1.0 (exact)" },
-              ]}
-            />
-          </PropertyRow>
-        </CardContent>
-      </Card>
+      <CollapsibleSection title="Engine pin" defaultOpen={false}>
+        <PropertyRow label="Engine version" hint="Semver range — '*' means any.">
+          <Select
+            value={config.enginePin}
+            onChange={(e) => update("enginePin", e.target.value)}
+            options={[
+              { value: "*", label: "* (any)" },
+              { value: "^0.1.0", label: "^0.1.0 (compatible 0.1.x)" },
+              { value: "~0.1.0", label: "~0.1.0 (patch-only 0.1.0)" },
+              { value: "0.1.0", label: "0.1.0 (exact)" },
+            ]}
+          />
+        </PropertyRow>
+      </CollapsibleSection>
 
       {exportProgress ? (
         <Card>
-          <CardContent>
+          <CardContent className="pt-4">
             <ProgressBar
               value={exportProgress.value}
               label="Exporting"
@@ -288,10 +283,41 @@ export function ProjectExportPanel({
         </Card>
       ) : null}
 
-      <div className="flex items-center justify-end gap-2 pt-2">
+      <Card>
+        <PanelHeader
+          title="Build output"
+          action={
+            logEntries.length > 0 ? (
+              <Badge variant="zinc">{logEntries.length}</Badge>
+            ) : null
+          }
+        />
+        <CardContent className="pt-3">
+          {logEntries.length === 0 ? (
+            <EmptyState
+              icon={<Package size={26} />}
+              title="No exports yet"
+              description="Run an export to see build output here. Lines from the pipeline stream in as the build runs."
+              tutorial="project-export"
+            />
+          ) : (
+            <div className="h-[280px]">
+              <LogPanel
+                lines={logLines}
+                onClear={onClearLog}
+                className="h-full"
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Sticky footer-style action row matches ProjectManagement.png's
+       *  EXPORT PACKAGE + Build Web Version row at the bottom. */}
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800 mt-2">
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={onExport}
           disabled={!onExport}
           title={
@@ -300,6 +326,7 @@ export function ProjectExportPanel({
               : "Export handler not registered yet"
           }
         >
+          <Package size={14} className="mr-1.5" />
           Export pack
         </Button>
       </div>

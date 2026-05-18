@@ -21,7 +21,7 @@ const PRECACHE_URLS = [
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/icon-512-maskable.png",
-  "/packs/default.apg",
+  "/packs/Cardboard.apg",
 ];
 
 /** Patterns considered cacheable build artifacts. */

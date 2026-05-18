@@ -12,7 +12,7 @@ import type { TopBarScene, SaveState } from "../components/ui/TopBar";
  *
  * Layout L→R:
  *   1. Cardboard hex logo (28-32px) + "CARDBOARD" wordmark.
- *   2. Scene dropdown (current scene, only shown on Map / Entities /
+ *   2. Scene dropdown (current scene, only shown on Scene / Prefabs /
  *      Animation; hidden otherwise).
  *   3. Flex spacer.
  *   4. Playtest button (amber, prominent, currently disabled until

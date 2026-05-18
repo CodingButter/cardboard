@@ -1,10 +1,11 @@
 {
-  "name": "default",
+  "name": "Cardboard",
   "version": "0.2.0",
   "engine": "two_5_d@0.1",
   "startScene": "scenes/scene1.json",
   "config": "config.json",
   "scripts": [
+    "scripts/systems/player-spawn.js",
     "scripts/systems/player-input.js",
     "scripts/systems/gun-render.js",
     "scripts/systems/pickup.js",
@@ -36,18 +37,6 @@
     { "name": "Systems" },
     { "name": "Scripts" }
   ],
-  "prefabs": {
-    "player": {
-      "name": "player",
-      "description": "First-person controllable player. Canonical hybrid declarative prefab — static Position/Facing/Aim + initScript for config-driven Movement/PlayerInput/Weapon/Inventory/Camera/MinimapMarker.",
-      "components": {
-        "Position": { "x": 0, "y": 0 },
-        "Facing": 0,
-        "Aim": { "screenY": 0 }
-      },
-      "initScript": "scripts/prefabs/player-init.js"
-    }
-  },
   "tileTextures": {
     "1": "images/tiles/wall.jpg",
     "2": "images/tiles/wood_floor.jpg",

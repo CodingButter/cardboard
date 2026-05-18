@@ -1,5 +1,4 @@
 import { CONFIG } from "GameConfig";
-import { PlayerInput, type KeyBindings } from "Components";
 import type { PartialGameConfig } from "Settings";
 import type { ModAPIImpl } from "ModAPI/ModAPIImpl";
 import { DefaultSettingsScreen } from "./DefaultSettingsScreen";
@@ -24,6 +23,15 @@ import { DefaultSettingsScreen } from "./DefaultSettingsScreen";
  * Settings surface every cardboard game gets for free, regardless of
  * which packs are loaded. Pack-specific modals (Inventory, hotbar,
  * minimap, …) live in their packs.
+ *
+ * Engine-side scope: the modal mounts, persists overlay to local
+ * storage, and re-applies it to the live CONFIG. Pack-specific
+ * propagation (e.g. pushing the new bindings into each player's
+ * `PlayerInput` component the same frame) lives in the pack that
+ * defines `PlayerInput` — it subscribes to `settings:changed` /
+ * `frame:before` and walks its own entities. See
+ * `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — engine no longer reads
+ * any game-specific component.
  */
 export function installDefaultSettings(api: ModAPIImpl): void {
   // In-memory overlay — initialised from localStorage / pack config,
@@ -37,23 +45,6 @@ export function installDefaultSettings(api: ModAPIImpl): void {
     // SettingsRegistry). After this returns, `api.config` reads the new
     // values immediately because `applyConfigOverride` rebinds CONFIG.
     api.settings.save(overlay);
-
-    // Propagate bindings to every live player so the rebind is active
-    // *this frame* rather than after reload.
-    const overlayBindings = overlay.bindings;
-    if (overlayBindings) {
-      api.world.each(PlayerInput, (_e, input) => {
-        const merged: KeyBindings = { ...input.bindings };
-        for (const k of Object.keys(overlayBindings) as (keyof KeyBindings)[]) {
-          const v = (overlayBindings as Partial<KeyBindings>)[k];
-          if (v) {
-            (merged as Record<keyof KeyBindings, readonly KeyBindings[keyof KeyBindings][0][]>)[k] =
-              v as readonly KeyBindings[keyof KeyBindings][0][];
-          }
-        }
-        input.bindings = merged;
-      });
-    }
   };
 
   const liveProps = () => ({

@@ -239,6 +239,19 @@ export function AnimationEditor({
   const [clipFilter, setClipFilter] = useState("");
   const [assetFilter, setAssetFilter] = useState("");
 
+  // Mockup-driven toolbar toggles (Animation.png header row). These
+  // are surfaced for parity with the design but currently visual-only:
+  //   - onionSkin: overlay neighbouring frames at low alpha when
+  //     scrubbing the timeline. WIRING: thread into the cell-picker's
+  //     <img> stack as a second translucent layer.
+  //   - autoStep: advance the playhead one frame per timeline cell
+  //     when a frame is dropped or remapped. WIRING: hook into
+  //     `cellClick` to bump `playFrame` after a successful insert.
+  // Persisting both lets the toggle survive a reload — most users
+  // turn on Onion Skin once and leave it on.
+  const [onionSkin, setOnionSkin] = useState(false);
+  const [autoStep, setAutoStep] = useState(true);
+
   const refresh = useCallback(async () => {
     const [mf, ss] = await Promise.all([
       EditorProjectStore.loadManifest(projectId),
@@ -784,6 +797,34 @@ export function AnimationEditor({
     refresh,
   ]);
 
+  /**
+   * Export the active sprite's baked PNG — surfaced by the top-row
+   * toolbar (Animation.png header). Re-bakes on the fly so the user
+   * always downloads what's currently in the editor, even if they
+   * haven't pressed Bake yet. Falls back to the existing baked PNG
+   * when the active sprite is in preview mode (no editorState).
+   */
+  const handleExportSheet = useCallback(async () => {
+    let blob: Blob | null = null;
+    let id: string | null = null;
+    if (editorState) {
+      blob = await compositeAndEncode();
+      id = editorState.spriteId;
+    } else if (bakedPngBlob && activeId) {
+      blob = bakedPngBlob;
+      id = activeId;
+    }
+    if (!blob || !id) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${id}-sheet.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, [editorState, compositeAndEncode, bakedPngBlob, activeId]);
+
   // ── Live playback preview ──
 
   const previewFramesPerAngle = activeAnim
@@ -1064,7 +1105,7 @@ export function AnimationEditor({
     <div className="flex flex-col h-full min-h-[640px] bg-zinc-950 text-zinc-100">
       <div className="flex flex-1 min-h-0">
         {/* ─── Left rail (300px): clip list + source list ─── */}
-        <aside className="w-[300px] shrink-0 border-r border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+        <aside className="w-[300px] shrink-0 border-r border-zinc-800 bg-zinc-900/40 flex flex-col min-h-0">
           <PanelHeader
             title="Animations"
             action={
@@ -1293,8 +1334,94 @@ export function AnimationEditor({
 
         {/* ─── Center (fluid): BakedSpritePreview + spritesheet display ─── */}
         <section className="flex-1 min-w-0 overflow-hidden flex flex-col bg-zinc-950/20">
-          {/* Top toolbar — sheet info + zoom/pan controls. Only shown
-              in edit mode (preview mode owns its own header). */}
+          {/* ── Action toolbar (Animation.png header row) ──
+              Lives above the mode-specific toolbar so the headline
+              Create / Onion Skin / Auto-Step / Export Sprite Sheet
+              actions are always visible. The PLAYTEST MODE pill on
+              the right mirrors the mockup. */}
+          <div className="px-3 pt-3 pb-2 border-b border-zinc-800/60 bg-zinc-900/30">
+            <Toolbar
+              groups={[
+                {
+                  id: "create",
+                  children: (
+                    <Tooltip content="Add a new clip to the active sprite" side="bottom">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!editorState}
+                        onClick={addAnimation}
+                        className="gap-1.5"
+                      >
+                        <Plus size={13} />
+                        Create Animation
+                      </Button>
+                    </Tooltip>
+                  ),
+                },
+                {
+                  id: "view-toggles",
+                  children: (
+                    <>
+                      <Tooltip content="Onion skin — overlay neighbouring frames" side="bottom">
+                        <label className="inline-flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                          <ToggleSwitch
+                            checked={onionSkin}
+                            onChange={setOnionSkin}
+                            aria-label="Onion skin"
+                          />
+                          <span>Onion Skin</span>
+                        </label>
+                      </Tooltip>
+                      <Tooltip content="Advance the playhead one frame per cell drop" side="bottom">
+                        <label className="inline-flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                          <ToggleSwitch
+                            checked={autoStep}
+                            onChange={setAutoStep}
+                            aria-label="Auto-step"
+                          />
+                          <span>Auto-Step</span>
+                        </label>
+                      </Tooltip>
+                    </>
+                  ),
+                },
+                {
+                  id: "export",
+                  children: (
+                    <Tooltip
+                      content={
+                        editorState || bakedPngBlob
+                          ? "Download the baked spritesheet PNG"
+                          : "No sprite selected"
+                      }
+                      side="bottom"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!editorState && !bakedPngBlob}
+                        onClick={handleExportSheet}
+                        className="gap-1.5"
+                      >
+                        <SaveIcon size={13} />
+                        Export Sprite Sheet
+                      </Button>
+                    </Tooltip>
+                  ),
+                },
+              ]}
+              tail={
+                <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-emerald-300">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
+                  Playtest Mode
+                </span>
+              }
+            />
+          </div>
+
+          {/* Mode-specific toolbar — sheet info + zoom/pan controls.
+              Only shown in edit mode (preview mode owns its own header). */}
           {editorState && loadedImage && grid && centerMode !== "preview" ? (
             <div className="px-3 pt-3 pb-2">
               <Toolbar
@@ -1603,13 +1730,15 @@ export function AnimationEditor({
         </section>
 
         {/* ─── Right rail (380px): per-tab Assets + Animation inspector ─── */}
-        <aside className="w-[380px] shrink-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
+        <aside className="w-[380px] shrink-0 border-l border-zinc-800 bg-zinc-900/40 flex flex-col min-h-0">
           <PanelHeader
-            title="Assets"
+            title="Animation Inspector"
             action={
-              <Badge variant="zinc">
-                {fbxSources.length + activeAnimationClips.length}
-              </Badge>
+              activeAnim ? (
+                <Badge variant="amber">{activeAnim}</Badge>
+              ) : activeId ? (
+                <Badge variant="zinc">{activeId}</Badge>
+              ) : null
             }
           />
           <div className="px-3 py-2 border-b border-zinc-800">
@@ -1629,6 +1758,74 @@ export function AnimationEditor({
 
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3 space-y-3">
+              {/* Preview card — top of the inspector rail per the
+                  mockup. Shows the active baked PNG with the same
+                  BakedSpritePreview component used in the center
+                  pane so the animation stays in sync. */}
+              {activeId &&
+              bakedPngBlob &&
+              manifest?.sprites?.[activeId] ? (
+                <CollapsibleSection
+                  title="Preview"
+                  defaultOpen
+                  icon={<Play size={12} />}
+                >
+                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 overflow-hidden max-h-[220px]">
+                    <BakedSpritePreview
+                      spriteId={activeId}
+                      sprite={manifest.sprites[activeId]!}
+                      pngBlob={bakedPngBlob}
+                      sourceMeta={sources.find(
+                        (s) => s.spriteId === activeId,
+                      )}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between pt-2 text-[11px] text-zinc-500">
+                    <span>
+                      {activeAnim ?? "—"}{" "}
+                      {previewFramesPerAngle > 0
+                        ? `· ${playFrame + 1}/${previewFramesPerAngle}`
+                        : ""}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <IconButton
+                        icon={<SkipBack size={12} />}
+                        tooltip="Step back"
+                        size="sm"
+                        disabled={!activeAnim || previewFramesPerAngle === 0}
+                        onClick={() =>
+                          setPlayFrame((f) => Math.max(0, f - 1))
+                        }
+                      />
+                      <IconButton
+                        icon={
+                          playing ? <Pause size={12} /> : <Play size={12} />
+                        }
+                        tooltip={playing ? "Pause" : "Play"}
+                        variant={playing ? "primary" : "ghost"}
+                        size="sm"
+                        disabled={!activeAnim || previewFramesPerAngle === 0}
+                        onClick={() => setPlaying((p) => !p)}
+                      />
+                      <IconButton
+                        icon={<SkipForward size={12} />}
+                        tooltip="Step forward"
+                        size="sm"
+                        disabled={!activeAnim || previewFramesPerAngle === 0}
+                        onClick={() =>
+                          setPlayFrame((f) =>
+                            Math.min(
+                              Math.max(0, previewFramesPerAngle - 1),
+                              f + 1,
+                            ),
+                          )
+                        }
+                      />
+                    </span>
+                  </div>
+                </CollapsibleSection>
+              ) : null}
+
               <CollapsibleSection
                 title={`FBX sources (${filteredFbxSources.length})`}
                 defaultOpen
@@ -1985,7 +2182,41 @@ export function AnimationEditor({
       </div>
 
       {/* ─── Bottom strip: bake controls + frame-rate slider + playback ─── */}
-      <div className="border-t border-zinc-800 bg-zinc-950/60 px-3 py-2 min-h-[56px]">
+      <div className="border-t border-zinc-800 bg-zinc-900/40">
+        {/* Timeline frame-strip — visual cue for the playhead. The
+            mockup shows a per-frame ribbon under the playback row;
+            this is a compact placeholder until the timeline component
+            in §7.6 lands (WIRING: rounded amber/grey track segments). */}
+        {activeAnim && previewFramesPerAngle > 0 ? (
+          <div className="px-3 pt-2">
+            <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+              <span className="uppercase tracking-wider font-medium">
+                Timeline
+              </span>
+              <span className="opacity-50">
+                · {previewFramesPerAngle} frame
+                {previewFramesPerAngle === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="mt-1 flex items-center gap-0.5 h-3">
+              {Array.from({ length: previewFramesPerAngle }, (_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setPlayFrame(i)}
+                  aria-label={`Frame ${i + 1}`}
+                  className={cn(
+                    "flex-1 h-full rounded-sm transition-colors",
+                    i === playFrame
+                      ? "bg-amber-400"
+                      : "bg-zinc-700/60 hover:bg-zinc-600",
+                  )}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      <div className="px-3 py-2 min-h-[56px]">
         <Toolbar
           groups={[
             {
@@ -2116,6 +2347,7 @@ export function AnimationEditor({
             ) : null
           }
         />
+      </div>
       </div>
 
       {/* Import modal — Path A new-sprite flow. */}
