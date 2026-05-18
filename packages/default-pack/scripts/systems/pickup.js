@@ -2,59 +2,76 @@
  * Default pack — PickupSystem.
  *
  * Walk-to-collect: each frame, measure squared distance from every
- * player entity to every `Position + Pickup` entity and grant the item
- * once they're within `PICKUP_RADIUS`. The grant routes through
- * `api.inventory.addItem`, which respects stack limits + the bag/hotbar
- * layout — leftover (e.g. "you tried to pick up 30 rounds but only had
- * room for 12") stays on the pickup entity, so partial grabs leave a
- * smaller pile behind to come back to.
+ * player entity (Carrier + Position) to every `Position + Pickup`
+ * entity and grant the item once they're within `PICKUP_RADIUS`.
+ *
+ * Grant semantics in the entity-ref inventory model:
+ *   1. Look up the player's hotbar container via `Carrier.hotbar`.
+ *   2. Spawn a fresh Item entity from the pickup's `itemId` via
+ *      `spawnItemFromRegistry` (so it has Item + Stackable + optional
+ *      Weapon components).
+ *   3. Try to merge that entity into the hotbar; on overflow, try the
+ *      backpack.
+ *   4. If the item merged into an existing stack, `addItemEntity`
+ *      despawns the freshly-spawned entity automatically (its data was
+ *      consumed). Otherwise it lives on as the slot's content.
+ *
+ * Note we no longer remove the original `Pickup` entity's `Position` /
+ * `Sprite` — the pickup entity is just a marker in the WORLD, and is
+ * despawned when fully consumed (same UX as before, the item entity
+ * spawned into the player's inventory is a SEPARATE entity).
  */
+import {
+  addItemEntity,
+  spawnItemFromRegistry,
+} from "../lib/inventory.js";
+
 const PICKUP_RADIUS = 0.5;
 
 export default (api) => {
   const C = api.components;
-  const inv = api.inventory;
-  const itemRegistry = api.singleton("ItemRegistry");
 
   api.registerSystem((world) => {
     const radiusSq = PICKUP_RADIUS * PICKUP_RADIUS;
-    const items = itemRegistry.byId ?? {};
 
     world.each(
-      C.PlayerInput, C.Position, C.Inventory,
-      (_player, _input, playerPos, inventory) => {
+      C.PlayerInput, C.Position, C.Carrier,
+      (player, _input, playerPos, carrier) => {
         world.each(C.Position, C.Pickup, (entity, pos, pickup) => {
           const dx = pos.x - playerPos.x;
           const dy = pos.y - playerPos.y;
           if (dx * dx + dy * dy > radiusSq) return;
 
-          const leftover = inv.addItem(
-            inventory,
-            items,
-            pickup.itemId,
-            pickup.count,
-          );
-          const taken = pickup.count - leftover;
-          if (taken === 0) return; // full inventory — leave the pile
+          // Spawn a fresh item entity for the count we're trying to
+          // grant; addItemEntity merges into existing stacks first, so
+          // this works the same for stackables and weapons.
+          const newItem = spawnItemFromRegistry(api, pickup.itemId, pickup.count);
+          if (newItem === undefined) return;
 
-          pickup.count = leftover;
-          // Au1 of AUDIO.md — chime on successful pickup. Plays for
-          // every partial-stack grab too; mass-collect of a pile fires
-          // once per frame the inventory accepts items.
-          api.audio.play("pickup");
-          // Ev1 of EVENTS.md §4.8 — fire `pickup:collected` only when
-          // the pile fully drains, matching the spec's "partial
-          // pickups don't fire" rule. Other packs subscribe by the
-          // canonical name to react (e.g. notification overlay, score
-          // tracker).
-          if (pickup.count === 0) {
-            api.events.emit("pickup:collected", {
-              player: _player,
-              itemId: pickup.itemId,
-              count: taken,
-            });
-            world.despawn(entity);
+          let placed = false;
+          if (typeof carrier.hotbar === "number") {
+            placed = addItemEntity(world, carrier.hotbar, newItem, C);
           }
+          if (!placed && typeof carrier.backpack === "number") {
+            placed = addItemEntity(world, carrier.backpack, newItem, C);
+          }
+          if (!placed) {
+            // Inventory full — tear down the candidate item so it
+            // doesn't leak. The pickup stays in the world.
+            world.despawn(newItem);
+            return;
+          }
+
+          // Successful pickup. Decrement the world pile (despawn at 0).
+          const taken = pickup.count;
+          pickup.count = 0;
+          api.audio.play("pickup");
+          api.events.emit("pickup:collected", {
+            player,
+            itemId: pickup.itemId,
+            count: taken,
+          });
+          world.despawn(entity);
         });
       },
     );

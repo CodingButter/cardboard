@@ -794,7 +794,20 @@ async function buildPack(
 
   for (const scriptPath of referencedScripts) {
     if (!isCompilablePackScript(scriptPath)) continue;
+    // For `.js` entries we only need the bundler when the script
+    // actually pulls in helpers via `import` — engine loads pack
+    // scripts via Blob URL (no relative-import resolution). Scripts
+    // without any `import` statements are byte-identical bundled vs.
+    // raw, so skip Bun.build to avoid surfacing pre-existing syntax
+    // issues in legacy bundle-naive scripts (e.g. duplicate declarations
+    // that Bun's scope analyser rejects but the engine's `import()`
+    // accepted).
     const absSource = join(packRoot, scriptPath);
+    if (scriptPath.endsWith(".js")) {
+      const src = await Bun.file(absSource).text();
+      const usesImport = /^\s*import\s+/m.test(src);
+      if (!usesImport) continue; // pass-through copy from the walk
+    }
     try {
       const compiled = await buildPackScript(absSource);
       const compiledPath = compiledPackScriptPath(scriptPath);
@@ -906,11 +919,13 @@ async function buildPack(
     if (scriptSourcesToSkip.has(inZip)) {
       continue;
     }
-    // Skip any other .tsx/.ts inside the `scripts/` tree that isn't a
-    // referenced entry — these are helpers (e.g. `scripts/ui/*.tsx`)
-    // bundled into the entrypoint already.
+    // Skip any other .tsx/.ts/.js inside the `scripts/` tree that
+    // isn't a referenced entry — these are helpers (e.g.
+    // `scripts/ui/*.tsx`, `scripts/lib/*.js`) which are already bundled
+    // into the entrypoint by `buildPackScript`.
     if (
-      (inZip.startsWith("scripts/") && (inZip.endsWith(".tsx") || inZip.endsWith(".ts"))) &&
+      inZip.startsWith("scripts/") &&
+      (inZip.endsWith(".tsx") || inZip.endsWith(".ts") || inZip.endsWith(".js")) &&
       !referencedScriptSet.has(inZip)
     ) {
       continue;

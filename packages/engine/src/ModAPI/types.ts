@@ -12,19 +12,7 @@ import type { PartialGameConfig } from "Settings";
 // the default-pack manifest and routed through the `PackComponents`
 // augmentation point (see `packages/shared/src/generatePackTypes.ts`
 // + the engine barrel's exported empty `PackComponents` interface).
-import {
-  BAG_SIZE,
-  HOTBAR_SIZE,
-  addItem,
-  countItem,
-  defaultStackMax,
-  emptyEquipment,
-  getActiveItem,
-  quickTransfer,
-  removeItem,
-  seedInventory,
-} from "Libs/Inventory";
-import { EQUIP_SLOTS, type SoundGroup } from "AssetPack";
+import { type SoundGroup } from "AssetPack";
 import type ItemImages from "ItemImages";
 import { castRayToWall } from "Libs/Raycast";
 
@@ -273,34 +261,6 @@ export type Tag = keyof KnownTags & string;
 export type BuiltInComponents = PackComponents & {
   readonly [name: string]: Component<unknown> | undefined;
 };
-
-/**
- * Inventory helpers + sizing constants. Exposed on `api.inventory` so
- * pack-side prefabs (e.g. `player.js`) and systems (gun-render, pickup,
- * stats overlay, inventory bar) can manipulate inventories without
- * re-implementing the bag/hotbar layout.
- *
- * These helpers all live in `Libs/Inventory` in the engine; the ModAPI
- * just re-exposes them so pack scripts can reach them without
- * importing engine modules (pack scripts load as plain JS via a Blob
- * URL — no module resolution back into the engine).
- */
-export interface InventoryAPI {
-  readonly BAG_SIZE: number;
-  readonly HOTBAR_SIZE: number;
-  /** Ordered list of equipment slot ids (helmet, chest, ...). */
-  readonly EQUIP_SLOTS: typeof EQUIP_SLOTS;
-  readonly emptyEquipment: typeof emptyEquipment;
-  readonly seedInventory: typeof seedInventory;
-  readonly addItem: typeof addItem;
-  readonly removeItem: typeof removeItem;
-  readonly countItem: typeof countItem;
-  readonly getActiveItem: typeof getActiveItem;
-  /** Maximum stack size for an item def (from `stackMax` or type default). */
-  readonly defaultStackMax: typeof defaultStackMax;
-  /** Shift-click flow — moves a stack between bag/hotbar/equipment. */
-  readonly quickTransfer: typeof quickTransfer;
-}
 
 /**
  * Raycast helpers re-exposed on `api.raycast` for pack-side systems
@@ -640,15 +600,11 @@ export interface ModAPI {
   readonly config: GameConfig;
   /**
    * The active asset pack. Pack scripts use this to read `manifest`
-   * (items, defaultInventory, etc.) when assembling entities — e.g. the
-   * default pack's `player.js` prefab calls `seedInventory` against
-   * `api.pack.manifest`.
+   * (item definitions, etc.) when assembling entities.
    */
   readonly pack: AssetPack;
   /** Built-in components, by name. Use these to spawn entities the engine already understands. */
   readonly components: BuiltInComponents;
-  /** Inventory helpers (sizes, seeding). See `InventoryAPI`. */
-  readonly inventory: InventoryAPI;
   /** Raycast helpers — engine internals re-exposed for pack systems. */
   readonly raycast: RaycastAPI;
   /** Decoded item images, indexed by `itemId`. See `ItemImagesAPI`. */

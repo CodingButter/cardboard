@@ -18,11 +18,11 @@
  * Headroom is sampled at every corner so a player crouched under a
  * hanging header doesn't pop through when they release crouch.
  */
+import { countItemId, getActiveItemEntity } from "../lib/inventory.js";
+
 export default (api) => {
   const C = api.components;
   const Vec2 = api.Vec2;
-  const inv = api.inventory;
-  const itemRegistry = api.singleton("ItemRegistry");
 
   // Reference logical canvas height the aim system clamps against.
   // Hard-wired to the engine's `Config.CANVAS_SIZE.y` (720) so the
@@ -159,48 +159,57 @@ export default (api) => {
         }
 
         // Hotbar switching — direct slot keys win over wheel cycling.
-        const inventory = C.Inventory.get(entity);
-        if (inventory) {
-          let nextIndex = inventory.activeHotbarIndex;
+        // Read the hotbar container via `Carrier` → `Inventory` + `ActiveSlot`.
+        const carrier = C.Carrier.get(entity);
+        const hotbarId = carrier?.hotbar;
+        const hotbarInv = typeof hotbarId === "number" ? C.Inventory.get(hotbarId) : null;
+        const activeSlot = typeof hotbarId === "number" ? C.ActiveSlot.get(hotbarId) : null;
+        if (hotbarInv && activeSlot) {
+          let nextIndex = activeSlot.index;
           if (slotPressed.length > 0) {
             for (const slot of slotPressed) {
-              if (slot < inventory.hotbar.length) {
+              if (slot < hotbarInv.capacity) {
                 nextIndex = slot;
                 break;
               }
             }
           } else if (wheelNotches !== 0) {
-            const n = inventory.hotbar.length;
-            nextIndex = ((inventory.activeHotbarIndex + wheelNotches) % n + n) % n;
+            const n = hotbarInv.capacity;
+            if (n > 0) {
+              nextIndex = ((activeSlot.index + wheelNotches) % n + n) % n;
+            }
           }
-          if (nextIndex !== inventory.activeHotbarIndex) {
-            inventory.activeHotbarIndex = nextIndex;
-            const weapon = C.Weapon.get(entity);
+          if (nextIndex !== activeSlot.index) {
+            activeSlot.index = nextIndex;
+            // Reset any per-weapon state on the newly-active item entity.
+            const newActiveItem = getActiveItemEntity(world, entity, C);
+            const weapon = newActiveItem !== null ? C.Weapon.get(newActiveItem) : null;
             if (weapon) {
               weapon.lastFireTime = -100;
               weapon.wasFiring = false;
-              weapon.reloadStart = -Infinity;
+              weapon.reloadStart = -1;
             }
           }
         }
 
         // Reload (R) start — completion lives in gun-render.
-        if (reloadPressed && inventory) {
-          const active = inv.getActiveItem(inventory);
-          const def = active ? itemRegistry.byId?.[active.itemId] : null;
-          const weapon = C.Weapon.get(entity);
-          const stats = def?.weapon;
-          const magSize = stats?.magazineSize ?? 0;
-          const ammoItem = stats?.ammoItem;
+        if (reloadPressed) {
+          const activeItem = getActiveItemEntity(world, entity, C);
+          const weapon = activeItem !== null ? C.Weapon.get(activeItem) : null;
+          const item = activeItem !== null ? C.Item.get(activeItem) : null;
+          const magSize = weapon?.magazineSize ?? 0;
+          const ammoItem = weapon?.ammoItem;
+          const ammoAvailable =
+            ammoItem ? countItemId(world, carrier?.backpack, ammoItem, C) +
+              countItemId(world, carrier?.hotbar, ammoItem, C) : 0;
           if (
-            active &&
             weapon &&
-            def?.type === "weapon" &&
+            item?.type === "weapon" &&
             magSize > 0 &&
             ammoItem &&
-            (active.mag ?? 0) < magSize &&
-            inv.countItem(inventory, ammoItem) > 0 &&
-            !Number.isFinite(weapon.reloadStart)
+            (weapon.mag ?? 0) < magSize &&
+            ammoAvailable > 0 &&
+            (!Number.isFinite(weapon.reloadStart) || weapon.reloadStart < 0)
           ) {
             weapon.reloadStart = performance.now() / 1000;
           }

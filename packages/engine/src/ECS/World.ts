@@ -81,8 +81,42 @@ export class World {
   private readonly nameIndex: Map<string, Entity> = new Map();
   private readonly entityNames: Map<Entity, string> = new Map();
 
-  /** Allocate a new entity id. Reuses ids freed by `despawn` when possible. */
-  spawn(): Entity {
+  /**
+   * Allocate a new entity id. When `requestedId` is omitted the next
+   * free id is returned (preferring ids returned by `despawn` so the
+   * dense range stays compact).
+   *
+   * When `requestedId` is supplied the entity materialises at that
+   * exact id — used by the world.json / scene-entity loaders to honour
+   * authored ids (a stable handle the pack can reference from other
+   * entity records). The id is removed from the free-pool if it was
+   * sitting there, the internal `nextId` counter is bumped so future
+   * auto-generated ids never collide, and an `Error` is thrown if the
+   * id is already alive (collisions are a pack-authoring bug, not
+   * something to paper over).
+   *
+   * WORLD_STATE.md §3 + "world.json full-scope" (authored entity ids).
+   */
+  spawn(requestedId?: Entity): Entity {
+    if (requestedId !== undefined) {
+      if (!Number.isInteger(requestedId) || requestedId < 1) {
+        throw new Error(
+          `World.spawn: requestedId ${requestedId} must be a positive integer`,
+        );
+      }
+      if (this.alive.has(requestedId)) {
+        throw new Error(
+          `World.spawn: requestedId ${requestedId} is already alive`,
+        );
+      }
+      // Pluck the id out of the free pool if it happens to be there
+      // (otherwise a later auto-`spawn()` would re-issue it).
+      const freeIdx = this.freeIds.indexOf(requestedId);
+      if (freeIdx !== -1) this.freeIds.splice(freeIdx, 1);
+      this.alive.add(requestedId);
+      if (requestedId >= this.nextId) this.nextId = requestedId + 1;
+      return requestedId;
+    }
     const id = this.freeIds.pop() ?? this.nextId++;
     this.alive.add(id);
     return id;

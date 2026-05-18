@@ -184,12 +184,22 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
   return await result.outputs[0]!.text();
 }
 
-/** `true` when `path` is a `.ts` / `.tsx` pack script (needs compiling). */
+/**
+ * `true` when `path` is a pack-script source that should be bundled
+ * by Bun before shipping inside the .apg. Includes `.js` so packs can
+ * `import { ... } from "../lib/foo.js"` and have the helper inlined
+ * into the entrypoint — engine loads pack scripts via Blob URLs which
+ * have no path context for relative-import resolution.
+ */
 export function isCompilablePackScript(path: string): boolean {
-  return path.endsWith(".ts") || path.endsWith(".tsx");
+  return path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".js");
 }
 
-/** Rewrite a `.ts`/`.tsx` script path to its compiled `.js` form. */
+/**
+ * Rewrite a script source path to its compiled `.js` form. `.js`
+ * entries keep the same path (Bun rewrites the bundle in place);
+ * `.ts`/`.tsx` swap their extension.
+ */
 export function compiledPackScriptPath(path: string): string {
   if (path.endsWith(".tsx")) return path.slice(0, -4) + ".js";
   if (path.endsWith(".ts")) return path.slice(0, -3) + ".js";

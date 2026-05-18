@@ -1,36 +1,36 @@
 /**
  * Default pack — InventoryBarRenderSystem.
  *
- * Bottom-center HUD hotbar strip. Each tile shows the item's icon
- * (from `api.itemImages`), its slot number, and — for weapons — the
- * current magazine count over the total reserve ammo in bag+hotbar.
- * Active slot gets a brighter background + thicker border. A thin
- * progress bar sweeps along the bottom of the active slot while that
- * weapon is reloading.
+ * Bottom-center HUD hotbar strip. Walks the player's hotbar container
+ * (`Carrier.hotbar → Inventory.slots[]`), reads each slot's item-entity
+ * id, fetches its `Item` + `Stackable` (+ optional `Weapon`) components
+ * for icon + ammo readout, and draws.
+ *
+ * Active slot index lives on the hotbar container's `ActiveSlot.index`.
  */
+import { countItemId } from "../lib/inventory.js";
+
 export default (api) => {
   const C = api.components;
-  const inv = api.inventory;
-  const itemRegistry = api.singleton("ItemRegistry");
 
   api.registerRendererSystem((renderer, world) => {
-    const entity = world.first(C.PlayerInput, C.Inventory);
-    if (entity === undefined) return;
-    const inventory = C.Inventory.getOrThrow(entity);
-    if (inventory.hotbar.length === 0) return;
-    const weapon = C.Weapon.get(entity);
+    const player = world.first(C.PlayerInput, C.Carrier);
+    if (player === undefined) return;
+    const carrier = C.Carrier.get(player);
+    if (!carrier || typeof carrier.hotbar !== "number") return;
+    const hotbarInv = C.Inventory.get(carrier.hotbar);
+    const activeSlot = C.ActiveSlot.get(carrier.hotbar);
+    if (!hotbarInv || hotbarInv.capacity === 0) return;
+    const activeIndex = activeSlot?.index ?? 0;
 
     const ctx = renderer.ctx;
     const H = ctx.canvas.height;
     const W = ctx.canvas.width;
-    // CONFIG.ui.scale is the single UI-scaling source of truth — see
-    // GameConfig.ts. All canvas2d HUD systems multiply their base
-    // sizes by it; modal Tailwind classes scale via <html>.fontSize.
     const uiScale = api.config.ui?.scale ?? 1;
     const slotSize = H * 0.075 * uiScale;
     const gap = H * 0.008 * uiScale;
     const padding = H * 0.02 * uiScale;
-    const n = inventory.hotbar.length;
+    const n = hotbarInv.capacity;
 
     const totalWidth = n * slotSize + (n - 1) * gap;
     const startX = (W - totalWidth) / 2;
@@ -41,10 +41,12 @@ export default (api) => {
 
     ctx.save();
     for (let i = 0; i < n; i++) {
-      const stack = inventory.hotbar[i];
-      const def = stack ? itemRegistry.byId?.[stack.itemId] : null;
+      const slotId = hotbarInv.slots[i];
+      const item = typeof slotId === "number" ? C.Item.get(slotId) : null;
+      const stackable = typeof slotId === "number" ? C.Stackable.get(slotId) : null;
+      const weapon = typeof slotId === "number" ? C.Weapon.get(slotId) : null;
       const x = startX + i * (slotSize + gap);
-      const isActive = i === inventory.activeHotbarIndex;
+      const isActive = i === activeIndex;
 
       ctx.fillStyle = isActive ? "rgba(255, 200, 60, 0.18)" : "rgba(0, 0, 0, 0.55)";
       ctx.fillRect(x, baseY, slotSize, slotSize);
@@ -58,8 +60,8 @@ export default (api) => {
         slotSize - ctx.lineWidth,
       );
 
-      if (stack) {
-        const img = api.itemImages.get(stack.itemId);
+      if (item) {
+        const img = api.itemImages.get(item.itemId);
         if (img) {
           const iconPad = slotSize * 0.12;
           ctx.globalAlpha = isActive ? 1 : 0.75;
@@ -88,18 +90,23 @@ export default (api) => {
       ctx.fillText(`${i + 1}`, x + slotSize * 0.08, baseY + slotSize * 0.06);
 
       // Count / ammo readout (bottom-right).
-      if (stack && def) {
+      if (item && stackable) {
         let label = null;
         let red = false;
-        if (def.type === "weapon" && def.weapon?.magazineSize) {
-          const reserve = def.weapon.ammoItem
-            ? inv.countItem(inventory, def.weapon.ammoItem)
+        if (weapon && item.type === "weapon" && (weapon.magazineSize ?? 0) > 0) {
+          const reserve = weapon.ammoItem
+            ? countItemId(world, carrier.backpack, weapon.ammoItem, C) +
+              countItemId(world, carrier.hotbar, weapon.ammoItem, C) -
+              // Subtract our OWN mag/stack so we don't double-count
+              // (the weapon's mag is held on its Weapon component, not
+              // in any container slot — no subtraction needed).
+              0
             : 0;
-          const mag = stack.mag ?? 0;
+          const mag = weapon.mag ?? 0;
           label = `${mag}/${reserve}`;
           red = mag === 0;
-        } else if (stack.count > 1) {
-          label = `${stack.count}`;
+        } else if (stackable.count > 1) {
+          label = `${stackable.count}`;
         }
         if (label) {
           ctx.fillStyle = red
@@ -122,12 +129,12 @@ export default (api) => {
       if (
         isActive &&
         weapon &&
-        stack &&
-        def?.type === "weapon" &&
-        def.weapon?.magazineSize &&
-        Number.isFinite(weapon.reloadStart)
+        item?.type === "weapon" &&
+        (weapon.magazineSize ?? 0) > 0 &&
+        Number.isFinite(weapon.reloadStart) &&
+        weapon.reloadStart >= 0
       ) {
-        const reloadTime = def.weapon.reloadTime ?? 1.5;
+        const reloadTime = weapon.reloadTime ?? 1.5;
         const now = performance.now() / 1000;
         const t = Math.min(1, Math.max(0, (now - weapon.reloadStart) / reloadTime));
         const barH = Math.max(2, slotSize * 0.05);

@@ -96,26 +96,87 @@
       "schema": {
         "type": "object",
         "properties": {
-          "lastFireTime": { "type": "number",  "default": -100 },
-          "walkPhase":    { "type": "number",  "default": 0 },
-          "wasFiring":    { "type": "boolean", "default": false },
-          "reloadStart":  { "type": "number",  "default": -1 }
-        },
-        "required": ["lastFireTime", "walkPhase", "wasFiring", "reloadStart"]
+          "fireRate":       { "type": "number",  "default": 0 },
+          "magazineSize":   { "type": "number",  "default": 0 },
+          "reloadTime":     { "type": "number",  "default": 1.5 },
+          "ammoItem":       { "type": "string" },
+          "mag":            { "type": "number",  "default": 0 },
+          "lastFireTime":   { "type": "number",  "default": -100 },
+          "walkPhase":      { "type": "number",  "default": 0 },
+          "wasFiring":      { "type": "boolean", "default": false },
+          "reloadStart":    { "type": "number",  "default": -1 }
+        }
       }
     },
     {
       "name": "Inventory",
+      "tags": ["entity", "container"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "slots":    { "type": "array",  "items": { "type": "number" }, "default": [] },
+          "capacity": { "type": "number", "default": 0 }
+        },
+        "required": ["slots", "capacity"]
+      }
+    },
+    {
+      "name": "ActiveSlot",
       "tags": ["entity"],
       "schema": {
         "type": "object",
         "properties": {
-          "bag":               { "type": "array",  "default": [] },
-          "hotbar":            { "type": "array",  "default": [] },
-          "equipment":         { "type": "object", "default": {} },
-          "activeHotbarIndex": { "type": "number", "default": 0 }
+          "index": { "type": "number", "default": 0 }
         },
-        "required": ["bag", "hotbar", "equipment", "activeHotbarIndex"]
+        "required": ["index"]
+      }
+    },
+    {
+      "name": "Carrier",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "hotbar":   { "type": "number" },
+          "backpack": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "Item",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "itemId":      { "type": "string" },
+          "displayName": { "type": "string" },
+          "image":       { "type": "string" },
+          "type":        { "type": "string" },
+          "equipSlot":   { "type": "string" },
+          "worldSpriteId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "Stackable",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "number", "default": 1 },
+          "max":   { "type": "number", "default": 1 }
+        },
+        "required": ["count", "max"]
+      }
+    },
+    {
+      "name": "Equippable",
+      "tags": ["entity"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "slot": { "type": "string" }
+        }
       }
     },
     {

@@ -4,19 +4,6 @@ import type { GameConfig } from "GameConfig";
 import { CONFIG } from "GameConfig";
 import type { AssetPack } from "AssetPack";
 import { Vec2 } from "Libs/Vector";
-import {
-  BAG_SIZE,
-  HOTBAR_SIZE,
-  addItem,
-  countItem,
-  defaultStackMax,
-  emptyEquipment,
-  getActiveItem,
-  quickTransfer,
-  removeItem,
-  seedInventory,
-} from "Libs/Inventory";
-import { EQUIP_SLOTS } from "AssetPack";
 import { castRayToWall } from "Libs/Raycast";
 import type KeyboardController from "Controllers/KeyboardController";
 import type MouseController from "Controllers/MouseController";
@@ -34,7 +21,6 @@ import type {
   EventsAPI,
   FrameFn,
   InputAPI,
-  InventoryAPI,
   ItemImagesAPI,
   ModAPI,
   ModalsAPI,
@@ -101,20 +87,6 @@ export class ModAPIImpl implements ModAPI {
   private readonly rendererSystemRegistry = new RendererSystemRegistry();
 
   readonly components: BuiltInComponents = this.componentRegistry.builtIns;
-
-  readonly inventory: InventoryAPI = {
-    BAG_SIZE,
-    HOTBAR_SIZE,
-    EQUIP_SLOTS,
-    emptyEquipment,
-    seedInventory,
-    addItem,
-    removeItem,
-    countItem,
-    getActiveItem,
-    defaultStackMax,
-    quickTransfer,
-  };
 
   readonly raycast: RaycastAPI = {
     castRayToWall,
