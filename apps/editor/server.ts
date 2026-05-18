@@ -8,6 +8,10 @@ const PUBLIC_DIR = `${import.meta.dir}/public`;
 // in apps/game). The previous staged-copy at `public/play/` rotted
 // every time the engine changed.
 const GAME_DIST_DIR = `${import.meta.dir}/../game/dist`;
+// Proxy `/packs/*` to apps/game/public/packs/ so HomeScreen's
+// "Create Project" templates (e.g. Cardboard.apg) resolve from the
+// editor origin without needing a duplicate copy in apps/editor/public/.
+const GAME_PACKS_DIR = `${import.meta.dir}/../game/public/packs`;
 
 /**
  * Resolve content-type / cache headers for files Bun.file might not
@@ -40,6 +44,16 @@ const server = Bun.serve({
     "/": index,
     "/*": async (req) => {
       const { pathname } = new URL(req.url);
+
+      // Proxy /packs/* to apps/game/public/packs/ so authored pack
+      // templates referenced by HomeScreen (e.g. /packs/Cardboard.apg)
+      // resolve from the editor origin.
+      if (pathname.startsWith("/packs/")) {
+        const rel = pathname.slice("/packs".length);
+        const file = Bun.file(`${GAME_PACKS_DIR}${rel}`);
+        if (await file.exists()) return new Response(file);
+        return new Response("Not Found", { status: 404 });
+      }
 
       // Proxy /play/* to apps/game/dist/ (live build, kept fresh by
       // the root `bun dev` watcher). Same origin = shared IndexedDB.
