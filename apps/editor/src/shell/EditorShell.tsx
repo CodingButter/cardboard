@@ -5,7 +5,7 @@ import {
   AudioLines,
   LayoutPanelTop,
 } from "lucide-react";
-import { useRoute } from "../lib/router";
+import { useRoute, buildHash } from "../lib/router";
 import {
   EditorProjectStore,
   type ProjectMeta,
@@ -31,10 +31,45 @@ import {
 import { ActiveSceneProvider, useActiveScene } from "./ActiveSceneContext";
 import {
   PrimaryTabs,
+  PRIMARY_TAB_ORDER,
   readPersistedTab,
   writePersistedTab,
   type PrimaryTabId,
 } from "./PrimaryTabs";
+
+/**
+ * localStorage mirror of the current project id, used as a fallback
+ * when the URL has no `#/p/<id>` segment. The URL hash is the source
+ * of truth — this exists purely so a fresh load with a bare `#/`
+ * doesn't lose the project the user was last working on. When set we
+ * rewrite the hash to `#/p/<id>` on mount, which then drives the rest
+ * of the state.
+ */
+const CURRENT_PROJECT_KEY = "editor.currentProjectId";
+
+function readPersistedProject(): string | null {
+  try {
+    return localStorage.getItem(CURRENT_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedProject(projectId: string | null): void {
+  try {
+    if (projectId) localStorage.setItem(CURRENT_PROJECT_KEY, projectId);
+    else localStorage.removeItem(CURRENT_PROJECT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function isPrimaryTabId(value: string | null): value is PrimaryTabId {
+  return (
+    value !== null &&
+    (PRIMARY_TAB_ORDER as ReadonlyArray<string>).includes(value)
+  );
+}
 
 /**
  * EditorShell — the chrome that wraps every editor view.
@@ -91,50 +126,86 @@ const SCENE_TABS: ReadonlyArray<PrimaryTabId> = [
 export function EditorShell() {
   const [route, navigate] = useRoute();
 
-  // Persisted tab. We hydrate from localStorage on mount and normalise
-  // against the current route — Home route → "home" tab regardless of
-  // the persisted value, project route → persisted tab or "scene".
-  const [tab, setTabState] = React.useState<PrimaryTabId>(() => {
-    const persisted = readPersistedTab();
-    if (typeof window !== "undefined") {
-      const hash = window.location.hash;
-      const onProject = /^#\/?p\//.test(hash);
-      if (!onProject) return "home";
-      return persisted && persisted !== "home" ? persisted : "scene";
-    }
-    return persisted ?? "home";
-  });
+  // Track whether we've finished the first-mount hydration so the
+  // mirror effect below doesn't clobber the persisted value before
+  // hydration has had a chance to run.
+  const hydratedRef = React.useRef(false);
 
-  // Whenever the route changes, reconcile the tab. Home route forces
-  // `home`; project route leaves whatever the user chose (or falls
-  // back to scene.
+  // Hydrate the URL hash from the localStorage mirror on first mount
+  // if the user landed on a bare `#/` but we have a previously
+  // remembered project. This lets the back-to-home action carry the
+  // current project across reloads even when the user manually clears
+  // the hash. Hash → state is the source of truth from here on.
   React.useEffect(() => {
-    if (route.view === "home") {
-      setTabState("home");
-    } else if (tab === "home") {
-      const persisted = readPersistedTab();
-      setTabState(persisted && persisted !== "home" ? persisted : "scene");
+    if (typeof window === "undefined") {
+      hydratedRef.current = true;
+      return;
     }
-    // We intentionally don't include `tab` in deps — we only want to
-    // run this on route changes.
+    if (!route.projectId) {
+      const persisted = readPersistedProject();
+      if (persisted) {
+        navigate(buildHash(persisted, null));
+      }
+    }
+    hydratedRef.current = true;
+    // Only run on initial mount — the hash-driven effects below
+    // handle every subsequent reconciliation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route]);
+  }, []);
+
+  // Mirror the route's projectId into localStorage so a stripped hash
+  // can re-hydrate on reload. Skipped until after first-mount
+  // hydration so we never wipe the persisted value before reading it.
+  React.useEffect(() => {
+    if (!hydratedRef.current) return;
+    writePersistedProject(route.projectId);
+  }, [route.projectId]);
+
+  // Derive the active tab from the route. A null tab segment means
+  // we're on Home — either project-less (`#/`) or project-scoped
+  // (`#/p/<id>`). Both render HomeScreen. Otherwise the tab segment
+  // is narrowed to `PrimaryTabId`; invalid values collapse to "scene"
+  // (the workflow default) when a project is open, or "home" when not.
+  const tab: PrimaryTabId = React.useMemo(() => {
+    if (route.tab === null) return "home";
+    if (isPrimaryTabId(route.tab)) return route.tab;
+    return route.projectId ? "scene" : "home";
+  }, [route.projectId, route.tab]);
+
+  // Whenever the resolved tab changes, mirror it to the legacy
+  // workflow-mode localStorage key so a fresh-tab open with no hash
+  // can still rehydrate to the user's last view (via the hash-
+  // hydration effect above + the persisted project + this tab cache).
+  React.useEffect(() => {
+    writePersistedTab(tab);
+  }, [tab]);
 
   const setTab = React.useCallback(
     (next: PrimaryTabId) => {
-      // Home is a navigation target too — leaving project view if
-      // currently inside one.
+      // Home tab clicked from anywhere → drop the tab segment but
+      // keep the project segment so Home shows the current project
+      // highlighted and subsequent tab clicks re-enter it.
       if (next === "home") {
-        setTabState("home");
-        writePersistedTab("home");
-        if (route.view !== "home") navigate("#/");
+        navigate(buildHash(route.projectId, null));
         return;
       }
-      setTabState(next);
-      writePersistedTab(next);
+      // Non-Home tabs only make sense with an open project. Without
+      // one we no-op — PrimaryTabs already disables them via its
+      // `hasProject` prop, this guard is defence in depth.
+      if (!route.projectId) return;
+      navigate(buildHash(route.projectId, next));
     },
-    [navigate, route.view],
+    [navigate, route.projectId],
   );
+
+  // If the hash ever points at a non-Home tab without a project id
+  // (impossible via PrimaryTabs but reachable via manual URL editing)
+  // strip the tab so the shell falls back to the project-less Home.
+  React.useEffect(() => {
+    if (!route.projectId && route.tab !== null) {
+      navigate("#/");
+    }
+  }, [route.projectId, route.tab, navigate]);
 
   // Cross-tab navigation event. Any view can dispatch
   // `cardboard:set-tab` to ask the shell to switch tabs (and
@@ -168,7 +239,7 @@ export function EditorShell() {
   // and to views via the existing prop plumbing. The TopBar's project
   // dropdown was removed (§12 Q9 reversed) — the Home tab is the only
   // project switcher — so the shell no longer needs a `projects` list.
-  const projectId = route.view === "project" ? route.projectId : null;
+  const projectId = route.projectId;
   const [meta, setMeta] = React.useState<ProjectMeta | null>(null);
   const [manifest, setManifest] = React.useState<PackManifest | null>(null);
   const [assets, setAssets] = React.useState<AssetMeta[]>([]);
@@ -279,11 +350,17 @@ export function EditorShell() {
             showSceneDropdown={hasProject && SCENE_TABS.includes(tab)}
             projectId={projectId}
             onOpenProject={(id) => {
-              navigate(`#/p/${id}`);
+              // Picking a project from Home lands the user on Scene
+              // (the canonical workflow entry) and stamps the hash
+              // with both segments so reload/back/forward all work.
+              navigate(buildHash(id, "scene"));
               setRefreshTick((n) => n + 1);
             }}
             onProjectMutated={() => setRefreshTick((n) => n + 1)}
-            onNavigateHome={() => navigate("#/")}
+            // "Back to Home" preserves the current project segment so
+            // Home highlights it and subsequent tab clicks re-enter
+            // the same project without re-picking.
+            onNavigateHome={() => navigate(buildHash(projectId, null))}
             onOpenSettings={() => setSettingsOpen(true)}
           />
           <EditorSettingsModal
@@ -416,6 +493,9 @@ function ShellChrome({
           onNavigateHome={onNavigateHome}
         />
       </main>
+      {/* `projectId` is intentionally threaded through ShellBody so
+          HomeScreen can read it as `currentProjectId` and highlight
+          the active project even when rendered without a tab segment. */}
       <StatusBar projectName={projectName || undefined} />
     </div>
   );
@@ -435,12 +515,18 @@ function ShellBody({
   onOpenProject,
   onNavigateHome,
 }: ShellBodyProps) {
-  // Home: always rendered as-is. HomeScreen is independent of
-  // projectId — it lists every project and lets the user open one.
+  // Home: always rendered as-is. HomeScreen lists every project and
+  // lets the user open one. When `projectId` is set (route is
+  // `#/p/<id>` with no tab segment) Home highlights that project so
+  // the user can see which one they'll re-enter when picking a
+  // workflow tab.
   if (tab === "home") {
     return (
       <div className="h-full overflow-auto">
-        <HomeScreen onOpenProject={onOpenProject} />
+        <HomeScreen
+          onOpenProject={onOpenProject}
+          currentProjectId={projectId}
+        />
       </div>
     );
   }

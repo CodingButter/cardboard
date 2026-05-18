@@ -6,27 +6,68 @@ import { useEffect, useState } from "react";
  * instead drive view state from `window.location.hash`.
  *
  * Hash shapes:
- *   `#/`            → home screen
- *   `#/p/<id>`      → project view
+ *   `#/`                  → home, no current project
+ *   `#/p/<id>`            → home, with `<id>` as the current project
+ *   `#/p/<id>/<tabId>`    → project view, current project `<id>`,
+ *                           active workflow tab `<tabId>`
  *
- * Components call `navigate("#/")` / `navigate(`#/p/${id}`)` to
- * change view; this hook re-reads + parses on `hashchange`.
+ * The two-segment shape (`#/p/<id>` with NO tab) is the "back to Home"
+ * state: it preserves the active project across navigation away from
+ * a project tab so Home can highlight it and so subsequent tab clicks
+ * re-enter the same project without re-picking it from the list.
+ *
+ * Components call `navigate("#/")` / `navigate(`#/p/${id}`)` /
+ * `navigate(`#/p/${id}/${tab}`)` to change view; this hook re-reads +
+ * parses on `hashchange`.
+ *
+ * Note: this layer is intentionally string-based. The `tab` segment is
+ * not validated here against `PrimaryTabId` — keeping the router free
+ * of `shell/` imports preserves the dependency direction (shell depends
+ * on lib, never the reverse). EditorShell narrows the string to the
+ * `PrimaryTabId` union on read.
  */
 
-export type Route =
-  | { view: "home" }
-  | { view: "project"; projectId: string };
+export interface Route {
+  /** Active project, or `null` when on the project-less Home (`#/`). */
+  projectId: string | null;
+  /**
+   * Tab segment from the URL, or `null` when the URL is on the
+   * project-less Home (`#/`) or on the project-scoped Home
+   * (`#/p/<id>` with no third segment). The shell treats `null` as
+   * "home tab".
+   */
+  tab: string | null;
+}
 
 function parseHash(hash: string): Route {
   // Strip the leading `#`. Accept both `#/` and `#` for the home
   // screen so a bare `#` doesn't break the home view.
   const cleaned = hash.replace(/^#\/?/, "");
-  if (cleaned === "" || cleaned === "/") return { view: "home" };
+  if (cleaned === "" || cleaned === "/") {
+    return { projectId: null, tab: null };
+  }
   const segments = cleaned.split("/").filter(Boolean);
   if (segments[0] === "p" && segments[1]) {
-    return { view: "project", projectId: segments[1] };
+    const projectId = segments[1];
+    const tab = segments[2] ?? null;
+    return { projectId, tab };
   }
-  return { view: "home" };
+  return { projectId: null, tab: null };
+}
+
+/**
+ * Build the canonical hash for a `(projectId, tab)` pair. `tab` of
+ * `"home"` or `null` collapses to the two-segment `#/p/<id>` shape so
+ * the Home view still carries the current project across reloads.
+ * When `projectId` is null we always land on `#/`.
+ */
+export function buildHash(
+  projectId: string | null,
+  tab: string | null,
+): string {
+  if (!projectId) return "#/";
+  if (!tab || tab === "home") return `#/p/${projectId}`;
+  return `#/p/${projectId}/${tab}`;
 }
 
 export function useRoute(): [Route, (next: string) => void] {
