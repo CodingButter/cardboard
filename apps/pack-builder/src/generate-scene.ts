@@ -133,24 +133,28 @@ for (const room of rooms) {
 const floors = walls.map((row) => row.map(() => "         "));
 const ceilings = walls.map((row) => row.map(() => "         "));
 
-/* --- Spawn ---------------------------------------------------------- */
+/* --- Spawn (scene-controller SpawnerList) --------------------------- */
 
 const first = rooms[0]!;
-const spawn = {
-  x: first.x + first.w / 2,
-  y: first.y + first.h / 2,
-  facing: 0,
+const spawnX = first.x + first.w / 2;
+const spawnY = first.y + first.h / 2;
+const controller = {
+  components: {
+    SpawnerList: {
+      points: [{ id: "main", x: spawnX, y: spawnY, facing: 0 }],
+    },
+  },
 };
 
 /* --- Write ---------------------------------------------------------- */
 
-const scene = { spawn, walls, floors, ceilings };
+const scene = { controller, walls, floors, ceilings };
 await Bun.write(OUT, JSON.stringify(scene, null, 2) + "\n");
 
 const openCells = walls.reduce((n, row) => n + row.filter((c) => c === 0).length, 0);
 console.log(
   `Wrote ${OUT}: ${W}×${H}, ${rooms.length} rooms, ` +
-    `${openCells} open cells, spawn (${spawn.x.toFixed(1)}, ${spawn.y.toFixed(1)})`,
+    `${openCells} open cells, spawn (${spawnX.toFixed(1)}, ${spawnY.toFixed(1)})`,
 );
 
 export {};

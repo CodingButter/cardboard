@@ -1,0 +1,30 @@
+{
+  "singletons": {
+    "SaveSlot": { "autosaveAt": 0 }
+  },
+  "entities": [
+    {
+      "name": "player",
+      "components": {
+        "Position": { "x": 0, "y": 0 },
+        "Facing": 0,
+        "Aim": { "screenY": 0 },
+        "Scripts": { "refs": ["scripts/setup/player-init.js"] }
+      }
+    }
+  ],
+  "scripts": [
+    "scripts/systems/scene-transition.js",
+    "scripts/systems/player-input.js",
+    "scripts/systems/gun-render.js",
+    "scripts/systems/pickup.js",
+    "scripts/systems/minimap-render.js",
+    "scripts/systems/reticle-render.js",
+    "scripts/systems/stats-render.js",
+    "scripts/systems/inventory-bar-render.js",
+    "scripts/systems/inventory-screen.tsx",
+    "scripts/systems/settings-screen.tsx",
+    "scripts/systems/events-demo.js",
+    "scripts/hello.js"
+  ]
+}

@@ -154,7 +154,19 @@ export interface SceneLight {
 /** Minimal scene shape we need to mutate — kept loose so the editor
  *  can round-trip arbitrary scene-extra fields untouched. */
 export interface MutableScene {
-  spawn?: { x: number; y: number; facing?: number };
+  /** Scene-controller block — WORLD_STATE.md §5.2 + "world.json
+   *  full-scope" (2026-05-17). Spawn point lives at
+   *  `controller.components.SpawnerList.points[0]`; the legacy
+   *  top-level `spawn` field has been removed. */
+  controller?: {
+    components?: {
+      SpawnerList?: {
+        points?: Array<{ id?: string; x: number; y: number; facing?: number }>;
+      };
+      [name: string]: unknown;
+    };
+    [editorOnly: `_${string}`]: unknown;
+  };
   idMap?: Record<string, string | null>;
   walls: Array<Array<number>>;
   floors?: Array<Array<number>>;
@@ -1447,9 +1459,14 @@ export function GridEditor({
         }
       }
 
-      // Spawn marker (player position).
-      const sx = scene.spawn?.x;
-      const sy = scene.spawn?.y;
+      // Spawn marker (player position). WORLD_STATE.md §11.2 +
+      // "world.json full-scope" — spawn point lives on the scene
+      // controller's SpawnerList, not the deprecated top-level
+      // `spawn` field.
+      const spawnPoint =
+        scene.controller?.components?.SpawnerList?.points?.[0];
+      const sx = spawnPoint?.x;
+      const sy = spawnPoint?.y;
       if (typeof sx === "number" && typeof sy === "number") {
         const px = pan.x + sx * cellSize;
         const py = pan.y + sy * cellSize;
@@ -1461,7 +1478,7 @@ export function GridEditor({
         ctx.lineWidth = 1.5;
         ctx.stroke();
         // Facing arrow.
-        const facing = scene.spawn?.facing ?? 0;
+        const facing = spawnPoint?.facing ?? 0;
         ctx.beginPath();
         ctx.moveTo(px, py);
         ctx.lineTo(

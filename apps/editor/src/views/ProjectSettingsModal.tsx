@@ -291,7 +291,12 @@ function ManifestTab({
     [assets],
   );
 
-  const scriptsList = manifest.scripts ?? [];
+  // `manifest.scripts[]` was retired in WORLD_STATE "world.json
+  // full-scope" (2026-05-17). The Scripts list now lives in
+  // `world.json.scripts[]`. This panel keeps an empty-list display
+  // for back-compat — a follow-up dispatch wires it to read from
+  // world.json.
+  const scriptsList: string[] = [];
 
   const handleSave = async () => {
     setSaving(true);
@@ -405,9 +410,9 @@ function ManifestTab({
         </h3>
         {scriptsList.length === 0 ? (
           <p className="text-xs text-zinc-500">
-            No <code>manifest.scripts[]</code> entries. Authoring scripts
-            ships in a later phase (#193); for now this list is
-            display-only.
+            Pack-script lists now live in <code>world.json.scripts[]</code>.
+            Inspecting them through the editor ships in a follow-up
+            dispatch.
           </p>
         ) : (
           <ul className="rounded border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800 text-xs font-mono">

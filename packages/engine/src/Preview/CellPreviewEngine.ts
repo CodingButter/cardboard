@@ -329,9 +329,9 @@ export class CellPreviewEngine {
       walls,
       floors,
       ceilings,
-      // Spawn is unused in preview mode — we drive the camera
-      // directly through `drawWorld`. Pin it to the grid centre.
-      spawn: { x: size / 2, y: size / 2, facing: 0 },
+      // Preview mode drives the camera directly through `drawWorld`,
+      // so no scene-controller / SpawnerList is needed — the
+      // synthetic controller spawns with an empty components map.
     };
     const builtScene = Scene.fromJSON(sceneJson, undefined, resolver);
 

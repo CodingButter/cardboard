@@ -1,9 +1,4 @@
 {
-  "spawn": {
-    "x": 1.5,
-    "y": 1.5,
-    "facing": 0
-  },
   "controller": {
     "components": {
       "SpawnerList": {

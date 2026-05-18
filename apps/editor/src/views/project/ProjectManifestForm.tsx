@@ -128,7 +128,12 @@ export function ProjectManifestForm({
     () => assets.filter((a) => a.path.startsWith("scenes/")),
     [assets],
   );
-  const scriptsList = manifest.scripts ?? [];
+  // `manifest.scripts[]` was retired in WORLD_STATE "world.json
+  // full-scope" (2026-05-17). Scripts now live in
+  // `world.json.scripts[]`. The panel keeps the empty-list rendering
+  // so the section header doesn't disappear; a follow-up dispatch
+  // wires this to read world.json.
+  const scriptsList: string[] = [];
 
   const handleSave = async () => {
     setSaving(true);

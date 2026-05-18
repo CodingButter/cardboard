@@ -115,9 +115,6 @@ interface PrefabRow {
   scriptPath?: string;
 }
 
-/** Regex that picks up `api.registerPrefab("name", ...)` and `.registerPrefab('name', …)`. */
-const REGISTER_PREFAB_RE = /registerPrefab\s*\(\s*["']([^"']+)["']/g;
-
 /**
  * Map of built-in component name → lucide icon (per §7.3 — "Component
  * icon resolved from a lookup table"). Falls back to a neutral Box icon
@@ -1633,30 +1630,20 @@ function JsPrefabView({
 // ── Helpers ──────────────────────────────────────────────────────
 
 /**
- * Find JS prefabs referenced by `manifest.scripts[]`. Each script body
- * is scanned for `registerPrefab("name", …)` / `registerPrefab('name', …)`
- * calls; the first match per script wins.
+ * Find JS prefabs referenced by legacy `manifest.scripts[]` entries.
+ *
+ * Post-WORLD_STATE "world.json full-scope" (2026-05-17) the field is
+ * gone from `PackManifest`; scripts now live in `world.json.scripts[]`
+ * and are loaded by `Game.runPackScripts` directly. The detector is
+ * kept as a no-op so the JS→declarative converter UI still mounts —
+ * scenes the editor opens today never surface JS prefabs because the
+ * registerPrefab() flow was removed alongside `manifest.scripts`.
  */
 async function detectJsPrefabs(
-  projectId: string,
-  manifest: PackManifest | null,
+  _projectId: string,
+  _manifest: PackManifest | null,
 ): Promise<ReadonlyArray<{ name: string; scriptPath: string }>> {
-  if (!manifest?.scripts || manifest.scripts.length === 0) return [];
-  const out: { name: string; scriptPath: string }[] = [];
-  const seen = new Set<string>();
-  for (const path of manifest.scripts) {
-    const body = await EditorProjectStore.loadAsset(projectId, path);
-    if (typeof body !== "string") continue;
-    REGISTER_PREFAB_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = REGISTER_PREFAB_RE.exec(body)) !== null) {
-      const name = m[1]!;
-      if (seen.has(name)) continue;
-      seen.add(name);
-      out.push({ name, scriptPath: path });
-    }
-  }
-  return out;
+  return [];
 }
 
 function cloneJson<T>(v: T): T {
@@ -1811,19 +1798,19 @@ function PrefabConverterModal({
           initPath;
         await EditorProjectStore.saveAsset(projectId, initPath, initBody);
       }
-      const nextScripts = (manifest.scripts ?? []).filter(
-        (p) => p !== scriptPath,
-      );
+      // `manifest.scripts[]` was removed in WORLD_STATE "world.json
+      // full-scope" — script lists now live in `world.json.scripts[]`.
+      // The converter no longer prunes a manifest list; if a pack has
+      // a stale `scripts` array on disk the editor's manifest reader
+      // drops the unknown field on its next save round-trip.
       const nextManifest: PackManifest = {
         ...manifest,
         prefabs: {
           ...(manifest.prefabs ?? {}),
           [name]: newPrefab,
         },
-        ...(nextScripts.length > 0
-          ? { scripts: nextScripts }
-          : { scripts: undefined }),
       };
+      void scriptPath;
       await EditorProjectStore.saveManifest(projectId, nextManifest);
       const keep = await loadKeepAsJs(projectId);
       keep.delete(name);
@@ -1972,9 +1959,9 @@ function PrefabConverterModal({
             <div className="text-xs text-red-300">{applyError}</div>
           ) : (
             <p className="text-[11px] text-zinc-500">
-              Apply rewrites the manifest, writes the init script asset
-              (if any residual), and removes the original JS from
-              <code> manifest.scripts</code>.
+              Apply rewrites the manifest and writes the init script
+              asset (if any residual). Removing the original JS from
+              <code> world.json.scripts</code> is a follow-up task.
             </p>
           )}
           <div className="flex items-center gap-2">

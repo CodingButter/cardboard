@@ -129,9 +129,6 @@ interface SceneAPI {
     id: EntityId;
     components: Readonly<Record<string, unknown>>;
   };
-  // legacy back-compat — kept until packs migrate; reads through
-  // the SpawnerList component on the controller when present.
-  readonly spawn: SceneSpawn;
   // existing helpers
   isWall(x: number, y: number): boolean;
   canPlayerPass(x: number, y: number, headZ: number): boolean;
@@ -147,10 +144,32 @@ interface World {
   has(id: EntityId): boolean;
   first(...components: Component<unknown>[]): EntityId | undefined;
   each(...args): void;            // existing typed callback
-  query(...names: string[]): Iterable<EntityId>;  // NEW
+  query(...names: string[]): Iterable<EntityId>;
   entityCount(): number;
+  // NEW (2026-05-17, world.json full-scope) — name index for
+  // persistent entities authored in `world.json.entities[]`.
+  // The engine writes to this index on every spawn that carries a
+  // `name` field; pack scripts read it to locate persistent entities
+  // without having to query by component shape.
+  setName(id: EntityId, name: string | undefined): void;
+  findByName(name: string): EntityId | undefined;
+  liveEntities(): EntityId[];
 }
 ```
+
+**Removed in the "world.json full-scope" pass (2026-05-17):**
+
+  - `api.scene.spawn` / `Scene.spawn` / `SceneSpawn` / `DEFAULT_SPAWN`
+    / `synthesiseControllerFromSpawn` / `SceneJSON.spawn`. The spawn
+    point now lives ONLY at
+    `api.scene.controller.components.SpawnerList.points[0]`. Pack
+    scripts that need to locate a persistent player call
+    `api.world.findByName("player")` and read its `Position` /
+    `Facing` components.
+  - `manifest.scripts[]` / `pack.scripts()`. Script entry points now
+    live in `world.json.scripts[]` (and `Scripts.refs[]` on world
+    entities / scene-controller components / scene entities). The
+    pack-builder walks every source surface to find paths to compile.
 
 **Removed in this overhaul:**
 
@@ -553,14 +572,52 @@ the scene file owns the controller for that scene.
 
 ### 10.2 world.json (optional, NEW)
 
-A pack MAY ship a `world.json` at the pack root:
+A pack MAY ship a `world.json` at the pack root. As of the
+"world.json full-scope" pass (2026-05-17) it carries four scopes:
 
 ```jsonc
 {
+  // §10.2 ORIGINAL — per-name persistent component holders.
   "singletons": {
     "SaveSlot": { "autosaveAt": 0, "slot": 0 },
     "Score":    { "points": 0 }
-  }
+  },
+  // NEW — persistent world-scope entities (named, full component
+  // sets). Spawned ONCE at boot. Survive every scene swap (the
+  // `Game.loadScene` despawn pass skips ids tracked in the engine's
+  // `persistentEntities` set). Engine emits `entity:spawned` for each
+  // one BEFORE `world:ready` fires.
+  "entities": [
+    {
+      "name": "player",
+      "components": {
+        "Position": { "x": 0, "y": 0 },
+        "Facing":   0,
+        "Aim":      { "screenY": 0 },
+        // Per-entity Scripts component (§8 signature) — engine
+        // resolves refs[] via the pack script loader, calls each
+        // default export with (entityId, world, api) at
+        // entity-attach time, AFTER all sibling components attach.
+        "Scripts":  { "refs": ["scripts/setup/player-init.js"] }
+      }
+    }
+  ],
+  // NEW — world-scope scripts. Default export `(api) => …`. Same
+  // signature as the deprecated `manifest.scripts[]` entry-points.
+  // Run once at boot, AFTER world entities spawn and BEFORE the
+  // first scene loads. Used for: event subscriptions
+  // (`scene:loaded` handlers, etc.), `api.registerSystem`,
+  // `api.registerRendererSystem`, `api.ui.registerModal`.
+  "scripts": [
+    "scripts/systems/scene-transition.js",
+    "scripts/systems/player-input.js"
+  ],
+  // RESERVED — world-scope declarative per-frame systems with
+  // explicit phase. Engine reads + warns on unknown entries; full
+  // handling lands in a follow-up dispatch. Pack authors needing a
+  // declarative scheduler today should use a `Systems` component on
+  // the scene controller or a world entity (§7).
+  "systems": []
 }
 ```
 
@@ -569,6 +626,31 @@ the singleton entities with the listed components attached (the
 later pack's value wins on conflict; merge is per-component, not
 per-field). Singletons missing from `world.json` are still
 get-or-created lazily by `api.singleton(name)` calls.
+
+**World entities boot order:**
+
+  1. `runPackScripts()` registers `manifest.components[]`.
+  2. Reads `world.json` (cached on `Game`).
+  3. Spawns every `world.json.entities[]` record as a persistent
+     entity. Each record's components attach in declaration order;
+     the engine flags every spawned id with the `_worldPersistent`
+     marker (engine-internal `Set<Entity>`). Records carrying a
+     `Scripts` component fire their default exports with
+     `(entityId, world, api)` AFTER all siblings have attached
+     (entity-attach handler — §8 + §11.5.3).
+  4. Runs `world.json.scripts[]` via the same Blob URL + dynamic
+     import pipeline the deprecated `manifest.scripts[]` used.
+  5. `spawnInitialEntities()` seeds singletons, fires `world:ready`,
+     spawns the scene controller + scene entities, runs queued
+     `onWorldReady` callbacks, then emits `scene:loaded` + `pack:loaded`.
+
+**Pack-chain merging of `world.json.entities[]`:** the engine
+walks each pack's `entities[]` in chain order, spawning every
+record. Two packs declaring an entity with the same `name` results
+in two separate entities (last-writer-wins on the name index — the
+later pack's entity becomes the one `findByName(name)` returns).
+This is a deliberate keep-it-simple choice; "merge entities by name"
+is a follow-up if a chained pack ever needs it.
 
 ### 10.3 Component declarations
 
@@ -788,6 +870,47 @@ default-pack ships its existing systems via `manifest.scripts[]`.
      understands the file shape; the default-pack ships none.
      Mod authors can opt-in.
 
+### 11.6a `world.json` full-scope (2026-05-17 second pass)
+
+After the initial migration in §11.1-§11.5, a second pass made
+`world.json` the authoritative world-scope authoring surface and
+ripped every `Scene.spawn` back-compat surface:
+
+  - `manifest.scripts[]` is gone. Pack script entry points live in
+    `world.json.scripts[]` (default export `(api) => void`) and any
+    `Scripts.refs[]` declared on world entities or scene controllers
+    (default export `(entityId, world, api) => void`).
+  - The default-pack player is a persistent world entity declared in
+    `world.json.entities[]`. The engine spawns it ONCE at boot, flags
+    it `_worldPersistent`, and skips it in every subsequent
+    scene-unload despawn pass.
+  - `scripts/setup/player-init.js` (entity-attach script declared in
+    the player's `Scripts` component) attaches the runtime-dependent
+    components — `Movement` / `PlayerInput` / `Weapon` / `Camera` /
+    `MinimapMarker` / `Inventory` — that need `api.config` /
+    `api.pack.manifest` at attach time.
+  - `scripts/systems/scene-transition.js` (world-scope script)
+    subscribes to `scene:loaded` and repositions the player at the
+    new scene's `controller.components.SpawnerList.points[0]`.
+  - `Scene.spawn`, `SceneSpawn`, `DEFAULT_SPAWN`,
+    `synthesiseControllerFromSpawn`, `api.scene.spawn`, and the
+    legacy top-level `spawn` field in `SceneJSON` were deleted. No
+    back-compat — the repo is mid-development, no consumers needed
+    the bridge.
+  - `World` gained `setName(id, name)` / `findByName(name)` /
+    `liveEntities()`. The engine writes to the name index on every
+    spawn that carries a `name` field (world entities + scene
+    entities), so `api.world.findByName("player")` is the canonical
+    way to locate the persistent player from a pack script.
+  - Pack-builder now walks `world.json.scripts[]` + `Scripts.refs[]`
+    from world entities + scene controllers to discover compilable
+    script paths. Manifests stripped of any stale `scripts` field
+    on emit.
+
+The 4 default-pack scenes were stripped of their top-level `spawn`
+fields. Each retains its `controller.components.SpawnerList` block
+which is the only source of truth for the spawn point.
+
 ### 11.6 Engine is now maximally unopinionated (2026-05-17)
 
 Following the PE2/PE3 re-implementation (see
@@ -1001,9 +1124,10 @@ fields; `player-spawn.js` revert restores `api.scene.spawn` read.
 | W1 | Plan doc (this file) | done (2026-05-17) |
 | W2 | Engine — component manifest registry + Systems/Scripts components + singleton + serialize + world.query + lifecycle events + scene controller entity | done (2026-05-17) |
 | W3 | Default-pack — manifest.components[] populated, scenes migrated to `controller.components.SpawnerList`, player-spawn.js reads controller | done (2026-05-17) |
+| W3b | `world.json` full-scope — entities + scripts + scene.spawn rip + persistent player entity + scene-transition.js + pack-builder script discovery from world.json | done (2026-05-17) |
 | W4 | AnimationSystem move to pack scripts/systems/animation-tick.js via Systems component | held (follow-up) |
 | W5 | Editor surface changes (component picker honours `tags`, controller-components editor panel, world.json editor) | held (per dispatch constraint) |
-| W6 | `world.json` honored — singletons auto-spawned at boot from per-pack files | held (engine supports the shape; default-pack ships none) |
+| W6 | `world.json` honored — singletons + entities + scripts auto-spawned at boot from per-pack files | ✅ Done as part of W3b (2026-05-17). Default-pack ships `world.json` with the player entity + every former `manifest.scripts[]` entry. |
 | W7 | Strict mode schema validation tied to `CONFIG.dev.strictComponentSchemas` | held |
 
 ---

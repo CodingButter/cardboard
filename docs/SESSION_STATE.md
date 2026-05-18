@@ -12,7 +12,35 @@ Date of last update: **2026-05-17**.
 
 Chronological since 2026-05-15:
 
-0. **(uncommitted, 2026-05-17)** — engine maximally-unopinionated
+-1. **(uncommitted, 2026-05-17)** — WORLD_STATE "world.json
+   full-scope" pass. `world.json` is now the authoritative
+   world-scope authoring surface — singletons + persistent
+   entities + scripts. The default-pack player is a persistent
+   world entity declared in `world.json.entities[]` (Position /
+   Facing / Aim / `Scripts.refs: ["scripts/setup/player-init.js"]`).
+   The engine spawns it ONCE at boot, flags it `_worldPersistent`,
+   and the `Game.loadScene` despawn pass skips persistent ids.
+   `scripts/setup/player-init.js` (entity-attach script) wires
+   Movement / PlayerInput / Weapon / Camera / MinimapMarker /
+   Inventory at attach time so they can read live `api.config` /
+   `api.pack.manifest`. `scripts/systems/scene-transition.js`
+   (world-scope script) subscribes to `scene:loaded` and
+   repositions the player at the new scene's
+   `controller.components.SpawnerList.points[0]`. Every
+   `Scene.spawn` back-compat surface ripped: `SceneSpawn`,
+   `DEFAULT_SPAWN`, `synthesiseControllerFromSpawn`,
+   `api.scene.spawn`, `SceneJSON.spawn`, the spawn-reset logic in
+   `Game.loadScene`. `manifest.scripts[]` retired; world.json
+   scripts list now drives everything. Pack-builder walks
+   `world.json.scripts[]` + `Scripts.refs[]` to discover compilable
+   pack scripts. World gains `setName(id, name)` /
+   `findByName(name)` / `liveEntities()`. Default-pack scenes
+   stripped of top-level `spawn` fields; manifest.json no longer
+   ships `scripts`. Engine's `pack.scripts()` replaced with
+   `pack.readScripts(paths)`. New `WorldJson` interface on
+   `Game`. Editor MutableScene gains `controller`; GridEditor
+   spawn handle reads from SpawnerList; smoke tests migrated.
+0. **(uncommitted earlier 2026-05-17)** — engine maximally-unopinionated
    pass + PE2/PE3 re-implementation after the recovery wipe.
    Engine built-ins slimmed to render/lifecycle infrastructure
    (Position/Facing/Aim/Camera/Sprite/Animation/Light/Shader);

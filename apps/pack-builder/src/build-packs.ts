@@ -632,33 +632,91 @@ async function buildPack(
   }
 
   // ── Pack-script TSX compile step ─────────────────────────────────
-  // Discover which scripts in `manifest.scripts` need a build-time
-  // transform (`.ts` / `.tsx`). Each gets bundled into a single ESM
-  // `.js` chunk via `buildPackScript`; the manifest's scripts[] entry
-  // is rewritten to point at the compiled `.js` path, and the source
-  // file (plus any imports the entrypoint pulls in from `scripts/ui/`
-  // etc.) is excluded from the zip — it's a build input, not a
-  // runtime artifact.
+  // WORLD_STATE.md "world.json full-scope" (2026-05-17) — script
+  // paths now live in `world.json.scripts[]` and any `Scripts.refs[]`
+  // declared on world-scope entities or scene-controller components.
+  // Walk every source surface, gather the unique path set, compile any
+  // `.ts` / `.tsx` entries via `buildPackScript`, and rewrite each
+  // reference to point at the compiled `.js` path. The source files
+  // (plus any helpers they pull in from `scripts/ui/` etc.) are
+  // excluded from the zip — they're build inputs, not runtime
+  // artifacts.
   const compiledScripts = new Map<string, string>(); // inZip path → compiled JS
   const scriptSourcesToSkip = new Set<string>();     // sources NOT to emit
   const scriptPathRewrites = new Map<string, string>(); // .tsx → .js mapping
-  if (manifest?.scripts) {
-    for (const scriptPath of manifest.scripts) {
-      if (!isCompilablePackScript(scriptPath)) continue;
-      const absSource = join(packRoot, scriptPath);
-      try {
-        const compiled = await buildPackScript(absSource);
-        const compiledPath = compiledPackScriptPath(scriptPath);
-        compiledScripts.set(compiledPath, compiled);
-        scriptPathRewrites.set(scriptPath, compiledPath);
-        // Skip the original .tsx in the zip pass.
-        scriptSourcesToSkip.add(scriptPath);
-        console.log(`    compiled ${scriptPath} → ${compiledPath}`);
-      } catch (err) {
-        throw new Error(
-          `pack-build: failed to compile ${scriptPath}: ${(err as Error).message}`,
-        );
+
+  // Read world.json once (post-rewrite emission of the rewritten file
+  // happens below). Tolerate absence — packs without a world.json have
+  // no scripts to compile.
+  interface BuildWorldJson {
+    singletons?: Record<string, unknown>;
+    entities?: Array<{ name?: string; components?: Record<string, unknown> }>;
+    scripts?: string[];
+    systems?: unknown[];
+  }
+  const worldJsonPath = join(packRoot, "world.json");
+  let worldJson: BuildWorldJson | null = null;
+  if (await Bun.file(worldJsonPath).exists()) {
+    try {
+      worldJson = JSON.parse(await Bun.file(worldJsonPath).text()) as BuildWorldJson;
+    } catch (err) {
+      throw new Error(
+        `pack-build: world.json parse failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Collect every script path referenced anywhere in the pack:
+  //   - world.json.scripts[]
+  //   - world.json.entities[].components.Scripts.refs[]
+  //   - scene.controller.components.Scripts.refs[]
+  // Order matters for the `world.json.scripts[]` entries (the engine
+  // runs them in declaration order); entity / controller `Scripts`
+  // entries are addressed by their owning record so order across
+  // surfaces is decoupled.
+  const referencedScripts = new Set<string>();
+  const collectFromScripts = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const scriptsBag = (node as { Scripts?: unknown }).Scripts;
+    if (scriptsBag && typeof scriptsBag === "object") {
+      const refs = (scriptsBag as { refs?: unknown }).refs;
+      if (Array.isArray(refs)) {
+        for (const r of refs) if (typeof r === "string") referencedScripts.add(r);
       }
+    }
+  };
+  if (worldJson?.scripts) {
+    for (const p of worldJson.scripts) if (typeof p === "string") referencedScripts.add(p);
+  }
+  if (worldJson?.entities) {
+    for (const e of worldJson.entities) collectFromScripts(e.components ?? {});
+  }
+  for (const sceneJson of sceneJsons.values()) {
+    const controllerComponents = (
+      sceneJson as { controller?: { components?: unknown } }
+    ).controller?.components;
+    collectFromScripts(controllerComponents ?? {});
+    const entities = (sceneJson as { entities?: Array<{ components?: unknown }> }).entities;
+    if (Array.isArray(entities)) {
+      for (const e of entities) collectFromScripts(e.components ?? {});
+    }
+  }
+
+  for (const scriptPath of referencedScripts) {
+    if (!isCompilablePackScript(scriptPath)) continue;
+    const absSource = join(packRoot, scriptPath);
+    try {
+      const compiled = await buildPackScript(absSource);
+      const compiledPath = compiledPackScriptPath(scriptPath);
+      compiledScripts.set(compiledPath, compiled);
+      scriptPathRewrites.set(scriptPath, compiledPath);
+      // Skip the original .tsx in the zip pass.
+      scriptSourcesToSkip.add(scriptPath);
+      console.log(`    compiled ${scriptPath} → ${compiledPath}`);
+    } catch (err) {
+      throw new Error(
+        `pack-build: failed to compile ${scriptPath}: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -666,19 +724,79 @@ async function buildPack(
   // the bundler — they ship inside the compiled entrypoint already.
   // Exclude them from byte-for-byte copy so the .apg doesn't carry
   // dead source duplicates. Detection rule: `scripts/**/*.tsx` and
-  // `scripts/**/*.ts` that aren't themselves manifest entries.
-  const manifestScripts = new Set(manifest?.scripts ?? []);
+  // `scripts/**/*.ts` that aren't themselves referenced from
+  // world.json / scene controllers / scene entities.
+  const referencedScriptSet = new Set(referencedScripts);
 
-  // Rebuild manifest.json with rewritten scripts[] paths before the
-  // emit pass — the zipped manifest must reference the compiled .js
-  // names the engine sees at runtime.
-  let manifestText: string | null = null;
-  if (manifest && scriptPathRewrites.size > 0) {
-    const rewritten = {
-      ...manifest,
-      scripts: (manifest.scripts ?? []).map((p) => scriptPathRewrites.get(p) ?? p),
+  // Rewrite world.json with compiled .js paths. The on-disk world.json
+  // ships its `.tsx` references; the zipped copy points at the .js
+  // names the runtime engine imports.
+  let worldJsonText: string | null = null;
+  if (worldJson && scriptPathRewrites.size > 0) {
+    const rewriteRefsList = (refs: unknown): unknown => {
+      if (!Array.isArray(refs)) return refs;
+      return refs.map((p) =>
+        typeof p === "string" ? scriptPathRewrites.get(p) ?? p : p,
+      );
     };
-    manifestText = JSON.stringify(rewritten, null, 2);
+    const rewriteScriptsBag = (components: Record<string, unknown> | undefined): void => {
+      if (!components) return;
+      const scriptsBag = components.Scripts;
+      if (scriptsBag && typeof scriptsBag === "object") {
+        const next = { ...(scriptsBag as Record<string, unknown>) };
+        next.refs = rewriteRefsList((scriptsBag as { refs?: unknown }).refs);
+        components.Scripts = next;
+      }
+    };
+    const rewritten = JSON.parse(JSON.stringify(worldJson)) as BuildWorldJson;
+    if (rewritten.scripts) {
+      rewritten.scripts = rewritten.scripts.map(
+        (p: string) => scriptPathRewrites.get(p) ?? p,
+      );
+    }
+    if (rewritten.entities) {
+      for (const e of rewritten.entities) rewriteScriptsBag(e.components);
+    }
+    worldJsonText = JSON.stringify(rewritten, null, 2);
+  }
+
+  // Also rewrite scene-controller Scripts.refs[] when paths got
+  // compiled — the scene JSONs are emitted from `mergedScenes` and
+  // need their controller blocks updated alongside the bake.
+  if (scriptPathRewrites.size > 0) {
+    for (const [path, sceneJson] of mergedScenes) {
+      const controllerComponents = (
+        sceneJson as { controller?: { components?: Record<string, unknown> } }
+      ).controller?.components;
+      if (controllerComponents) {
+        const scriptsBag = controllerComponents.Scripts;
+        if (scriptsBag && typeof scriptsBag === "object") {
+          const refs = (scriptsBag as { refs?: unknown }).refs;
+          if (Array.isArray(refs)) {
+            const next = { ...(scriptsBag as Record<string, unknown>) };
+            next.refs = refs.map((p) =>
+              typeof p === "string" ? scriptPathRewrites.get(p) ?? p : p,
+            );
+            controllerComponents.Scripts = next;
+          }
+        }
+      }
+      void path;
+    }
+  }
+
+  // The manifest.json no longer carries a `scripts[]` field — but if
+  // a stale one exists on disk the editor's previous-version output
+  // may still ship it. Strip on emit so the zipped manifest stays
+  // clean.
+  let manifestText: string | null = null;
+  if (
+    manifest &&
+    (manifest as unknown as { scripts?: unknown }).scripts !== undefined
+  ) {
+    const stripped: Record<string, unknown> = { ...(manifest as unknown as Record<string, unknown>) };
+    delete stripped.scripts;
+    manifestText = JSON.stringify(stripped, null, 2);
   }
 
   // ── Emit pass: bake + zip ─────────────────────────────────────────
@@ -692,17 +810,19 @@ async function buildPack(
       continue;
     }
     // Skip any other .tsx/.ts inside the `scripts/` tree that isn't a
-    // manifest entry — these are helpers (e.g. `scripts/ui/*.tsx`)
+    // referenced entry — these are helpers (e.g. `scripts/ui/*.tsx`)
     // bundled into the entrypoint already.
     if (
       (inZip.startsWith("scripts/") && (inZip.endsWith(".tsx") || inZip.endsWith(".ts"))) &&
-      !manifestScripts.has(inZip)
+      !referencedScriptSet.has(inZip)
     ) {
       continue;
     }
 
     if (inZip === "manifest.json" && manifestText !== null) {
       zip.file(inZip, manifestText);
+    } else if (inZip === "world.json" && worldJsonText !== null) {
+      zip.file(inZip, worldJsonText);
     } else if (inZip.startsWith("scenes/") && inZip.endsWith(".json")) {
       const sceneJson = mergedScenes.get(inZip)!;
       // Pre-expand idMap → legacy structured shape so the bake script's

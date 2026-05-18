@@ -4,20 +4,6 @@
   "engine": "two_5_d@0.1",
   "startScene": "scenes/scene1.json",
   "config": "config.json",
-  "scripts": [
-    "scripts/systems/player-spawn.js",
-    "scripts/systems/player-input.js",
-    "scripts/systems/gun-render.js",
-    "scripts/systems/pickup.js",
-    "scripts/systems/minimap-render.js",
-    "scripts/systems/reticle-render.js",
-    "scripts/systems/stats-render.js",
-    "scripts/systems/inventory-bar-render.js",
-    "scripts/systems/inventory-screen.tsx",
-    "scripts/systems/settings-screen.tsx",
-    "scripts/systems/events-demo.js",
-    "scripts/hello.js"
-  ],
   "components": [
     { "name": "Position",      "tags": ["entity"] },
     { "name": "Facing",        "tags": ["entity"] },

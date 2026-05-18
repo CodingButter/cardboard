@@ -67,7 +67,11 @@ function makeMinimalScene(): unknown {
     Array.from({ length: W }, () => 0),
   );
   return {
-    spawn: { x: 1.5, y: 1.5, facing: 0 },
+    controller: {
+      components: {
+        SpawnerList: { points: [{ id: "main", x: 1.5, y: 1.5, facing: 0 }] },
+      },
+    },
     idMap: { "0": null, "1": "wall" },
     walls,
     floors,

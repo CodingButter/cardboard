@@ -25,8 +25,11 @@
  *                           `manifest.shaders.postPasses[]` — these
  *                           are pack-author-named materials per the
  *                           PostPassDef schema.
- *   - "manifest-script"   — same script path declared in
- *                           `manifest.scripts[]` by two packs.
+ *   - "manifest-script"   — retired post-WORLD_STATE "world.json
+ *                           full-scope" (2026-05-17). Script lists
+ *                           now live in `world.json.scripts[]`; a
+ *                           follow-up adds the equivalent conflict
+ *                           pass against the new field.
  *
  * Algorithm:
  *
@@ -190,14 +193,12 @@ export async function detectConflicts(
       bump("manifest-sound", id, url);
     }
 
-    // ── 3. Manifest scripts — order-significant but collisions on
-    //      the same path across packs still warrant a flag (one will
-    //      double-run, or one's source will be served from the wrong
-    //      pack via the asset-path collision above; reporting both
-    //      makes the relationship obvious). ──
-    for (const p of manifest.scripts ?? []) {
-      bump("manifest-script", p, url);
-    }
+    // ── 3. `manifest.scripts[]` was retired in WORLD_STATE
+    //      "world.json full-scope" (2026-05-17). Pack scripts now ship
+    //      in `world.json.scripts[]` per pack; conflict-detecting
+    //      across world.json files is a follow-up dispatch. The
+    //      asset-path collision pass above still flags two packs that
+    //      both write the same script path. ──
 
     // ── 4. Tile presets. Two surfaces:
     //

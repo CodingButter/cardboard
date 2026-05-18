@@ -54,6 +54,19 @@ export class World {
   resolveComponentName: ((name: string) => Component<unknown> | undefined) | null =
     null;
 
+  /**
+   * Optional name → entity id index. Pack-side spawn paths (the engine's
+   * scene-entity loader, the world-entity loader, pack scripts calling
+   * `world.spawn() + setName`) write to this so `world.findByName("player")`
+   * resolves O(1). WORLD_STATE.md §3 + "world.json full-scope" (2026-05-17).
+   *
+   * Cleared on `despawn` for any entity whose id appears as a value.
+   * Names are unique within a `World` — the second `setName(e2, "player")`
+   * call overwrites the first registration with a console warning.
+   */
+  private readonly nameIndex: Map<string, Entity> = new Map();
+  private readonly entityNames: Map<Entity, string> = new Map();
+
   /** Allocate a new entity id. Reuses ids freed by `despawn` when possible. */
   spawn(): Entity {
     const id = this.freeIds.pop() ?? this.nextId++;
@@ -72,8 +85,60 @@ export class World {
     // emit in try/catch so handler throws never reach this far.
     if (this.onDespawn !== null) this.onDespawn(entity);
     for (const component of this.knownComponents) component.remove(entity);
+    const name = this.entityNames.get(entity);
+    if (name !== undefined) {
+      this.entityNames.delete(entity);
+      if (this.nameIndex.get(name) === entity) this.nameIndex.delete(name);
+    }
     this.alive.delete(entity);
     this.freeIds.push(entity);
+  }
+
+  /**
+   * Register a human-readable name for an entity. The engine writes
+   * to this index whenever it spawns a `name`-bearing record from
+   * `scene.entities[]` / `world.json.entities[]`. Pack scripts call
+   * `world.findByName(name)` to locate persistent entities (the
+   * canonical "player" lookup). Re-using a name across two live entities
+   * overwrites the index with a console warning — names are unique.
+   * Pass `undefined` to clear an entity's name.
+   */
+  setName(entity: Entity, name: string | undefined): void {
+    if (!this.alive.has(entity)) return;
+    const prevName = this.entityNames.get(entity);
+    if (prevName !== undefined) {
+      this.entityNames.delete(entity);
+      if (this.nameIndex.get(prevName) === entity) this.nameIndex.delete(prevName);
+    }
+    if (name === undefined) return;
+    const existing = this.nameIndex.get(name);
+    if (existing !== undefined && existing !== entity && this.alive.has(existing)) {
+      console.warn(
+        `[world] setName: name "${name}" reassigned from entity ${existing} → ${entity}`,
+      );
+    }
+    this.nameIndex.set(name, entity);
+    this.entityNames.set(entity, name);
+  }
+
+  /**
+   * Resolve a previously-registered name to its entity id. Returns
+   * `undefined` if the name isn't registered or its entity was
+   * despawned. WORLD_STATE.md §3.
+   */
+  findByName(name: string): Entity | undefined {
+    const id = this.nameIndex.get(name);
+    if (id === undefined) return undefined;
+    if (!this.alive.has(id)) {
+      this.nameIndex.delete(name);
+      return undefined;
+    }
+    return id;
+  }
+
+  /** Read-only view of `entity → name`. Used by `serialize`. */
+  getName(entity: Entity): string | undefined {
+    return this.entityNames.get(entity);
   }
 
   /** `true` while `entity` exists. */
@@ -154,6 +219,16 @@ export class World {
   /** Number of alive entities. Cheap to call. */
   entityCount(): number {
     return this.alive.size;
+  }
+
+  /**
+   * Snapshot every currently-alive entity id. Returns a fresh array
+   * so callers can mutate the world (e.g. `despawn` walk) without
+   * tripping iteration. WORLD_STATE.md §6.2 — `Game.loadScene` uses
+   * this for the scene-scoped despawn pass.
+   */
+  liveEntities(): Entity[] {
+    return Array.from(this.alive);
   }
 
   /**

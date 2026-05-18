@@ -469,13 +469,6 @@ export interface PackManifest {
    */
   config?: string;
   /**
-   * Optional list of script paths inside the pack. Each script is loaded
-   * as an ES module via a Blob URL and its default export is invoked
-   * with the engine's `ModAPI` to register components, prefabs, and
-   * systems.
-   */
-  scripts?: string[];
-  /**
    * Item catalog. Keys are item ids referenced by `defaultInventory`,
    * `Pickup` components, and the inventory UI. Replaced the old
    * `weapons` catalog — weapons are now `ItemDef` entries with

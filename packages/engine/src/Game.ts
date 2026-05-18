@@ -19,6 +19,7 @@ import {
 import ModalRegistry from "ModalRegistry";
 import type { PartialGameConfig } from "Settings";
 import { Aim, Camera, Facing, Position } from "Components";
+import type { Entity } from "ECS"; // World already imported above
 import { Vec2 } from "Libs/Vector";
 import { CONFIG } from "GameConfig";
 import type { AssetPack, ShaderRole } from "AssetPack";
@@ -32,11 +33,50 @@ import { installDefaultSettings } from "UI/DefaultSettingsSystem";
  * across reloads keeps every entity (and so the player's position, facing,
  * etc.) where it was; re-using `keyboard`/`mouse` keeps DOM listeners bound
  * to the same instances rather than stacking up.
+ *
+ * `persistentEntities` rides along so an HMR reload doesn't double-spawn
+ * the world.json entities — `spawnInitialEntities()` short-circuits on a
+ * non-fresh world (the existing world already carries the previous run's
+ * persistent entities).
  */
 export interface GameState {
   world: World;
   keyboard: KeyboardController;
   mouse: MouseController;
+  persistentEntities?: ReadonlySet<Entity>;
+}
+
+/**
+ * Shape of the optional pack-shipped `world.json` (WORLD_STATE.md §10.2 +
+ * "world.json full-scope" 2026-05-17). The engine reads four scopes from
+ * this file:
+ *
+ *   - `singletons`  — per-name component data attached to persistent
+ *                     singleton entities (one entity per component name).
+ *   - `entities`    — named persistent world entities (the player today)
+ *                     spawned ONCE per Game lifetime and skipped by the
+ *                     scene-unload despawn walk.
+ *   - `scripts`     — world-scope script paths run ONCE at boot, after
+ *                     world entities spawn but before the first
+ *                     scene:loaded fires. Same signature as the old
+ *                     `manifest.scripts[]` entry — default export
+ *                     `(api) => { ... }`.
+ *   - `systems`     — reserved. The engine reads + warns on unknown
+ *                     entries; full handling lands when the Systems
+ *                     scheduler grows the world-scope codepath.
+ *
+ * Every field is optional. A pack with no `world.json` boots byte-
+ * identically to a pack with `world.json` = `{}`.
+ */
+export interface WorldJson {
+  singletons?: Record<string, Record<string, unknown>>;
+  entities?: Array<{
+    name?: string;
+    components?: Record<string, unknown>;
+    [editorOnly: `_${string}`]: unknown;
+  }>;
+  scripts?: string[];
+  systems?: unknown[];
 }
 
 /**
@@ -101,6 +141,17 @@ export class Game {
    * second pass would duplicate every record.
    */
   private readonly freshWorld: boolean;
+
+  /**
+   * Persistent world entities — spawned from `world.json.entities[]`
+   * at boot. Survive every scene swap (the `loadScene` despawn pass
+   * skips ids in this set). Engine-internal; pack code reaches the
+   * underlying entities by their declared `name` via
+   * `api.world.findByName("player")`.
+   *
+   * WORLD_STATE.md §10.2 + "world.json full-scope" (2026-05-17).
+   */
+  private readonly persistentEntities: Set<Entity> = new Set();
 
   /**
    * Monotonic frame counter — incremented at the top of `update`.
@@ -193,6 +244,12 @@ export class Game {
     this.mouse = previous?.mouse ?? new MouseController(canvas);
     this.freshWorld = previous?.world === undefined;
     this.world = previous?.world ?? new World();
+    // Carry forward persistent-entity ids across HMR snapshots so the
+    // first scene swap after a reload still skips the player /
+    // singleton-class entities the previous Game spawned.
+    if (previous?.persistentEntities) {
+      for (const id of previous.persistentEntities) this.persistentEntities.add(id);
+    }
 
     this.scene = scene;
     // Engine-side systems still in the engine after R4: sprite + light
@@ -264,66 +321,241 @@ export class Game {
   };
 
   /**
-   * Load and execute every script listed in the pack's manifest. Each
-   * script gets a Blob URL and is dynamic-imported as an ES module; its
-   * default export (or `setup` named export) is called with the
-   * `ModAPI`.
+   * Cached `world.json` parse — read once at boot in `runPackScripts`
+   * and re-used by `spawnInitialEntities` for the entity-spawn pass.
+   * Held on `Game` (not `AssetPack`) so HMR reloads with a stale pack
+   * snapshot still re-read fresh world.json. `null` means "no
+   * world.json shipped by this pack".
+   */
+  private worldJson: WorldJson | null = null;
+
+  /**
+   * Read + cache `world.json` from the pack root. Returns `null` when
+   * the pack ships no `world.json`. WORLD_STATE.md §10.2 +
+   * "world.json full-scope" (2026-05-17).
+   */
+  private async readWorldJson(): Promise<WorldJson | null> {
+    if (!this.pack.has("world.json")) return null;
+    try {
+      const raw = await this.pack.textBody("world.json");
+      const parsed = JSON.parse(raw) as WorldJson;
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (err) {
+      console.error("[world.json] parse failed —", err);
+      return null;
+    }
+  }
+
+  /**
+   * Boot-time setup pass. Order is load-bearing:
    *
-   * Run after the game is fully constructed, so scripts can immediately
-   * spawn entities and register systems that interact with the world.
-   * Loading failures are logged but don't crash the engine — one broken
-   * script shouldn't take the whole pack down.
+   *   1. Register every `manifest.components[]` entry so script-side
+   *      spawns + scene-controller spawns resolve pack-declared
+   *      component names.
+   *   2. Read + cache `world.json` (singletons + entities + scripts).
+   *   3. Spawn `world.json.entities[]` as persistent world entities.
+   *      Each entry's `Scripts` component fires at attach time with
+   *      `(entityId, world, api)` — used by the default-pack player
+   *      to assemble runtime-dependent components (Movement / Camera /
+   *      Inventory seeded from manifest.defaultInventory).
+   *   4. Run `world.json.scripts[]` (default-export `(api) => …`).
+   *      These register per-frame systems, event subscriptions, modal
+   *      screens. They fire ONCE per Game lifetime, BEFORE the first
+   *      scene loads.
+   *   5. Install engine-shipped universal modals (Settings).
+   *
+   * Loading failures are logged but don't crash the engine — one
+   * broken script shouldn't take the whole pack down.
    */
   async runPackScripts(): Promise<void> {
-    // WORLD_STATE.md §4 — register every entry in
-    // `manifest.components[]` BEFORE pack scripts run so script-side
-    // entity-spawn paths and the scene-controller spawn can resolve
-    // pack-declared component names. Built-in conflicts are tolerated
-    // (the built-in component class wins; manifest entry just
-    // augments tags/schema for editor pickers).
+    // 1. WORLD_STATE.md §4 — register every entry in
+    //    `manifest.components[]` BEFORE world.json reads so spawn
+    //    paths can resolve pack-declared component names. Built-in
+    //    conflicts are tolerated (the built-in component class wins;
+    //    manifest entry just augments tags/schema for editor pickers).
     this.api.registerComponentsFromManifest(
       this.pack.manifest.components,
       this.pack.manifest.name ?? "pack",
     );
-    const scripts = await this.pack.scripts();
-    for (const { path, source } of scripts) {
+
+    // 2. Cache world.json for the entity-spawn pass in
+    //    `spawnInitialEntities`. `null` here means "no world.json
+    //    shipped" — every downstream loop short-circuits cleanly.
+    this.worldJson = await this.readWorldJson();
+
+    // 3. Persistent world entities. Spawned BEFORE scripts so a
+    //    Scripts-component attached to a world entity runs during
+    //    spawn (entity-attach handler), giving pack code its first
+    //    chance to wire up event subscriptions / per-frame systems
+    //    against the freshly-built persistent entity.
+    if (this.freshWorld && this.worldJson?.entities) {
+      await this.spawnWorldEntities(this.worldJson.entities);
+    }
+
+    // 4. World-scope scripts. Run via Blob URL + dynamic import,
+    //    same way the deprecated `manifest.scripts[]` ran.
+    const scriptPaths = this.worldJson?.scripts ?? [];
+    if (scriptPaths.length > 0) {
+      const scripts = await this.pack.readScripts(scriptPaths);
+      for (const { path, source } of scripts) {
+        try {
+          const blob = new Blob([source], { type: "application/javascript" });
+          const url = URL.createObjectURL(blob);
+          // Ev1 of EVENTS.md §6.1 — tag every subscription registered
+          // during this script's setup() so HMR reloads of the single
+          // script can drop only its subscriptions. setActiveScript
+          // returns to null in the `finally`, so subscriptions made
+          // OUTSIDE the wrapper (engine internals, late onWorldReady
+          // callbacks) stay un-tagged and live for the session.
+          this.api.events.setActiveScript(path);
+          try {
+            const mod = (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
+            const setup = (mod.default ?? mod.setup) as ((api: ModAPIImpl) => void) | undefined;
+            if (typeof setup === "function") {
+              setup(this.api);
+              console.log(`Script ${path}: loaded`);
+            } else {
+              console.warn(`Script ${path}: no default export or setup() function`);
+            }
+          } finally {
+            URL.revokeObjectURL(url);
+            this.api.events.setActiveScript(null);
+          }
+        } catch (err) {
+          console.error(`Script ${path}: failed to load —`, err);
+        }
+      }
+    }
+
+    if (this.worldJson?.systems && this.worldJson.systems.length > 0) {
+      console.warn(
+        "[world.json] systems[] declared but world-scope Systems scheduling " +
+          "is not yet wired — entries ignored (follow-up).",
+      );
+    }
+
+    // 5. Engine-shipped universal modals — Settings today, Console
+    //    (#199) soon. Per `docs/plans/EDITOR_REDESIGN.md` §12 Q4, the
+    //    engine owns the universal-to-every-game UI surfaces (every
+    //    cardboard game needs settings access regardless of pack).
+    //    Mounted via the same `api.ui.registerModal` path that packs
+    //    use, so packs can override the slot by calling
+    //    `registerModal("settings", …)` in their own scripts — and
+    //    because pack scripts run BEFORE this line, the pack's
+    //    component wins via the `has`-guarded install.
+    installDefaultSettings(this.api);
+  }
+
+  /**
+   * Spawn each `world.json.entities[]` record as a persistent world
+   * entity. Components attach in declaration order; the entity is
+   * registered with its declared `name` so pack scripts can locate
+   * it via `api.world.findByName(name)`. Every spawned id is added to
+   * `persistentEntities` so the `loadScene` despawn pass skips it.
+   *
+   * Position payloads are materialised into `Vec2` instances (same
+   * path the scene-entity loader uses) so engine systems reading
+   * `pos.x` / `pos.y` see live values.
+   *
+   * Emits `entity:spawned` per record with `{ entity, name }` so
+   * subscribers see the canonical lifecycle event alongside the
+   * spawn — same shape `spawnSceneEntities` emits.
+   */
+  private async spawnWorldEntities(
+    records: ReadonlyArray<{
+      name?: string;
+      components?: Record<string, unknown>;
+    }>,
+  ): Promise<void> {
+    for (const record of records) {
+      const components = record?.components;
+      if (!components || typeof components !== "object") continue;
+      const entity = this.world.spawn();
+      this.persistentEntities.add(entity);
+      if (record.name) this.world.setName(entity, record.name);
+      // Attach declared components first. The Scripts component
+      // itself attaches as data (`{ refs: [...] }`); the engine fires
+      // its handlers AFTER the rest of the sibling components are in
+      // place (WORLD_STATE.md §8 + §11.5.3 — Scripts handlers run
+      // after siblings attach).
+      let scriptRefs: string[] | null = null;
+      for (const [name, rawValue] of Object.entries(components)) {
+        if (name.startsWith("_")) continue;
+        const c = this.api.getComponent(name);
+        if (c === undefined) {
+          console.warn(
+            `[world-entity] unknown component "${name}" — skipping ` +
+              "(declare it in manifest.components[] or via api.defineComponent)",
+          );
+          continue;
+        }
+        const value = name === "Position" ? materialisePosition(rawValue) : rawValue;
+        this.world.add(entity, c, value as unknown);
+        if (name === "Scripts") {
+          const refs = (rawValue as { refs?: unknown } | null)?.refs;
+          if (Array.isArray(refs)) scriptRefs = refs.filter((r): r is string => typeof r === "string");
+        }
+      }
+      // WORLD_STATE.md §8 — invoke each Scripts ref with
+      // `(entityId, world, api)`. Async to allow dynamic-import of
+      // each script body; awaited inline so a Scripts handler that
+      // synchronously mutates the entity is observable by the time
+      // `entity:spawned` fires below.
+      if (scriptRefs && scriptRefs.length > 0) {
+        await this.runEntityScripts(entity, scriptRefs);
+      }
+      this.api.events.emit("entity:spawned", { entity, name: record.name });
+    }
+  }
+
+  /**
+   * Resolve + invoke a `Scripts` component's `refs[]` against an
+   * entity. Each ref is read through `pack.readScripts`, wrapped as a
+   * Blob URL, dynamic-imported, and called with `(entityId, world, api)`.
+   * WORLD_STATE.md §8.
+   *
+   * Failures are logged + skipped — one broken Scripts ref shouldn't
+   * blow up the rest of the entity's attach.
+   */
+  private async runEntityScripts(
+    entity: Entity,
+    refs: ReadonlyArray<string>,
+  ): Promise<void> {
+    const sources = await this.pack.readScripts(refs);
+    for (const { path, source } of sources) {
       try {
         const blob = new Blob([source], { type: "application/javascript" });
         const url = URL.createObjectURL(blob);
-        // Ev1 of EVENTS.md §6.1 — tag every subscription registered
-        // during this script's setup() so HMR reloads of the single
-        // script can drop only its subscriptions. setActiveScript
-        // returns to null in the `finally`, so subscriptions made
-        // OUTSIDE the wrapper (engine internals, late
-        // onWorldReady callbacks) stay un-tagged and live for the
-        // session.
         this.api.events.setActiveScript(path);
         try {
           const mod = (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
-          const setup = (mod.default ?? mod.setup) as ((api: ModAPIImpl) => void) | undefined;
-          if (typeof setup === "function") {
-            setup(this.api);
-            console.log(`Script ${path}: loaded`);
+          const fn = (mod.default ?? mod.setup) as
+            | ((entity: Entity, world: World, api: ModAPIImpl) => void)
+            | undefined;
+          if (typeof fn === "function") {
+            fn(entity, this.world, this.api);
+            console.log(`EntityScript ${path}: applied to entity ${entity}`);
           } else {
-            console.warn(`Script ${path}: no default export or setup() function`);
+            console.warn(`EntityScript ${path}: no default export / setup() function`);
           }
         } finally {
           URL.revokeObjectURL(url);
           this.api.events.setActiveScript(null);
         }
       } catch (err) {
-        console.error(`Script ${path}: failed to load —`, err);
+        console.error(`EntityScript ${path}: failed —`, err);
       }
     }
-    // Engine-shipped universal modals — Settings today, Console (#199)
-    // soon. Per `docs/plans/EDITOR_REDESIGN.md` §12 Q4, the engine
-    // owns the universal-to-every-game UI surfaces (every cardboard
-    // game needs settings access regardless of pack). Mounted via the
-    // same `api.ui.registerModal` path that packs use, so packs can
-    // override the slot by calling `registerModal("settings", …)`
-    // in their own scripts — and because pack scripts run BEFORE this
-    // line, the pack's component wins via the `has`-guarded install.
-    installDefaultSettings(this.api);
+  }
+
+  /**
+   * Read-only view of persistent world entity ids — consumed by
+   * `loadScene` for the despawn-skip walk. `GameState.snapshot()` also
+   * surfaces it so HMR carries the set forward to the next `Game`
+   * instance.
+   */
+  getPersistentEntities(): ReadonlySet<Entity> {
+    return this.persistentEntities;
   }
 
   /**
@@ -398,6 +630,7 @@ export class Game {
       const components = record.components;
       if (!components || typeof components !== "object") continue;
       const entity = this.world.spawn();
+      if (record.name) this.world.setName(entity, record.name);
       for (const [name, rawValue] of Object.entries(components)) {
         if (name.startsWith("_")) continue;
         const c = this.api.getComponent(name);
@@ -440,9 +673,8 @@ export class Game {
     // singleton state. Runs BEFORE `world:ready` so any pack-script
     // `onWorldReady` handler reading `api.singleton(Name)` sees the
     // pre-populated value. Gracefully no-ops when the pack ships no
-    // `world.json` (the common case today — the default pack hasn't
-    // adopted it yet per the plan's tracking table).
-    await this.seedSingletonsFromPack();
+    // `world.json`.
+    this.seedSingletonsFromCachedWorldJson();
     // WORLD_STATE.md §6.1 — fire `world:ready` ONCE per Game lifetime,
     // AFTER `runPackScripts()` and BEFORE the first scene-controller
     // spawn. Pack scripts use it for one-time setup that doesn't
@@ -486,31 +718,19 @@ export class Game {
   }
 
   /**
-   * WORLD_STATE.md §10.2 — read the pack's optional `world.json` and
-   * pre-populate every listed singleton. Each `singletons[name]` entry
-   * is attached via `api.singleton(name)` (which get-or-creates the
-   * entity) followed by a shallow `Object.assign` so the live
-   * component reference carries the seed data. Singletons not listed
-   * here are still get-or-created lazily on first `api.singleton(name)`
-   * call.
+   * WORLD_STATE.md §10.2 — pre-populate every singleton declared in
+   * the cached `world.json`. Each `singletons[name]` entry is attached
+   * via `api.singleton(name)` (which get-or-creates the entity)
+   * followed by a shallow `Object.assign` so the live component
+   * reference carries the seed data. Singletons not listed here are
+   * still get-or-created lazily on first `api.singleton(name)` call.
    *
-   * Errors are caught + logged. A pack with no `world.json` (today's
-   * default-pack) hits the early-return path and the engine boots
-   * byte-identically to the pre-§10.2 behaviour.
+   * Reads from `this.worldJson` cached during `runPackScripts`. A pack
+   * with no `world.json` hits the early-return path and the engine
+   * boots byte-identically to the pre-§10.2 behaviour.
    */
-  private async seedSingletonsFromPack(): Promise<void> {
-    if (!this.pack.has("world.json")) return;
-    let parsed: { singletons?: Record<string, Record<string, unknown>> };
-    try {
-      const raw = await this.pack.textBody("world.json");
-      parsed = JSON.parse(raw) as {
-        singletons?: Record<string, Record<string, unknown>>;
-      };
-    } catch (err) {
-      console.error("[world.json] parse failed — skipping singleton seed:", err);
-      return;
-    }
-    const singletons = parsed.singletons;
+  private seedSingletonsFromCachedWorldJson(): void {
+    const singletons = this.worldJson?.singletons;
     if (!singletons || typeof singletons !== "object") return;
     for (const [name, value] of Object.entries(singletons)) {
       if (!value || typeof value !== "object") continue;
@@ -530,10 +750,14 @@ export class Game {
    * Switch to a different scene from the current pack. I1 of
    * EDITOR_IFRAME.md §7 — handler for the `switch-scene` message.
    *
-   * The world (ECS entities) is preserved: the player keeps its
-   * Position / Inventory / etc., but `Position` is reset to the
-   * new scene's spawn so the player doesn't start mid-wall in the
-   * destination map.
+   * WORLD_STATE.md §6.2 — every scene-scoped entity (anything NOT in
+   * `persistentEntities` and NOT a world-singleton) is despawned
+   * before the swap. The synthetic scene-controller is despawned
+   * + respawned inside `spawnSceneController`. Persistent world
+   * entities (the player today, spawned from `world.json.entities[]`)
+   * carry through; pack-side handlers subscribed to `scene:loaded`
+   * reposition them by reading the new scene's controller's
+   * `SpawnerList.points[0]`.
    *
    * Tile / wall geometry comes from `this.scene` per-frame, so
    * swapping the reference is all the renderer needs to draw the
@@ -552,6 +776,12 @@ export class Game {
       this.api.events.emit("scene:willUnload", { name: from });
     }
 
+    // WORLD_STATE.md §6.2 — despawn every scene-scoped entity before
+    // loading the next scene. Persistent world entities + world
+    // singletons survive. The scene controller is handled by
+    // `spawnSceneController` (despawns previous + spawns fresh).
+    this.despawnSceneScopedEntities();
+
     const fresh = await this.pack.scene(path);
     this.scene = fresh;
     this.api.scene = fresh;
@@ -560,23 +790,41 @@ export class Game {
     // from the new scene's `controller.components` block. Previous
     // controller is despawned inside `spawnSceneController`.
     this.spawnSceneController();
-    // Reset the player to the new scene's spawn. Keeping the world
-    // intact across scene swaps is a deliberate I1 choice — full
-    // entity teardown on each load is I2 territory.
-    const playerEntity = this.world.first(Camera, Position, Facing);
-    if (playerEntity !== undefined) {
-      // Vec2 is immutable — overwrite the component with a fresh
-      // instance instead of trying to mutate `pos.x` / `pos.y`.
-      this.world.add(playerEntity, Position, new Vec2(fresh.spawn.x, fresh.spawn.y));
-      Facing.set(playerEntity, fresh.spawn.facing);
-    }
+    // PREFABS_EDITOR_ONLY.md §4.2 — walk the fresh scene's flattened
+    // entity records and materialise each as a live entity. The
+    // default-pack ships empty `entities` arrays so this is a no-op
+    // there; mod packs that author scene-scoped entities pick up
+    // their per-scene spawns here.
+    this.spawnSceneEntities();
     // `scene:loaded` mirrors the boot-time emit in
     // `spawnInitialEntities`. Subscribers can re-run their per-scene
-    // setup logic each time the player switches.
+    // setup logic each time the player switches; world-scope scripts
+    // hand the player back to the SpawnerList point by listening
+    // here.
     this.api.events.emit("scene:loaded", {
       name: path,
       size: { x: fresh.size.x, y: fresh.size.y },
     });
+  }
+
+  /**
+   * Despawn every entity scoped to the outgoing scene. Persistent
+   * world entities (`persistentEntities`), world singletons (via
+   * `api.getSingletonEntityIds`), and the synthetic scene controller
+   * (handled by `spawnSceneController`) are skipped. WORLD_STATE.md
+   * §6.2.
+   */
+  private despawnSceneScopedEntities(): void {
+    const keep = new Set<Entity>(this.persistentEntities);
+    for (const id of this.api.getSingletonEntityIds()) keep.add(id);
+    if (this.sceneControllerEntity !== undefined) {
+      keep.add(this.sceneControllerEntity);
+    }
+    // Snapshot first — despawn mutates `alive` mid-iteration otherwise.
+    for (const id of this.world.liveEntities()) {
+      if (keep.has(id)) continue;
+      this.world.despawn(id);
+    }
   }
 
   /**
@@ -748,7 +996,12 @@ export class Game {
 
   /** State to preserve across an HMR reload. */
   snapshot(): GameState {
-    return { world: this.world, keyboard: this.keyboard, mouse: this.mouse };
+    return {
+      world: this.world,
+      keyboard: this.keyboard,
+      mouse: this.mouse,
+      persistentEntities: new Set(this.persistentEntities),
+    };
   }
 
   private readonly update = (deltaTime: number): void => {

@@ -103,7 +103,10 @@ const packAManifest: PackManifest = {
   sounds: {
     boom: { file: "audio/boom.ogg" },
   },
-  scripts: ["scripts/shared.js"],
+  // `manifest.scripts[]` was retired post-WORLD_STATE; the
+  // conflict pass for the equivalent `world.json.scripts[]` is a
+  // follow-up dispatch. Asset-path collisions are still flagged
+  // for any script files both packs ship under the same path.
   tilePresets: ["presets/walls.jsonc"],
   shaders: {
     postPasses: [{ name: "crt", frag: "shaders/crt.glsl" }],
@@ -151,7 +154,7 @@ const packBManifest: PackManifest = {
   sounds: {
     boom: { file: "audio/boom.ogg" }, // CONFLICT
   },
-  scripts: ["scripts/shared.js"], // CONFLICT
+  // `manifest.scripts[]` retired — see pack-a comment above.
   tilePresets: ["presets/walls.jsonc"],
   shaders: {
     postPasses: [{ name: "crt", frag: "shaders/crt.glsl" }], // CONFLICT
@@ -207,7 +210,11 @@ console.log("\n[1] detectConflicts on [A, B] reports B as the winner");
   assertEqual(byKind["manifest-item"] ?? 0, 1, "1 item conflict (health)");
   assertEqual(byKind["manifest-prefab"] ?? 0, 1, "1 prefab conflict (spawner)");
   assertEqual(byKind["manifest-sound"] ?? 0, 1, "1 sound conflict (boom)");
-  assertEqual(byKind["manifest-script"] ?? 0, 1, "1 script conflict (shared.js)");
+  // `manifest-script` was retired post-WORLD_STATE — scripts now live
+  // in `world.json.scripts[]`. The asset-path conflict on
+  // `scripts/shared.js` still fires from the file-level path-collision
+  // pass above.
+  assertEqual(byKind["manifest-script"] ?? 0, 0, "0 script conflicts (manifest.scripts[] retired)");
   assertEqual(byKind["shader-material"] ?? 0, 1, "1 material conflict (crt)");
   assertEqual(byKind["tile-preset"] ?? 0, 1, "1 tile-preset conflict (brick.wall)");
 

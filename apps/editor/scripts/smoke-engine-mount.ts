@@ -92,35 +92,30 @@ async function main() {
       scene !== null && scene !== undefined,
       "pack.startScene() resolves to a Scene instance",
     );
-    // Scenes carry a `size` and a `spawn`; both are required by the
-    // engine boot path. If they're absent, the engine would crash
-    // inside Game's first frame, so this is a meaningful gate.
+    // Scenes carry a `size` and a scene-controller block; both are
+    // required by the engine boot path. WORLD_STATE.md §5.2 +
+    // "world.json full-scope" — the spawn point lives on the
+    // controller's SpawnerList, not the deprecated top-level `spawn`.
     assert(
       typeof scene.size?.x === "number" && typeof scene.size?.y === "number",
       `scene.size is populated (${scene.size?.x}×${scene.size?.y})`,
     );
+    const spawnerList = (
+      scene.controller?.components as { SpawnerList?: { points?: unknown[] } } | undefined
+    )?.SpawnerList;
     assert(
-      scene.spawn !== undefined,
-      "scene.spawn is defined",
+      Array.isArray(spawnerList?.points) && (spawnerList?.points?.length ?? 0) > 0,
+      "scene.controller.components.SpawnerList.points[0] is present",
     );
   } catch (err) {
     assert(false, `pack.startScene() should not throw — got ${(err as Error).message}`);
   }
 
   console.log("Sampling a text body…");
-  // Pick the first script the manifest lists (default pack ships
-  // several). Falls back to ANY text asset if no scripts.
-  const scriptPath = pack.manifest.scripts?.[0];
-  if (scriptPath) {
-    try {
-      const body = await pack.textBody(scriptPath);
-      assert(typeof body === "string", "textBody returns a string");
-      assert(body.length > 0, `textBody body is non-empty (${body.length} chars)`);
-    } catch (err) {
-      assert(false, `textBody should not throw — got ${(err as Error).message}`);
-    }
-  } else {
-    // No scripts in this pack? Find any text asset to probe.
+  // Find any text asset to probe (manifest.scripts[] no longer exists
+  // post-WORLD_STATE full-scope; scripts now live in world.json.scripts[]
+  // and are read through Game.runPackScripts directly).
+  {
     const assets = await EditorProjectStore.listAssets(result.project.id);
     const text = assets.find((a) => a.kind === "text");
     if (text) {

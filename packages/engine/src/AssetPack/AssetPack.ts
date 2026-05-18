@@ -131,12 +131,16 @@ export abstract class AssetPack {
   }
 
   /**
-   * Read all script paths listed in `manifest.scripts`. Returns an array
-   * of `{ path, source }` so the caller can wire up Blob URLs + dynamic
-   * imports. Order is preserved — scripts run in manifest order.
+   * Read a series of script paths (post-WORLD_STATE "world.json
+   * full-scope"). Caller resolves paths from `world.json.scripts[]`
+   * and any `Scripts.refs[]` carried by world / scene / scene-entity
+   * records, then hands them here for batch text loading. Returns an
+   * array of `{ path, source }` so the caller can wire up Blob URLs +
+   * dynamic imports. Order is preserved — scripts run in caller order.
    */
-  async scripts(): Promise<Array<{ path: string; source: string }>> {
-    const paths = this.manifest.scripts ?? [];
+  async readScripts(
+    paths: ReadonlyArray<string>,
+  ): Promise<Array<{ path: string; source: string }>> {
     const out: Array<{ path: string; source: string }> = [];
     for (const path of paths) {
       const source = await this.textBody(path);

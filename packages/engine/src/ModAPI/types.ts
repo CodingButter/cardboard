@@ -36,10 +36,12 @@ import { castRayToWall } from "Libs/Raycast";
 /**
  * The modding surface exposed to pack scripts.
  *
- * Each script in `manifest.scripts` is loaded as an ES module and called
- * with a single argument — an instance of `ModAPI`. The script registers
- * components and systems through this object; the engine runs them
- * alongside the built-in pipeline.
+ * Each script in `world.json.scripts[]` is loaded as an ES module and
+ * called with a single argument — an instance of `ModAPI`. The script
+ * registers components and systems through this object; the engine
+ * runs them alongside the built-in pipeline. (Pre-WORLD_STATE
+ * "world.json full-scope" 2026-05-17 the entry-point list lived at
+ * `manifest.scripts[]`; the field has been retired.)
  *
  * Prefabs are an editor-only concept (see
  * `docs/plans/PREFABS_EDITOR_ONLY.md`) — scenes ship every entity

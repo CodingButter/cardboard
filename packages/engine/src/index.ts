@@ -32,7 +32,6 @@ export {
 export type {
   SceneJSON,
   SceneGrid,
-  SceneSpawn,
   SceneOptions,
   SceneLightmap,
   SceneLightmapJSON,
