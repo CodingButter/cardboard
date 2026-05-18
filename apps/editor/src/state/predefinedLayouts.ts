@@ -2,24 +2,17 @@ import type { SerializedDockview } from "dockview";
 
 /**
  * predefinedLayouts — the built-in, read-only layout catalogue surfaced
- * inside the Workspace v1.5 Layouts modal.
+ * inside the Workspace Layouts modal.
  *
- * Built-in layouts always include the Workspace rail in their JSON so
- * applying a preset preserves the rail. The rail lives on the left
- * edge with an `initialWidth` ~ 48px; dockview only stores a relative
- * `size` in the grid JSON (the workspace group's flex weight), so we
- * give it a small weight (40) and let the panel splitter constraint
- * (minimum 40) handle the live width — the rail will naturally render
- * narrow, and the user can drag the splitter wider if they want.
+ * These describe dockview's internal panel layout only. The Workspace
+ * rail is page chrome, not a dockview panel, so it never appears in
+ * these JSON snapshots. Each entry's `panels` map MUST reference only
+ * panel ids registered on the page's DockShell (e.g. `map`,
+ * `inspector` for the Scene page). Referencing a panel that isn't in
+ * the registry causes `api.fromJSON` to drop the whole layout silently.
  *
  * Catalogue is keyed by pageId (e.g. `"scene"`); each page registers
  * its own list. Pages without registered layouts get an empty array.
- *
- * The layout shape mirrors dockview's `SerializedDockview` exactly; we
- * paint each `panels` entry's `id` / `contentComponent` / `title` and
- * a leaf node referencing the view in the grid. DockShell handles
- * `fromJSON` and re-injects icon/controls ornaments via context (those
- * are React nodes, not JSON-safe — see DockShell.tsx).
  */
 
 export interface PredefinedLayout {
@@ -38,39 +31,13 @@ export interface PredefinedLayout {
   readonly layout: SerializedDockview;
 }
 
-const WORKSPACE_GRID_WEIGHT = 40;
-
-/** Helper — produce the Workspace rail leaf used by every Scene
- *  predefined layout. The grid is HORIZONTAL at root so this leaf
- *  becomes a thin left column. */
-const workspaceLeaf = () => ({
-  type: "leaf" as const,
-  data: {
-    views: ["workspace"],
-    activeView: "workspace",
-    id: "workspace-group",
-  },
-  size: WORKSPACE_GRID_WEIGHT,
-});
-
-const workspacePanelEntry = () => ({
-  workspace: {
-    id: "workspace",
-    contentComponent: "workspace",
-    title: "Workspace",
-  },
-});
-
-/** "Default" — Map + Inspector side-by-side with the Workspace rail on
- *  the far left. Mirrors `MapView.buildDefaultLayout` but explicitly
- *  includes the workspace leaf so the preset is self-contained. */
+/** "Default" — Map + Inspector side-by-side. */
 function defaultLayout(): SerializedDockview {
   return {
     grid: {
       root: {
         type: "branch",
         data: [
-          workspaceLeaf(),
           {
             type: "leaf",
             data: {
@@ -97,7 +64,6 @@ function defaultLayout(): SerializedDockview {
       orientation: "HORIZONTAL",
     },
     panels: {
-      ...workspacePanelEntry(),
       map: { id: "map", contentComponent: "map", title: "Map" },
       inspector: {
         id: "inspector",
@@ -116,7 +82,6 @@ function mapFocusLayout(): SerializedDockview {
       root: {
         type: "branch",
         data: [
-          workspaceLeaf(),
           {
             type: "leaf",
             data: {
@@ -143,7 +108,6 @@ function mapFocusLayout(): SerializedDockview {
       orientation: "HORIZONTAL",
     },
     panels: {
-      ...workspacePanelEntry(),
       map: { id: "map", contentComponent: "map", title: "Map" },
       inspector: {
         id: "inspector",
@@ -155,51 +119,39 @@ function mapFocusLayout(): SerializedDockview {
 }
 
 /** "Split Horizontal" — Map on the top half of the content area,
- *  Inspector on the bottom. The Workspace rail stays on the left. */
+ *  Inspector on the bottom. */
 function splitHorizontalLayout(): SerializedDockview {
-  // Root is HORIZONTAL: workspace rail on the left + a VERTICAL
-  // branch on the right that contains Map (top) and Inspector
-  // (bottom). dockview encodes nested branches as `{type:"branch"}`
-  // entries inside the parent branch's `data` array.
   return {
     grid: {
       root: {
         type: "branch",
         data: [
-          workspaceLeaf(),
           {
-            type: "branch",
-            data: [
-              {
-                type: "leaf",
-                data: {
-                  views: ["map"],
-                  activeView: "map",
-                  id: "map-group",
-                },
-                size: 500,
-              },
-              {
-                type: "leaf",
-                data: {
-                  views: ["inspector"],
-                  activeView: "inspector",
-                  id: "inspector-group",
-                },
-                size: 500,
-              },
-            ],
-            size: 960,
+            type: "leaf",
+            data: {
+              views: ["map"],
+              activeView: "map",
+              id: "map-group",
+            },
+            size: 500,
+          },
+          {
+            type: "leaf",
+            data: {
+              views: ["inspector"],
+              activeView: "inspector",
+              id: "inspector-group",
+            },
+            size: 500,
           },
         ],
         size: 1000,
       },
       height: 1000,
       width: 1000,
-      orientation: "HORIZONTAL",
+      orientation: "VERTICAL",
     },
     panels: {
-      ...workspacePanelEntry(),
       map: { id: "map", contentComponent: "map", title: "Map" },
       inspector: {
         id: "inspector",
@@ -218,7 +170,6 @@ function inspectorWideLayout(): SerializedDockview {
       root: {
         type: "branch",
         data: [
-          workspaceLeaf(),
           {
             type: "leaf",
             data: {
@@ -245,7 +196,6 @@ function inspectorWideLayout(): SerializedDockview {
       orientation: "HORIZONTAL",
     },
     panels: {
-      ...workspacePanelEntry(),
       map: { id: "map", contentComponent: "map", title: "Map" },
       inspector: {
         id: "inspector",
