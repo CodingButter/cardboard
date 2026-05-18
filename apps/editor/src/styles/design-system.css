@@ -611,25 +611,26 @@
  * element too. Specificity 0,2,0 beats abyss's 0,1,0. */
 .dockview-theme-cardboard,
 .dockview-theme-cardboard .dockview-theme-abyss {
-  /* Group + panel surfaces — body uses bg-card; chrome matches. */
-  --dv-group-view-background-color: var(--color-bg-card);
-  /* Flat chrome — tabs strip + every tab background matches the panel
-   * body so the header reads as a thin drag handle, not a contrasting
-   * bar. Active vs inactive tabs are distinguished by text color
-   * + the divider line between them, not background. */
-  --dv-tabs-and-actions-container-background-color: var(--color-bg-card);
+  /* Group + panel surfaces — both the dock content background and
+   * the tab strip match the page body colour. The visible "card"
+   * for each panel is rendered INSIDE the panel body itself using
+   * --color-bg-panel-surface, so dock-level chrome must stay flat
+   * against the page or it competes with that inner surface
+   * (double-surface look). */
+  --dv-group-view-background-color: var(--color-bg-panel);
+  --dv-tabs-and-actions-container-background-color: var(--color-bg-panel);
   --dv-tabs-and-actions-container-height: 22px;
   --dv-tabs-and-actions-container-font-size: 12px;
 
   /* Active-group tab states */
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-bg-card);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bg-card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bg-panel);
   --dv-activegroup-visiblepanel-tab-color: #f4f4f5; /* zinc-100 */
   --dv-activegroup-hiddenpanel-tab-color: #a1a1aa; /* zinc-400 */
 
   /* Inactive-group tab states (when focus is in a different group). */
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-bg-card);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bg-card);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bg-panel);
   --dv-inactivegroup-visiblepanel-tab-color: #d4d4d8; /* zinc-300 */
   --dv-inactivegroup-hiddenpanel-tab-color: #71717a; /* zinc-500 */
 
@@ -712,11 +713,42 @@
  * ─────────────────────────────────────────────────────────────────── */
 .dockview-theme-cardboard .dv-content-container,
 .dockview-theme-cardboard .dockview-theme-abyss .dv-content-container {
-  background: var(--color-bg-card);
+  /* Page-bg colour — the dock content container is just a positional
+   * wrapper. Each panel body renders the only visible surface
+   * (--color-bg-panel-surface + border + radius), so any dock-level
+   * background would compete with that and create the double-surface
+   * look. */
+  background: var(--color-bg-panel);
 }
 /* (Both `--dv-group-view-background-color` and panel-body content
  * background are already pinned to `--color-bg-card` in the main
  * variable block above — kept that single source of truth.) */
+
+/* ───────────────────────────────────────────────────────────────────
+ * Floating-group tab layout fix — kept as a safety net for any saved
+ * layouts that still contain in-page floating groups. New ctrl+drag
+ * gestures spawn popout browser windows instead (see DockPanelHeader),
+ * so floating groups are legacy state going forward. This rule
+ * ensures any restored float remains draggable (exposes the
+ * `dv-void-container.dv-draggable` instead of letting the fullwidth
+ * tab swallow the title strip).
+ * ─────────────────────────────────────────────────────────────────── */
+.dockview-theme-cardboard .dv-groupview-floating
+  .dv-tabs-and-actions-container.dv-full-width-single-tab
+  .dv-scrollable,
+.dockview-theme-cardboard .dv-groupview-floating
+  .dv-tabs-and-actions-container.dv-full-width-single-tab
+  .dv-tabs-container,
+.dockview-theme-cardboard .dv-groupview-floating
+  .dv-tabs-and-actions-container.dv-full-width-single-tab
+  .dv-tabs-container .dv-tab {
+  flex-grow: 0;
+}
+.dockview-theme-cardboard .dv-groupview-floating
+  .dv-tabs-and-actions-container.dv-full-width-single-tab
+  .dv-void-container {
+  flex-grow: 1;
+}
 
 /* ───────────────────────────────────────────────────────────────────
  * Panel-header bar mode (custom defaultTabComponent + singleTabMode)
