@@ -166,19 +166,37 @@ export default DockPanelHeader;
  */
 function WorkspaceDragHandle(): React.JSX.Element {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  // Orientation derived from the tab element's own dimensions so it
-  // self-heals on any DOM reshuffle. When the tab strip sits at the
-  // bottom of a vertical rail it's wide-and-short → horizontal grip;
-  // when it sits at the right of a horizontal rail it's tall-and-
-  // narrow → vertical grip. ResizeObserver fires whenever dockview
-  // re-lays-out the panel, including header-position flips and any
-  // size changes, so we don't have to chase ancestor class changes.
+  // Orientation derived from the ancestor `.dv-groupview`'s
+  // header-position class (`dv-groupview-header-bottom` /
+  // `-right` / `-top` / `-left`). Checking the tab's own
+  // dimensions doesn't work — dockview keeps the tab roughly
+  // square regardless of which edge it sits on, so width vs
+  // height comparison always tips horizontal.
+  //
+  // We re-resolve the ancestor each evaluate() rather than
+  // observing a captured node directly; when dockview re-parents
+  // the panel during a drag, the captured ancestor would go stale
+  // but `.closest()` always returns the freshest one. ResizeObserver
+  // on our own element fires on any layout shift (including the
+  // header-position flip dockview triggers when relocating the
+  // panel), so a single observer covers both dimension changes
+  // and orientation flips.
   const [horizontal, setHorizontal] = React.useState(true);
 
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const evaluate = () => {
+      const group = el.closest(".dv-groupview");
+      if (group) {
+        const cls = group.className;
+        setHorizontal(
+          cls.includes("dv-groupview-header-bottom") ||
+            cls.includes("dv-groupview-header-top"),
+        );
+        return;
+      }
+      // Fallback to dimension check if no ancestor (rare).
       const r = el.getBoundingClientRect();
       setHorizontal(r.width >= r.height);
     };

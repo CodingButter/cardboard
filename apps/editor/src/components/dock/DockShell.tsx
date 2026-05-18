@@ -483,18 +483,32 @@ export function DockShell({
                   minimumHeight: WORKSPACE_DEFAULT_WIDTH,
                 },
           );
-          panel.api.setSize(
-            isLandscape
-              ? { height: WORKSPACE_DEFAULT_WIDTH }
-              : { width: WORKSPACE_DEFAULT_WIDTH },
-          );
+          // setSize gets deferred to the next animation frame.
+          // Calling it synchronously right after a drag-drop landed
+          // the panel in its new orientation doesn't snap reliably
+          // — dockview's gridview is still settling the splitter
+          // weights from the drop and silently drops the size
+          // request. Waiting one rAF lets the gridview finalise its
+          // post-drop layout, then our setSize forcibly snaps the
+          // constrained axis to 40px.
+          requestAnimationFrame(() => {
+            try {
+              panel.api.setSize(
+                isLandscape
+                  ? { height: WORKSPACE_DEFAULT_WIDTH }
+                  : { width: WORKSPACE_DEFAULT_WIDTH },
+              );
+            } catch {
+              // ignore — panel may have been removed
+            }
+          });
         } catch {
           // ignore
         } finally {
-          // Allow further syncs after this microtask drains so the
-          // setSize-triggered onDidLayoutChange we just emitted can't
+          // Allow further syncs after the rAF drains so the
+          // setSize-triggered onDidLayoutChange we'll emit can't
           // re-enter the function before we exit the current pass.
-          queueMicrotask(() => {
+          requestAnimationFrame(() => {
             applyingSyncWork = false;
           });
         }
