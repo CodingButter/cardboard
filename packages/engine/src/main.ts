@@ -11,7 +11,15 @@ import { deepMerge } from "Libs/DeepMerge";
  * fetches and break live reload. Bun's bundler exposes `import.meta.hot`
  * only in dev, so its presence is a reliable HMR signal.
  */
-if (typeof navigator !== "undefined" && "serviceWorker" in navigator && !import.meta.hot) {
+if (
+  typeof navigator !== "undefined" &&
+  "serviceWorker" in navigator &&
+  !import.meta.hot &&
+  // Skip SW registration when running inside the editor iframe — the
+  // editor origin doesn't serve /sw.js, and we don't want a SW to cache
+  // the editor's bundle anyway.
+  !new URLSearchParams(window.location.search).has("source")
+) {
   // Defer until after first paint so it doesn't compete with the
   // initial bundle/pack fetches.
   window.addEventListener("load", () => {

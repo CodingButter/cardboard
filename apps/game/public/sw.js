@@ -10,7 +10,7 @@
 // Bump CACHE_VERSION on any release that ships new build artifacts; on
 // `activate` we delete every cache that isn't the current version.
 
-const CACHE_VERSION = "two_5_d-v1";
+const CACHE_VERSION = "two_5_d-v3";
 
 // Static assets to seed into the cache on install. The bundle filename
 // is hashed by Bun's bundler so we can't precache that; it'll be cached
