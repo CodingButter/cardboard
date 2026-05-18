@@ -1,0 +1,137 @@
+# Build and deploy the editor + flattened game runner to GitHub Pages.
+#
+# Base URL strategy: bun build already emits asset hrefs as relative
+# (`./index-XXXX.js`), so no `--public-path` is needed. Runtime base
+# detection in `apps/editor/src/lib/assetUrl.ts` picks up the
+# `/cardboard/` subpath from `location.pathname` and prefixes all
+# editor-side absolute asset URLs (e.g. `/packs/Cardboard.apg`). The
+# game's engine code hardcodes `/packs/Cardboard.apg` — out of scope
+# to edit — so the `flatten` step below rewrites that string to
+# `./packs/...` in the built game bundle so it resolves relative to
+# the iframe document (`/cardboard/play/index.html` →
+# `/cardboard/play/packs/Cardboard.apg`).
+#
+# Conflict with .github/workflows/docs.yml: both target GitHub Pages
+# (single deployment slot per repo). The `concurrency: pages` group
+# below is shared with docs.yml so they queue rather than collide.
+# If both should be deployable, they need to be merged into a single
+# multi-app pipeline; for now the most recent push wins.
+name: Deploy editor
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build game
+        run: bun run --cwd apps/game build
+
+      - name: Build editor
+        run: bun run --cwd apps/editor build
+
+      - name: Flatten deploy tree
+        # Mirrors apps/editor/scripts/build-pages.ts. Inlined here so
+        # the workflow doesn't depend on the script existing at this
+        # version of the repo, and so any future build-script edits
+        # don't silently change the deploy shape.
+        run: |
+          set -euo pipefail
+
+          # 0. Editor's own public/ → editor/dist/. Bun's HTML
+          #    bundler doesn't auto-copy `public/`, so popout.html
+          #    (used by dockview) lives there.
+          if [ -d apps/editor/public ]; then
+            cp -r apps/editor/public/. apps/editor/dist/
+          fi
+
+          # 1. Game bundle → editor/dist/play/
+          mkdir -p apps/editor/dist/play
+          cp -r apps/game/dist/. apps/editor/dist/play/
+
+          # 2. Packs → editor/dist/packs/ (for the editor's
+          #    `/packs/Cardboard.apg` template fetch).
+          mkdir -p apps/editor/dist/packs
+          cp -r apps/game/public/packs/. apps/editor/dist/packs/
+
+          # 3. Packs → editor/dist/play/packs/ (for the game iframe's
+          #    rewritten `./packs/Cardboard.apg` engine fetch).
+          mkdir -p apps/editor/dist/play/packs
+          cp -r apps/game/public/packs/. apps/editor/dist/play/packs/
+
+          # 4. Game-side root statics under play/ (manifest + icons
+          #    + images). sw.js is intentionally excluded — its
+          #    isCacheable() does pathname-equality checks that the
+          #    URL rewrite below would silently break. The game's
+          #    `register('/sw.js')` will 404 and reject in its
+          #    existing .catch() handler — harmless for a preview.
+          for name in manifest.webmanifest icons images; do
+            src="apps/game/public/$name"
+            [ -e "$src" ] || continue
+            cp -r "$src" "apps/editor/dist/play/$(basename "$src")"
+          done
+
+          # 5. Rewrite root-absolute /packs/ etc. in the built game
+          #    bundle to document-relative so they resolve under the
+          #    `/cardboard/play/` subpath without touching engine
+          #    source. Only text-ish files are touched; `.apg` zips
+          #    in `play/packs/` are excluded via -path pruning.
+          find apps/editor/dist/play \
+            \( -path apps/editor/dist/play/packs -o -path apps/editor/dist/play/icons -o -path apps/editor/dist/play/images \) -prune -o \
+            -type f \
+            \( -name '*.js' -o -name '*.mjs' -o -name '*.css' -o -name '*.html' -o -name '*.webmanifest' -o -name '*.json' \) -print \
+            | while read -r f; do
+                sed -i \
+                  -e 's|"/packs/|"./packs/|g' \
+                  -e "s|'/packs/|'./packs/|g" \
+                  -e 's|"/sw\.js|"./sw.js|g' \
+                  -e "s|'/sw\.js|'./sw.js|g" \
+                  -e 's|"/manifest\.webmanifest|"./manifest.webmanifest|g' \
+                  -e "s|'/manifest\.webmanifest|'./manifest.webmanifest|g" \
+                  -e 's|"/icons/|"./icons/|g' \
+                  -e "s|'/icons/|'./icons/|g" \
+                  -e 's|"/images/|"./images/|g' \
+                  -e "s|'/images/|'./images/|g" \
+                  "$f"
+              done
+
+          # 6. Sanity report.
+          echo "--- deploy tree summary ---"
+          ls apps/editor/dist | head -20
+          echo "--- play/ ---"
+          ls apps/editor/dist/play | head -20
+          echo "--- packs/ ---"
+          ls apps/editor/dist/packs
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/editor/dist
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

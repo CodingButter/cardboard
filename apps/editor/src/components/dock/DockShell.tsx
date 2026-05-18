@@ -12,6 +12,7 @@ import {
   DockPanelHeaderOrnamentsContext,
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
+import { assetUrl } from "../../lib/assetUrl";
 
 /**
  * DockShell — the editor's React wrapper around `<DockviewReact/>`.
@@ -574,7 +575,10 @@ export function DockShell({
         queueMicrotask(() => {
           try {
             void api.addPopoutGroup(item, {
-              popoutUrl: "/popout.html",
+              // assetUrl prefixes the Pages subpath (`/cardboard/`)
+              // when the editor is served from one; in dev it's a
+              // no-op.
+              popoutUrl: assetUrl("/popout.html"),
               position: {
                 left: screenLeft,
                 top: screenTop,

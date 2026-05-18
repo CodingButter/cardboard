@@ -22,6 +22,7 @@ import {
   importPackFromBlob,
   importPackFromUrl,
 } from "../lib/importPack";
+import { assetUrl } from "../lib/assetUrl";
 
 // Specific-path imports are kept here from the era when the legacy
 // `ui.tsx` shadowed the `ui/index.ts` barrel under Node-style
@@ -108,7 +109,10 @@ const STARTER_TEMPLATES: ReadonlyArray<{
     displayName: "Cardboard",
     description:
       "The default starter — Wolfenstein-style raycaster with player + sample scene.",
-    packUrl: "/packs/Cardboard.apg",
+    // assetUrl() prefixes the GitHub Pages subpath (`/cardboard/`) when
+    // running on Pages; in dev / standalone-static deploys it returns
+    // the path unchanged. See `apps/editor/src/lib/assetUrl.ts`.
+    packUrl: assetUrl("/packs/Cardboard.apg"),
   },
   {
     id: "blank",
