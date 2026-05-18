@@ -215,6 +215,187 @@ export interface SceneEntityJSON {
 
 const DEFAULT_SPAWN: SceneSpawn = { x: 1.5, y: 1.5, facing: 0 };
 
+/* --- Run-length grid encoding ------------------------------------------- */
+
+/**
+ * Run-length-encoded grid wire format for `walls` / `floors` /
+ * `ceilings`. Storage / transport optimisation only — the engine
+ * unrolls it back to the nested-array shape the rest of the pipeline
+ * already consumes at `Scene.fromJSON` time.
+ *
+ *   `{ width, height, rle: [value, runLength, value, runLength, ...] }`
+ *
+ * The flat `rle` array carries alternating `(value, runLength)` pairs
+ * in row-major order. The sum of every `runLength` MUST equal
+ * `width * height`.
+ *
+ * For structured cells (objects, not bare ints) two cells are
+ * considered "the same" if they compare deeply-equal via canonical
+ * JSON. Int grids — what `idMap` produces and what `default-pack`
+ * ships — collapse with a trivial `===` compare.
+ */
+export interface RleGrid<T = unknown> {
+  width: number;
+  height: number;
+  rle: T[];
+}
+
+/**
+ * Either the legacy nested-row form (`T[][]`) or the new RLE-object
+ * form. Scene authors / tools pick whichever is more readable for the
+ * grid; the loader auto-detects via `Array.isArray`.
+ */
+export type GridField<T> = T[][] | RleGrid<T>;
+
+/** Type guard for the RLE wire form. */
+export function isRleGrid<T>(value: unknown): value is RleGrid<T> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Array.isArray((value as { rle?: unknown }).rle) &&
+    typeof (value as { width?: unknown }).width === "number" &&
+    typeof (value as { height?: unknown }).height === "number"
+  );
+}
+
+/**
+ * Unroll an RLE grid back into the nested-array shape the engine
+ * consumes downstream. `width × height` cells walked row-major.
+ *
+ * Throws when the run-length sum doesn't match `width * height` —
+ * silent truncation would let a typo'd scene render with a misaligned
+ * grid and ship to disk on the next save.
+ */
+export function decodeRleGrid<T>(input: RleGrid<T>): T[][] {
+  const { width, height, rle } = input;
+  if (rle.length % 2 !== 0) {
+    throw new Error(
+      `[scene] RLE grid has odd-length pairs array (${rle.length}); expected alternating (value, runLength).`,
+    );
+  }
+  const total = width * height;
+  const out: T[][] = new Array(height);
+  for (let y = 0; y < height; y++) out[y] = new Array(width) as T[];
+
+  let cell = 0;
+  for (let i = 0; i < rle.length; i += 2) {
+    const value = rle[i] as T;
+    const runRaw = rle[i + 1] as unknown;
+    const run = typeof runRaw === "number" ? runRaw : Number(runRaw);
+    if (!Number.isInteger(run) || run <= 0) {
+      throw new Error(
+        `[scene] RLE grid run length at pair ${i / 2} is not a positive integer (got ${String(runRaw)}).`,
+      );
+    }
+    for (let k = 0; k < run; k++) {
+      if (cell >= total) {
+        throw new Error(
+          `[scene] RLE grid overflow: runs sum to more than ${total} cells (${width} × ${height}).`,
+        );
+      }
+      const y = (cell / width) | 0;
+      const x = cell - y * width;
+      out[y]![x] = value;
+      cell++;
+    }
+  }
+  if (cell !== total) {
+    throw new Error(
+      `[scene] RLE grid underflow: runs sum to ${cell} cells, expected ${total} (${width} × ${height}).`,
+    );
+  }
+  return out;
+}
+
+/**
+ * Encode a nested-array grid back into the RLE wire form. Mirrors
+ * `decodeRleGrid`. Used by tooling that wants to ship scenes in the
+ * compact form (the default-pack scenes + the editor's eventual save
+ * path).
+ *
+ * Equality:
+ *   - Primitives (numbers, strings, booleans, `null`) compare with
+ *     `Object.is`.
+ *   - Objects / arrays compare via canonical JSON. Cheap enough for
+ *     scene-sized grids and stable across keys.
+ *
+ * Empty grids (height 0 or width 0) round-trip to an empty `rle`
+ * array.
+ */
+export function encodeRleGrid<T>(grid: ReadonlyArray<ReadonlyArray<T>>): RleGrid<T> {
+  const height = grid.length;
+  const width = height > 0 ? grid[0]!.length : 0;
+  const rle: T[] = [];
+  if (width === 0 || height === 0) return { width, height, rle };
+
+  let prev: T | undefined;
+  let prevKey: string | null = null;
+  let hasPrev = false;
+  let run = 0;
+  for (let y = 0; y < height; y++) {
+    const row = grid[y]!;
+    for (let x = 0; x < width; x++) {
+      const v = row[x] as T;
+      const k = rleKey(v);
+      if (hasPrev && k === prevKey) {
+        run++;
+      } else {
+        if (hasPrev) {
+          rle.push(prev as T, run as unknown as T);
+        }
+        prev = v;
+        prevKey = k;
+        hasPrev = true;
+        run = 1;
+      }
+    }
+  }
+  if (hasPrev) rle.push(prev as T, run as unknown as T);
+  return { width, height, rle };
+}
+
+/**
+ * Canonical key for RLE deduping. Primitives stringify to themselves;
+ * objects/arrays go through `canonicalJsonKey` for stable, key-order-
+ * independent comparison.
+ */
+function rleKey(value: unknown): string {
+  if (value === null) return "n";
+  const t = typeof value;
+  if (t === "number" || t === "boolean") return t[0] + String(value);
+  if (t === "string") return "s" + (value as string);
+  if (t === "undefined") return "u";
+  return "o" + canonicalJsonKey(value);
+}
+
+function canonicalJsonKey(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalJsonKey).join(",") + "]";
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return (
+    "{" +
+    keys
+      .map((k) => JSON.stringify(k) + ":" + canonicalJsonKey((value as Record<string, unknown>)[k]))
+      .join(",") +
+    "}"
+  );
+}
+
+/**
+ * Normalise a `GridField<T>` into the nested-array shape. Pass-
+ * through for legacy arrays; unrolls the RLE wire form via
+ * `decodeRleGrid`. `undefined` returns `undefined` so optional grids
+ * (`floors` / `ceilings`) keep their absence semantics.
+ */
+export function normaliseGridField<T>(field: GridField<T> | undefined): T[][] | undefined {
+  if (field === undefined) return undefined;
+  if (Array.isArray(field)) return field as T[][];
+  return decodeRleGrid(field);
+}
+
 /* --- Layer-array input format ------------------------------------------- */
 
 /**
@@ -740,14 +921,28 @@ export class Scene {
       : DEFAULT_SPAWN;
     const lightmap = data.lightmap ? decodeLightmap(data.lightmap) : undefined;
 
+    // ── RLE auto-detect ────────────────────────────────────────────
+    // Scene grids accept either the legacy nested-row form or the
+    // run-length-encoded wire form (see `RleGrid` / `decodeRleGrid`).
+    // Unroll once here so the rest of the loader — idMap translation,
+    // bake-time emissive collection, constructor — keeps working with
+    // the nested-array shape unchanged.
+    const wallsRaw = normaliseGridField(data.walls as GridField<unknown>) as unknown[][];
+    const floorsRaw = normaliseGridField(
+      data.floors as GridField<unknown> | undefined,
+    ) as unknown[][] | undefined;
+    const ceilingsRaw = normaliseGridField(
+      data.ceilings as GridField<unknown> | undefined,
+    ) as unknown[][] | undefined;
+
     // ── idMap fast path ────────────────────────────────────────────
     // When the scene declares an idMap, every cell is a small int that
     // resolves to a preset id. We translate each grid into the
     // existing WallCellInput / FloorCellInput shape the Scene
     // constructor already accepts — no runtime changes downstream.
-    let walls = data.walls as WallCellInput[][];
-    let floors = (data.floors ?? []) as FloorCellInput[][];
-    let ceilings = (data.ceilings ?? []) as CeilingCellInput[][];
+    let walls = wallsRaw as WallCellInput[][];
+    let floors = (floorsRaw ?? []) as FloorCellInput[][];
+    let ceilings = (ceilingsRaw ?? []) as CeilingCellInput[][];
     // Per-cell preset id grid — M2 of MATERIALS.md uses this to map
     // each cell to its world-shader variant id. Sparse: only cells
     // resolved via `idMap` have entries; legacy scenes pass `undefined`.
@@ -763,24 +958,24 @@ export class Scene {
         if (typeof idx === "string") return data.idMap![idx] ?? null;
         return null;
       };
-      walls = (data.walls as Array<Array<number | WallCellInput>>).map((row) =>
+      walls = (wallsRaw as Array<Array<number | WallCellInput>>).map((row) =>
         row.map((cell) => translateWallCell(cell, lookup, resolver)),
       );
       const floorDefault = data.layerDefaults?.floor ?? null;
       const ceilingDefault = data.layerDefaults?.ceiling ?? null;
-      floors = ((data.floors as Array<Array<number | FloorCellInput>>) ?? []).map((row) =>
+      floors = ((floorsRaw as Array<Array<number | FloorCellInput>>) ?? []).map((row) =>
         row.map((cell) => translateFloorCell(cell, lookup, resolver, floorDefault)),
       );
-      ceilings = ((data.ceilings as Array<Array<number | CeilingCellInput>>) ?? []).map(
+      ceilings = ((ceilingsRaw as Array<Array<number | CeilingCellInput>>) ?? []).map(
         (row) => row.map((cell) => translateFloorCell(cell, lookup, resolver, ceilingDefault)),
       );
 
       // Capture per-cell preset ids alongside the cell-translation
       // pass above. We re-walk the raw grids — cheap (small int
       // lookups) — and keep the translation logic above unchanged.
-      const wallRowsRaw = data.walls as Array<Array<number | WallCellInput>>;
-      const floorRowsRaw = (data.floors as Array<Array<number | FloorCellInput>>) ?? [];
-      const ceilRowsRaw = (data.ceilings as Array<Array<number | CeilingCellInput>>) ?? [];
+      const wallRowsRaw = wallsRaw as Array<Array<number | WallCellInput>>;
+      const floorRowsRaw = (floorsRaw as Array<Array<number | FloorCellInput>>) ?? [];
+      const ceilRowsRaw = (ceilingsRaw as Array<Array<number | CeilingCellInput>>) ?? [];
       cellPresets = wallRowsRaw.map((wallRow, y) => {
         const floorRow = floorRowsRaw[y] ?? [];
         const ceilRow = ceilRowsRaw[y] ?? [];
@@ -1124,9 +1319,23 @@ export interface SceneJSON {
    * "no tile". `walls` has no layer default — `0` always means open.
    */
   layerDefaults?: { floor?: string; ceiling?: string };
-  walls: WallCellInput[][] | number[][];
-  floors?: FloorCellInput[][] | number[][];
-  ceilings?: CeilingCellInput[][] | number[][];
+  /**
+   * Wall grid. Two wire forms — auto-detected at load:
+   *
+   *   1. **Nested rows** (`T[][]`) — legacy hand-authored shape.
+   *   2. **Run-length-encoded** (`{ width, height, rle: [...] }`) —
+   *      compact storage form for pre-built scenes (default-pack,
+   *      editor output). See `RleGrid` / `decodeRleGrid`.
+   *
+   * The engine unrolls the RLE form back to a nested array at
+   * `Scene.fromJSON` time; everything downstream consumes nested rows
+   * unchanged.
+   */
+  walls: GridField<WallCellInput | number>;
+  /** Floor grid. Same dual wire form as `walls`. */
+  floors?: GridField<FloorCellInput | number>;
+  /** Ceiling grid. Same dual wire form as `walls`. */
+  ceilings?: GridField<CeilingCellInput | number>;
   /** Optional player spawn override. Falls back to `(1.5, 1.5)` facing east. */
   spawn?: { x: number; y: number; facing?: number };
   /**

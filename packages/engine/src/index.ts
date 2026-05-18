@@ -21,7 +21,14 @@ export type { GameState } from "./Game";
 
 // Scene module — the bake script (`apps/pack-builder`) parses, mutates,
 // and re-emits SceneJSON, and uses the `Scene` class for LOS queries.
-export { Scene, decodeLightmap } from "./Scene";
+export {
+  Scene,
+  decodeLightmap,
+  decodeRleGrid,
+  encodeRleGrid,
+  isRleGrid,
+  normaliseGridField,
+} from "./Scene";
 export type {
   SceneJSON,
   SceneGrid,
@@ -44,6 +51,8 @@ export type {
   StructuredFloorSpec,
   TileSpec,
   LightDef,
+  GridField,
+  RleGrid,
 } from "./Scene";
 
 // Asset-pack surface — pack-builder + editor consume preset types.

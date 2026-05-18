@@ -43,6 +43,8 @@ import {
 } from "./build-pack-script";
 import {
   PresetResolver,
+  encodeRleGrid,
+  normaliseGridField,
   type SceneJSON,
   type PackManifest,
   type ResolvedPresetData,
@@ -51,6 +53,7 @@ import {
   type CeilingCellInput,
   type WallSegmentInput,
   type StructuredFloorSpec,
+  type GridField,
 } from "@two_5_d/engine";
 import {
   collectShaderReferences,
@@ -200,9 +203,19 @@ function buildMergeScenes(
         }
       }
     };
-    collect(scene.walls as unknown[][]);
-    collect(scene.floors as unknown[][]);
-    collect(scene.ceilings as unknown[][]);
+    // Normalise RLE → nested-array up-front so the merge/remap pass
+    // can stay simple. The output is re-encoded back to RLE at the
+    // end of this function so the on-disk scene keeps its compact form.
+    const wallsArr = normaliseGridField(scene.walls as GridField<unknown>) as unknown[][];
+    const floorsArr = normaliseGridField(scene.floors as GridField<unknown> | undefined) as
+      | unknown[][]
+      | undefined;
+    const ceilingsArr = normaliseGridField(
+      scene.ceilings as GridField<unknown> | undefined,
+    ) as unknown[][] | undefined;
+    collect(wallsArr);
+    collect(floorsArr);
+    collect(ceilingsArr);
 
     // Build a deterministic ordering: named first (alphabetical),
     // then anonymous (alphabetical). Index 0 stays reserved.
@@ -235,12 +248,25 @@ function buildMergeScenes(
 
     const out: SceneJSON = { ...scene };
     out.idMap = newIdMap;
-    const newWalls = remap(scene.walls as unknown[][]);
-    if (newWalls) out.walls = newWalls;
-    const newFloors = remap(scene.floors as unknown[][]);
-    if (newFloors) out.floors = newFloors;
-    const newCeils = remap(scene.ceilings as unknown[][]);
-    if (newCeils) out.ceilings = newCeils;
+    // Whether each grid was authored in RLE form on disk — preserve
+    // that choice on the round-trip so authoring intent survives the
+    // build-merge pass.
+    const wallsWereRle = !Array.isArray(scene.walls);
+    const floorsWereRle = scene.floors !== undefined && !Array.isArray(scene.floors);
+    const ceilingsWereRle =
+      scene.ceilings !== undefined && !Array.isArray(scene.ceilings);
+    const newWalls = remap(wallsArr);
+    if (newWalls) {
+      out.walls = wallsWereRle ? encodeRleGrid(newWalls) : newWalls;
+    }
+    const newFloors = remap(floorsArr);
+    if (newFloors) {
+      out.floors = floorsWereRle ? encodeRleGrid(newFloors) : newFloors;
+    }
+    const newCeils = remap(ceilingsArr);
+    if (newCeils) {
+      out.ceilings = ceilingsWereRle ? encodeRleGrid(newCeils) : newCeils;
+    }
     rewritten.set(path, out);
   }
 
@@ -328,20 +354,27 @@ function expandSceneForBake(scene: SceneJSON, resolver: PresetResolver): SceneJS
   };
 
   const expanded: SceneJSON = { ...scene };
-  if (scene.walls) {
-    expanded.walls = (scene.walls as unknown[][]).map((row) =>
-      row.map(expandWall),
-    ) as WallCellInput[][];
+  // Decode RLE wire form here so the bake script sees the legacy
+  // nested-row shape it has always consumed. The expansion runs only
+  // for the bake; the on-disk scene keeps whichever form the merge
+  // step emitted.
+  const wallsRows = normaliseGridField(scene.walls as GridField<unknown>) as
+    | unknown[][]
+    | undefined;
+  const floorsRows = normaliseGridField(
+    scene.floors as GridField<unknown> | undefined,
+  ) as unknown[][] | undefined;
+  const ceilingsRows = normaliseGridField(
+    scene.ceilings as GridField<unknown> | undefined,
+  ) as unknown[][] | undefined;
+  if (wallsRows) {
+    expanded.walls = wallsRows.map((row) => row.map(expandWall)) as WallCellInput[][];
   }
-  if (scene.floors) {
-    expanded.floors = (scene.floors as unknown[][]).map((row) =>
-      row.map(expandFloor),
-    ) as FloorCellInput[][];
+  if (floorsRows) {
+    expanded.floors = floorsRows.map((row) => row.map(expandFloor)) as FloorCellInput[][];
   }
-  if (scene.ceilings) {
-    expanded.ceilings = (scene.ceilings as unknown[][]).map((row) =>
-      row.map(expandFloor),
-    ) as CeilingCellInput[][];
+  if (ceilingsRows) {
+    expanded.ceilings = ceilingsRows.map((row) => row.map(expandFloor)) as CeilingCellInput[][];
   }
   return expanded;
 }

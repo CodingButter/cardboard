@@ -405,6 +405,54 @@ After migration:
 - The legacy `tileTextures` + plain-int wall ids still parse via
   the compatibility shim in § 5.3.
 
+### 4.5 Run-length-encoded grid form
+
+The `walls` / `floors` / `ceilings` fields each accept TWO wire
+forms — the loader auto-detects per-field:
+
+1. **Nested rows** (`T[][]`) — the legacy hand-authored shape shown
+   in § 4.1. Best for small or visually-meaningful maps.
+2. **Run-length-encoded object** —
+   `{ "width": W, "height": H, "rle": [v0, n0, v1, n1, ...] }`. The
+   `rle` array is a flat list of alternating `(value, runLength)`
+   pairs in row-major order. The sum of every `runLength` MUST
+   equal `width * height`.
+
+The engine unrolls the RLE form back into the nested-array shape at
+`Scene.fromJSON` time, so everything downstream (`idMap`
+translation, bake-time emissive collection, the
+`Scene` constructor) keeps consuming nested rows unchanged. RLE is
+purely a storage / transport optimisation — both forms render
+byte-identical scenes.
+
+Auto-detect rule:
+- `Array.isArray(field)` → legacy nested-rows.
+- Otherwise (an object with `width` / `height` / `rle`) → RLE.
+
+```jsonc
+{
+  "idMap": { "0": null, "1": "brick.wall" },
+  "walls": {
+    "width": 10,
+    "height": 10,
+    "rle": [
+      1, 11,  // top edge + first cell of row 2
+      0,  8,  // interior row 2
+      1,  2,  // last cell of row 2 + first cell of row 3
+      0,  8,  // ...
+      // (eight more interior rows, last row all wall)
+      1, 11
+    ]
+  }
+}
+```
+
+Encoding equality: primitives compare with `Object.is`; structured
+cell objects compare via stable canonical JSON. The engine ships
+`encodeRleGrid` / `decodeRleGrid` / `normaliseGridField` from the
+`@two_5_d/engine` barrel so tooling (pack-builder build-merge, the
+editor save path) can round-trip either form.
+
 ---
 
 ## 5. Data format spec — manifest changes

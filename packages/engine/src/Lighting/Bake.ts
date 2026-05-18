@@ -22,7 +22,7 @@
  * `docs/plans/LIGHTING_OVERHAUL.md` for the user-facing model.
  */
 
-import { Scene } from "Scene";
+import { Scene, normaliseGridField } from "Scene";
 import { Vec2 } from "Libs/Vector";
 import { castRayThroughWalls } from "Libs/Raycast";
 import type {
@@ -31,6 +31,8 @@ import type {
   EmissiveSpec,
   WallSegmentInput,
   FloorCellInput,
+  CeilingCellInput,
+  WallCellInput,
   StructuredFloorSpec,
 } from "Scene";
 
@@ -173,8 +175,18 @@ interface BakedLight {
  * post-bake `tooSlow` branch.
  */
 export function bakeScene(scene: SceneJSON, opts: BakeOpts = {}): BakeResult {
-  const W = scene.walls[0]?.length ?? 0;
-  const H = scene.walls.length;
+  // Auto-detect the wire form (legacy nested rows vs RLE wrapper)
+  // and unroll up-front so the rest of bakeScene works with the
+  // nested-array shape unchanged.
+  const wallsArr = (normaliseGridField(scene.walls) ?? []) as WallCellInput[][];
+  const floorsArr = normaliseGridField(scene.floors) as FloorCellInput[][] | undefined;
+  const ceilingsArr = normaliseGridField(scene.ceilings) as
+    | CeilingCellInput[][]
+    | undefined;
+  scene = { ...scene, walls: wallsArr, floors: floorsArr, ceilings: ceilingsArr };
+
+  const W = wallsArr[0]?.length ?? 0;
+  const H = wallsArr.length;
 
   let K = Math.max(1, Math.floor(opts.lightmapResolution ?? DEFAULT_LIGHTMAP_RESOLUTION));
   let N = Math.max(1, Math.floor(opts.supersample ?? DEFAULT_LIGHT_SUPERSAMPLE));
@@ -183,7 +195,7 @@ export function bakeScene(scene: SceneJSON, opts: BakeOpts = {}): BakeResult {
   // Build the combined light list FIRST so we know whether there's
   // any baking work to do at all.
   const userLights = (scene.lights ?? []).map((l) => normaliseUserLight(l));
-  const autoLights = collectEmissiveLights(scene, W, H);
+  const autoLights = collectEmissiveLights(wallsArr, floorsArr, ceilingsArr, W, H);
   const allLights: BakedLight[] = [...userLights, ...autoLights];
 
   if (allLights.length === 0 || W === 0 || H === 0) {
@@ -404,7 +416,13 @@ function normaliseUserLight(l: LightDef): BakedLight {
  * surfaces whose `areaLight !== false`. Each emissive surface becomes
  * an `AREA_LIGHT_SAMPLES²` grid of point lights, each at 1/N² intensity.
  */
-function collectEmissiveLights(scene: SceneJSON, W: number, H: number): BakedLight[] {
+function collectEmissiveLights(
+  walls: WallCellInput[][],
+  floors: FloorCellInput[][] | undefined,
+  ceilings: CeilingCellInput[][] | undefined,
+  W: number,
+  H: number,
+): BakedLight[] {
   const out: BakedLight[] = [];
   if (W === 0 || H === 0) return out;
 
@@ -413,9 +431,9 @@ function collectEmissiveLights(scene: SceneJSON, W: number, H: number): BakedLig
   const subIntensityScale = 1 / (samples * samples);
 
   for (let cy = 0; cy < H; cy++) {
-    const wallRow = scene.walls[cy] ?? [];
-    const floorRow = scene.floors?.[cy] ?? [];
-    const ceilRow = scene.ceilings?.[cy] ?? [];
+    const wallRow = walls[cy] ?? [];
+    const floorRow = floors?.[cy] ?? [];
+    const ceilRow = ceilings?.[cy] ?? [];
     for (let cx = 0; cx < W; cx++) {
       const floorEm = readCellEmissive(floorRow[cx] as FloorCellInput);
       if (floorEm && floorEm.areaLight !== false) {
