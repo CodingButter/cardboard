@@ -1,15 +1,21 @@
 /**
- * Editor primitive library — R2 redesign.
+ * Editor primitive library — Phase 1 + later additions.
  *
- * Aggregator export so view code can `import { Slider, Toolbar, ... }
- * from "../components/ui"` (assuming the directory is preferred
- * over the legacy flat `ui.tsx` — note both can coexist, see
- * `../ui.tsx` for the pre-existing primitives).
+ * Aggregator export so view code can write
+ * `import { Slider, Toolbar, ... } from "../components/ui"` and reach
+ * every refined primitive in one specifier. Previously the
+ * sibling-file `ui.tsx` shadowed this directory under Node-style
+ * resolution; that file has been deleted, so `"../components/ui"`
+ * now resolves here unambiguously.
  *
- * Phase 1 of the editor redesign adds the bolded entries below to the
- * existing library. Each new primitive references the design-system
- * `@apply` classes in `apps/editor/src/styles/design-system.css` —
- * retunes happen there, not inside the component file.
+ * Backwards-compat aliases (`Input` → `TextInput`, `Separator` →
+ * `Divider`) are exported below so unmigrated callsites keep working
+ * during the cleanup. Future passes can rename the callsites and drop
+ * the aliases.
+ *
+ * Each refined primitive references the design-system `@apply`
+ * classes in `apps/editor/src/styles/design-system.css` — retunes
+ * happen there, not inside the component file.
  */
 
 export { Slider, ToggleSwitch, SegmentedControl } from "./controls";
@@ -115,10 +121,10 @@ export {
 } from "./Card";
 export type { CardProps } from "./Card";
 
-export { Divider } from "./Divider";
+export { Divider, Divider as Separator } from "./Divider";
 export type { DividerProps } from "./Divider";
 
-export { TextInput } from "./TextInput";
+export { TextInput, TextInput as Input } from "./TextInput";
 export type { TextInputProps } from "./TextInput";
 
 export { Textarea } from "./Textarea";
@@ -154,9 +160,5 @@ export type { TogglePillProps, TogglePillOption } from "./TogglePill";
 export { ThreeRailLayout, TwoRailLayout } from "./RailLayout";
 export type { ThreeRailLayoutProps, TwoRailLayoutProps } from "./RailLayout";
 
-// NOTE: The legacy `ui.tsx` SHADOWS this barrel when consumers import
-// from "../components/ui" (no `/index`). The new `Modal` below is
-// intentionally NOT re-exported here to avoid two `Modal`s in the
-// same module graph — Phase 1 callers should import it directly from
-// `./Modal` to bypass the shadow. See `views/HomeScreen.tsx` for the
-// pattern.
+export { Modal } from "./Modal";
+export type { ModalProps, ModalWidth } from "./Modal";

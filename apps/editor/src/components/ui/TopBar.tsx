@@ -1,6 +1,6 @@
 import React from "react";
 import { cn } from "../../lib/cn";
-import { Button } from "../ui";
+import { Button } from "./Button";
 import { DropdownMenu } from "./DropdownMenu";
 import { IconButton } from "./IconButton";
 import { StatusPill } from "./StatusPill";
