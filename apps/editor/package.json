@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot server.ts",
-    "build": "bun build index.html --outdir public --splitting",
+    "clean": "rm -rf dist",
+    "build": "bun run clean && bun build index.html --outdir dist --splitting",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
