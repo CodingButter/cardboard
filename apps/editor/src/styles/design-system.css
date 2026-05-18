@@ -603,29 +603,44 @@
  *   - floating + popout windows    → panel background + border
  * ─────────────────────────────────────────────────────────────────── */
 
-.dockview-theme-cardboard {
-  /* Group + panel surfaces */
-  --dv-group-view-background-color: var(--color-bg-panel);
-  --dv-tabs-and-actions-container-background-color: var(--color-bg-tabs);
-  --dv-tabs-and-actions-container-height: 32px;
+/* Selector list — dockview internally wraps content in a `.dv-shell`
+ * that carries the built-in `.dockview-theme-abyss` class, which sets
+ * its own `--dv-*` variable values on itself. Inheritance from the
+ * outer `.dockview-theme-cardboard` wrapper loses to the descendant's
+ * own declarations, so we re-assert our variables ON the abyss-themed
+ * element too. Specificity 0,2,0 beats abyss's 0,1,0. */
+.dockview-theme-cardboard,
+.dockview-theme-cardboard .dockview-theme-abyss {
+  /* Group + panel surfaces — body uses bg-card; chrome matches. */
+  --dv-group-view-background-color: var(--color-bg-card);
+  /* Flat chrome — tabs strip + every tab background matches the panel
+   * body so the header reads as a thin drag handle, not a contrasting
+   * bar. Active vs inactive tabs are distinguished by text color
+   * + the divider line between them, not background. */
+  --dv-tabs-and-actions-container-background-color: var(--color-bg-card);
+  --dv-tabs-and-actions-container-height: 22px;
   --dv-tabs-and-actions-container-font-size: 12px;
 
   /* Active-group tab states */
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-bg-card);
   --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bg-card);
   --dv-activegroup-visiblepanel-tab-color: #f4f4f5; /* zinc-100 */
   --dv-activegroup-hiddenpanel-tab-color: #a1a1aa; /* zinc-400 */
 
   /* Inactive-group tab states (when focus is in a different group). */
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-bg-card);
   --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bg-card);
   --dv-inactivegroup-visiblepanel-tab-color: #d4d4d8; /* zinc-300 */
   --dv-inactivegroup-hiddenpanel-tab-color: #71717a; /* zinc-500 */
 
-  /* Tab divider strip */
+  /* Tab divider keeps a hairline between Output/Problems-style
+   * tabbed siblings; panel-to-panel separators are intentionally
+   * transparent so adjacent panels look continuous — each panel's
+   * own content paints its surfaces (cards/sections/padding) which
+   * provides the visual separation. */
   --dv-tab-divider-color: var(--color-border);
-  --dv-separator-border: var(--color-border);
-  --dv-paneview-header-border-color: var(--color-border);
+  --dv-separator-border: transparent;
+  --dv-paneview-header-border-color: transparent;
 
   /* Splitters / sashes — show only on hover. */
   --dv-sash-color: transparent;
@@ -695,14 +710,13 @@
  * override the group view background token so the gutter between
  * the panel content and its tab strip matches.
  * ─────────────────────────────────────────────────────────────────── */
-.dockview-theme-cardboard .dv-content-container {
+.dockview-theme-cardboard .dv-content-container,
+.dockview-theme-cardboard .dockview-theme-abyss .dv-content-container {
   background: var(--color-bg-card);
 }
-.dockview-theme-cardboard {
-  /* Panel body bg matches the darker bg-card; the tab strip already
-   * paints its own bg-tabs colour via the existing token. */
-  --dv-group-view-background-color: var(--color-bg-card);
-}
+/* (Both `--dv-group-view-background-color` and panel-body content
+ * background are already pinned to `--color-bg-card` in the main
+ * variable block above — kept that single source of truth.) */
 
 /* ───────────────────────────────────────────────────────────────────
  * Panel-header bar mode (custom defaultTabComponent + singleTabMode)
@@ -733,12 +747,8 @@
  *     its own px-4) controls the spacing.
  * ─────────────────────────────────────────────────────────────────── */
 
-.dockview-theme-cardboard
-  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab {
-  /* h-9 / 36px to match the panel-header geometry. The token
-   * cascades; we don't fight specificity. */
-  --dv-tabs-and-actions-container-height: 36px;
-}
+/* Single-tab full-width groups share the compact 22px height set in
+ * the main variable block above. No per-group override needed. */
 
 .dockview-theme-cardboard
   .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab

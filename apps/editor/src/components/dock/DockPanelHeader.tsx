@@ -87,25 +87,26 @@ export function DockPanelHeader(
   const params = (props.params ?? {}) as DockPanelHeaderParams;
   const ornaments = React.useContext(DockPanelHeaderOrnamentsContext);
   const own = ornaments[api.id] ?? {};
-  const icon = own.icon ?? null;
+  // Per-panel icons are intentionally NOT rendered in the dock tab
+  // strip — the title alone identifies the panel. The MANIFEST.icon
+  // field is still consumed by DocksModal (panel-discovery card grid).
   const controls = own.controls ?? null;
   const showChevron = !controls && !params.hideTrailingChevron;
 
   return (
     <div
       className={cn(
-        // Header bar geometry — full height of dockview's tab strip.
+        // Header bar geometry — full height of dockview's tab strip
+        // (driven by --dv-tabs-and-actions-container-height, currently
+        // 22px). No own background or bottom rule — inherits the
+        // panel-body colour and reads as a thin drag handle. Panel
+        // content paints its own surfaces (cards / sections) so the
+        // header doesn't need a separator from the body.
         "dock-panel-header h-full w-full",
         "flex items-center gap-2",
-        "px-4",
-        "bg-(--color-bg-card-elev)",
+        "px-3",
         "text-(--color-fg-secondary)",
         "text-[11px] font-medium uppercase tracking-wider",
-        // Subtle bottom rule separates the header from the panel
-        // body. dockview already paints a `.dv-tab-divider-color`
-        // line between tabs in multi-panel mode; this is for the
-        // bar's lower edge.
-        "border-b border-(--color-border)",
         "select-none",
         "cursor-grab active:cursor-grabbing",
       )}
@@ -114,11 +115,6 @@ export function DockPanelHeader(
       // layer can find the right panel from a pointer hit-test.
       data-panel-id={api.id}
     >
-      {icon ? (
-        <span className="dock-panel-header__icon flex h-4 w-4 items-center justify-center text-(--color-fg-muted)">
-          {icon}
-        </span>
-      ) : null}
       <span className="dock-panel-header__title flex-1 truncate">{title}</span>
       {controls ? (
         <span className="dock-panel-header__controls flex items-center gap-1">
