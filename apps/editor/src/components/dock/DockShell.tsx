@@ -421,7 +421,18 @@ export function DockShell({
       // Orientation detection: there's no public orientation API on
       // dockview's panel/group surface, so we infer from the measured
       // width vs height of the group. width >= height → landscape.
+      // Cached last orientation. setConstraints + setSize only run
+      // when orientation ACTUALLY flips (vertical rail ↔ horizontal
+      // rail). Running them on every onDidLayoutChange event creates
+      // a feedback loop during drag — each setSize fires another
+      // layout change, which fires this handler, which calls setSize
+      // again — and Chrome eventually OOMs the tab ("Aw, Snap"). The
+      // cache breaks that loop: same orientation = no-op.
+      let lastOrientation: "landscape" | "portrait" | null = null;
+      let applyingSyncWork = false;
+
       const syncWorkspaceOrientation = () => {
+        if (applyingSyncWork) return;
         const panel = api.getPanel(WORKSPACE_PANEL_ID);
         if (!panel) return;
         const group = panel.group;
@@ -429,8 +440,13 @@ export function DockShell({
         const w = group.api.width;
         const h = group.api.height;
         if (typeof w !== "number" || typeof h !== "number") return;
-        const isLandscape = w >= h;
+        const orientation: "landscape" | "portrait" =
+          w >= h ? "landscape" : "portrait";
+        if (orientation === lastOrientation) return;
+        lastOrientation = orientation;
+        const isLandscape = orientation === "landscape";
         const desired: "bottom" | "right" = isLandscape ? "right" : "bottom";
+        applyingSyncWork = true;
         try {
           const current = group.api.getHeaderPosition();
           if (current !== desired) group.api.setHeaderPosition(desired);
@@ -438,15 +454,6 @@ export function DockShell({
           // Older dockview build or transient state — ignore.
         }
         try {
-          // Lock the rail to a 40px strip on the constrained axis.
-          // setConstraints only updates the min/max — it doesn't
-          // actively resize the panel. So we follow up with setSize
-          // to snap the current dimension to 40px IFF it's not
-          // already there. Skipping the redundant write is critical:
-          // every setSize call fires onDidLayoutChange, which calls
-          // back into syncWorkspaceOrientation — without the guard
-          // the show-workspace event (and any other call into this
-          // function) feedback-loops into a frozen page.
           panel.api.setConstraints(
             isLandscape
               ? {
@@ -460,16 +467,20 @@ export function DockShell({
                   minimumHeight: WORKSPACE_DEFAULT_WIDTH,
                 },
           );
-          const currentSize = isLandscape ? h : w;
-          if (currentSize !== WORKSPACE_DEFAULT_WIDTH) {
-            panel.api.setSize(
-              isLandscape
-                ? { height: WORKSPACE_DEFAULT_WIDTH }
-                : { width: WORKSPACE_DEFAULT_WIDTH },
-            );
-          }
+          panel.api.setSize(
+            isLandscape
+              ? { height: WORKSPACE_DEFAULT_WIDTH }
+              : { width: WORKSPACE_DEFAULT_WIDTH },
+          );
         } catch {
           // ignore
+        } finally {
+          // Allow further syncs after this microtask drains so the
+          // setSize-triggered onDidLayoutChange we just emitted can't
+          // re-enter the function before we exit the current pass.
+          queueMicrotask(() => {
+            applyingSyncWork = false;
+          });
         }
       };
       // Initial sync after layout has settled.
