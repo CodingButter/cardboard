@@ -6,18 +6,17 @@ import { Modal } from "../ui/Modal";
 import type { DockPanelDef } from "./DockShell";
 
 /**
- * DocksModal — the Workspace v1.5 panel-discovery surface.
+ * DocksModal — the panel-discovery surface.
  *
- * Replaces the rail's PanelPacker flyout. Lists every registered panel
- * for the active page as a card; cards for already-mounted panels are
- * muted with an "In layout" badge. Cards for closed panels are
- * draggable — they carry `dataTransfer["dockview/panel-id"]` so the
- * existing DockShell `onDidDrop` handler can mount them when dropped
- * onto the dockview area.
+ * Lists every registered panel for the active page as a card; cards
+ * for already-mounted panels are muted with an "In layout" badge.
  *
- * Auto-close: when DockShell successfully mounts a panel via drop it
- * dispatches a `cardboard:panel-added` event on `window`. We listen
- * for it and close the modal so the user sees their new panel.
+ * Click-to-add: the previous drag-from-card flow was technically
+ * fragile — dockview's drop zones don't highlight for external HTML5
+ * drags, so the user just dropped "somewhere" with no visual feedback
+ * about where the panel would land. Click-to-add is deterministic:
+ * the panel materialises in the layout (split right of the existing
+ * groups) and the user can drag its tab to reposition.
  */
 
 interface DocksModalProps {
@@ -82,41 +81,47 @@ export function DocksModal({
       >
         {cards.map((def) => {
           const isMounted = !!api?.getPanel(def.id);
+          // Add the panel to the live dockview layout. Default
+          // placement: split right of the rightmost existing group
+          // (the agreed UX is "click to add, then drag the panel's
+          // tab anywhere"). dockview shows drop zones for tab drags,
+          // not external HTML5 drags, so trying to drag-from-card
+          // gives the user no visual feedback about where the panel
+          // will land. Click-to-add is deterministic; the
+          // re-position-by-tab afterwards is robust.
+          const onAdd = () => {
+            if (isMounted) return;
+            if (!api) return;
+            try {
+              api.addPanel({
+                id: def.id,
+                component: def.id,
+                title: def.title,
+                position: { direction: "right" },
+              });
+            } catch {
+              // ignore — dockview rejected the addPanel call
+            }
+            onClose();
+          };
           return (
-            <div
+            <button
               key={def.id}
-              draggable={!isMounted}
-              onDragStart={(e) => {
-                if (isMounted) {
-                  e.preventDefault();
-                  return;
-                }
-                e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("dockview/panel-id", def.id);
-                // Some browsers require a text/plain payload for the
-                // drop to fire reliably across windows.
-                e.dataTransfer.setData("text/plain", def.id);
-                // Dismiss the modal so the user can drop into the
-                // dockview area beneath. HTML5 drags survive removal
-                // of the source DOM — the dataTransfer payload is
-                // preserved through dragend regardless of whether the
-                // source element still exists. Without this the modal
-                // backdrop blocks pointer events from reaching
-                // dockview and the drop never fires.
-                onClose();
-              }}
+              type="button"
+              onClick={onAdd}
+              disabled={isMounted}
               className={cn(
                 "relative flex flex-col items-center justify-center gap-2",
                 "rounded-md border p-3 h-[140px]",
                 "transition-colors",
                 isMounted
                   ? "border-(--color-border) bg-(--color-bg-card) opacity-60 cursor-not-allowed"
-                  : "border-(--color-border) bg-(--color-bg-card) hover:border-(--color-border-strong) cursor-grab active:cursor-grabbing",
+                  : "border-(--color-border) bg-(--color-bg-card) hover:border-(--color-border-strong) cursor-pointer",
               )}
               title={
                 isMounted
                   ? `${def.title} is already in the layout`
-                  : `Drag ${def.title} onto the layout to add it`
+                  : `Add ${def.title} to the layout`
               }
             >
               {/* Large icon block */}
@@ -144,10 +149,10 @@ export function DocksModal({
                 </span>
               ) : (
                 <span className="text-[9px] uppercase tracking-wider text-(--color-fg-muted)">
-                  Drag to add
+                  Click to add
                 </span>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
