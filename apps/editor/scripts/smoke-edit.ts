@@ -32,9 +32,17 @@ import {
   EditorProjectStore,
   _resetDBCache,
 } from "../src/lib/EditorProjectStore";
-import { IdbAssetPack } from "@two_5_d/engine";
+import { IdbAssetPack, isRleGrid } from "@two_5_d/engine";
 import { importPackFromBlob } from "../src/lib/importPack";
+import {
+  parseSceneText,
+  stringifySceneRle,
+} from "../src/lib/sceneSerde";
 
+// Pack file was renamed default.apg → Cardboard.apg in the
+// "Cardboard pack rename" commit; keep the smoke pointed at the
+// new artefact so the round-trip still exercises real default-pack
+// content (now shipped with RLE scene grids).
 const PACK_PATH = resolve(
   import.meta.dir,
   "..",
@@ -42,7 +50,7 @@ const PACK_PATH = resolve(
   "game",
   "public",
   "packs",
-  "default.apg",
+  "Cardboard.apg",
 );
 
 let passed = 0;
@@ -151,8 +159,11 @@ async function main() {
     startScene,
   );
   assert(typeof sceneBodyBefore === "string", "scene loaded as text");
-  const sceneBefore = JSON.parse(sceneBodyBefore as string) as MutableScene;
-  assert(Array.isArray(sceneBefore.walls), "scene has a walls grid");
+  // Real editor load path: parseSceneText normalises RLE grids → nested
+  // arrays so the GridEditor's paint helpers below operate on the same
+  // shape regardless of what the on-disk scene shipped as.
+  const sceneBefore = parseSceneText<MutableScene>(sceneBodyBefore as string);
+  assert(Array.isArray(sceneBefore.walls), "scene has a walls grid (normalised)");
 
   // Find a cell to mutate. We pick (1, 1) — guaranteed in-bounds for
   // every default-pack scene, and a value we can sanity-check before/after.
@@ -173,11 +184,12 @@ async function main() {
   const mapped = sceneAfter.idMap?.[String(afterId)];
   assert(mapped === presetId, `idMap[${afterId}] === "${presetId}"`);
 
-  // Persist via the same store API the editor uses.
+  // Persist via the same store API the editor uses, via
+  // `stringifySceneRle` so the on-disk shape stays RLE.
   await EditorProjectStore.saveAsset(
     projectId,
     startScene,
-    JSON.stringify(sceneAfter, null, 2),
+    stringifySceneRle(sceneAfter as unknown as Record<string, unknown>),
   );
 
   // Reload to confirm round-trip.
@@ -189,9 +201,18 @@ async function main() {
     typeof sceneBodyReloaded === "string",
     "scene round-trips as text",
   );
-  const sceneReloaded = JSON.parse(
-    sceneBodyReloaded as string,
-  ) as MutableScene;
+  // Inspect the raw text BEFORE normalising — the on-disk shape
+  // should be the RLE wire form (matches what default-pack ships).
+  const rawReloaded = JSON.parse(sceneBodyReloaded as string) as Record<
+    string,
+    unknown
+  >;
+  assert(
+    isRleGrid(rawReloaded.walls),
+    "saved scene preserves RLE wire form for walls",
+  );
+  // Now normalise + assert the painted cell survived.
+  const sceneReloaded = parseSceneText<MutableScene>(sceneBodyReloaded as string);
   const reloadedId = sceneReloaded.walls[targetY]?.[targetX];
   assert(
     reloadedId === afterId,

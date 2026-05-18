@@ -20,6 +20,7 @@
 
 import type { BakeOpts, SceneJSON } from "@two_5_d/engine";
 import { EditorProjectStore } from "./EditorProjectStore";
+import { stringifySceneRle } from "./sceneSerde";
 import {
   runBakeJob,
   type BakeJobDone,
@@ -84,12 +85,15 @@ export async function bakeSceneLightmap(
 
   onProgress?.("Saving…");
   // The worker returns the full scene JSON with the `lightmap` field
-  // populated. Persist it verbatim — preserving every other field the
-  // bake left untouched (idMap, entities, scene-level shaders, …).
+  // populated. Persist it via `stringifySceneRle` so the grid layers
+  // round-trip back to the on-disk RLE wire form — `bakeScene`
+  // unrolls grids internally and would otherwise write nested arrays
+  // back to disk, flipping any RLE-shipped scene to the verbose form
+  // on its first bake.
   await EditorProjectStore.saveAsset(
     projectId,
     scenePath,
-    JSON.stringify(done.scene, null, 2),
+    stringifySceneRle(done.scene as unknown as Record<string, unknown>),
   );
 
   onProgress?.(`Done · ${done.stats.lights} light(s) · ${done.stats.ms.toFixed(0)} ms`);

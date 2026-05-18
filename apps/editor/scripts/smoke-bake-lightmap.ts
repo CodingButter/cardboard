@@ -26,7 +26,7 @@ import {
   _resetDBCache,
 } from "../src/lib/EditorProjectStore";
 import { bakeSceneLightmap } from "../src/lib/lightmapBaker";
-import { IdbAssetPack } from "@two_5_d/engine";
+import { IdbAssetPack, isRleGrid } from "@two_5_d/engine";
 
 let passed = 0;
 let failed = 0;
@@ -127,6 +127,8 @@ async function main() {
     "scene round-trips as text post-bake",
   );
   const reloaded = JSON.parse(reloadedBody as string) as {
+    walls?: unknown;
+    floors?: unknown;
     lightmap?: {
       width: number;
       height: number;
@@ -135,6 +137,16 @@ async function main() {
       ceilingRGB?: string;
     };
   };
+  // The bake save path must re-RLE the grids so a scene that started
+  // life nested-array ends up in the compact wire form on disk.
+  assert(
+    isRleGrid(reloaded.walls),
+    "post-bake walls layer round-trips as RLE on disk",
+  );
+  assert(
+    isRleGrid(reloaded.floors),
+    "post-bake floors layer round-trips as RLE on disk",
+  );
   assert(
     reloaded.lightmap !== undefined && reloaded.lightmap !== null,
     "post-bake scene has lightmap field",
