@@ -120,9 +120,21 @@ const STARTER_TEMPLATES: ReadonlyArray<{
 
 interface HomeScreenProps {
   onOpenProject: (id: string) => void;
+  /**
+   * Id of the project that is currently "active" — i.e. the one
+   * carried in the URL hash (`#/p/<id>` or `#/p/<id>/<tab>`). When
+   * set, Home highlights that project in both the recents list and
+   * the main grid so the user can see which project will be re-
+   * entered when they click a non-Home tab. Null when on the bare
+   * `#/` route (no current project).
+   */
+  currentProjectId?: string | null;
 }
 
-export function HomeScreen({ onOpenProject }: HomeScreenProps) {
+export function HomeScreen({
+  onOpenProject,
+  currentProjectId = null,
+}: HomeScreenProps) {
   const [projects, setProjects] = React.useState<ProjectMeta[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -326,25 +338,35 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           ) : (
             <ul className="space-y-1">
               {projects.slice(0, 12).map((p) => {
-                const isMostRecent = p.id === mostRecent?.id;
+                const isCurrent = p.id === currentProjectId;
+                const isMostRecent =
+                  !isCurrent && p.id === mostRecent?.id;
                 return (
                   <li key={p.id}>
                     <button
                       type="button"
                       onClick={() => onOpenProject(p.id)}
+                      aria-current={isCurrent ? "true" : undefined}
                       className={cn(
                         "w-full text-left rounded-md px-3 py-2 transition-colors",
                         "hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-                        isMostRecent
-                          ? "bg-amber-500/10 border border-amber-500/40 text-amber-100"
-                          : "border border-transparent text-zinc-200",
+                        isCurrent
+                          ? // Active project (carried in the URL hash) —
+                            // distinct left-accent rail so it stands out
+                            // even when it's also the most-recent item.
+                            "bg-amber-500/15 border border-amber-500/60 border-l-4 border-l-amber-400 text-amber-50"
+                          : isMostRecent
+                            ? "bg-amber-500/5 border border-amber-500/30 text-amber-100"
+                            : "border border-transparent text-zinc-200",
                       )}
                     >
                       <div className="text-sm font-medium truncate">
                         {p.name}
                       </div>
                       <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-                        {formatRelative(p.modifiedAt)}
+                        {isCurrent
+                          ? "Current project"
+                          : formatRelative(p.modifiedAt)}
                       </div>
                     </button>
                   </li>
@@ -434,12 +456,15 @@ export function HomeScreen({ onOpenProject }: HomeScreenProps) {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-2">
               {projects.map((p) => {
-                const isMostRecent = p.id === mostRecent?.id;
+                const isCurrent = p.id === currentProjectId;
+                const isMostRecent =
+                  !isCurrent && p.id === mostRecent?.id;
                 return (
                   <ProjectCard
                     key={p.id}
                     project={p}
                     highlight={isMostRecent}
+                    current={isCurrent}
                     onOpen={() => onOpenProject(p.id)}
                     onRename={() => handleRename(p.id, p.name)}
                     onDelete={() => handleDelete(p.id, p.name)}
@@ -871,6 +896,10 @@ function TemplateCard({
 interface ProjectCardProps {
   project: ProjectMeta;
   highlight: boolean;
+  /** True when this card represents the project carried in the URL
+   *  hash. Renders with a stronger amber accent (left rail + ring) so
+   *  it visually wins over the "most recent" highlight. */
+  current?: boolean;
   onOpen: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -879,18 +908,22 @@ interface ProjectCardProps {
 function ProjectCard({
   project,
   highlight,
+  current = false,
   onOpen,
   onRename,
   onDelete,
 }: ProjectCardProps) {
   return (
     <div
+      aria-current={current ? "true" : undefined}
       className={cn(
         "group relative rounded-lg border bg-zinc-950/40 overflow-hidden",
         "transition-colors",
-        highlight
-          ? "border-amber-500/40 bg-amber-500/[0.04]"
-          : "border-zinc-800 hover:border-zinc-700",
+        current
+          ? "border-amber-400 bg-amber-500/[0.08] ring-2 ring-amber-400/40 border-l-4"
+          : highlight
+            ? "border-amber-500/40 bg-amber-500/[0.04]"
+            : "border-zinc-800 hover:border-zinc-700",
       )}
     >
       {/* Thumbnail — 16:9 region. */}
@@ -917,11 +950,15 @@ function ProjectCard({
         <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
           <Sparkles size={28} aria-hidden="true" />
         </div>
-        {highlight && (
+        {current ? (
+          <div className="absolute top-2 left-2">
+            <Badge variant="amber">Current</Badge>
+          </div>
+        ) : highlight ? (
           <div className="absolute top-2 left-2">
             <Badge variant="amber">Most recent</Badge>
           </div>
-        )}
+        ) : null}
         <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-500 text-zinc-950 shadow-lg">
             <Play size={16} aria-hidden="true" />
