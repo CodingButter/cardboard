@@ -25,10 +25,10 @@
  * Run from anywhere — paths below are resolved relative to this file.
  */
 
-import { $ } from "bun";
-import { cp, mkdir, readdir, stat, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, stat, readFile, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import tailwindPlugin from "bun-plugin-tailwind";
 
 const SCRIPT_DIR = new URL(".", import.meta.url).pathname;
 const EDITOR_DIR = resolve(SCRIPT_DIR, "..");
@@ -42,13 +42,40 @@ const GAME_PUBLIC = join(GAME_DIR, "public");
 console.log("[build:pages] editor =", EDITOR_DIR);
 console.log("[build:pages] game   =", GAME_DIR);
 
-// Step 1: build the game first so its dist exists for the flatten step.
-console.log("[build:pages] building game…");
-await $`bun run build`.cwd(GAME_DIR);
+// Programmatic build with the Tailwind plugin explicitly loaded.
+//
+// The CLI `bun build` does NOT pick up the [serve.static] plugins
+// declared in bunfig.toml — that section is dev-server-only — so a
+// CLI build ships the raw Tailwind v4 source (`@theme default { … }`
+// blocks intact, no `:root` token expansion, no utility classes
+// emitted). That's exactly what crashed the first deploy: the
+// stylesheet loaded with status 200 but contained zero usable rules.
+//
+// Calling `Bun.build({ plugins: [tailwindPlugin] })` runs the
+// plugin's `setup(build)` hook at the same point the dev server does,
+// producing a fully compiled CSS file in the dist output.
+async function buildApp(label: string, cwd: string) {
+  const distDir = join(cwd, "dist");
+  if (existsSync(distDir)) {
+    await rm(distDir, { recursive: true, force: true });
+  }
+  const entry = join(cwd, "index.html");
+  console.log(`[build:pages] building ${label}…`);
+  const result = await Bun.build({
+    entrypoints: [entry],
+    outdir: distDir,
+    splitting: true,
+    plugins: [tailwindPlugin],
+    root: cwd,
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error(`[build:pages] ${label} build failed`);
+  }
+}
 
-// Step 2: build the editor.
-console.log("[build:pages] building editor…");
-await $`bun run build`.cwd(EDITOR_DIR);
+await buildApp("game", GAME_DIR);
+await buildApp("editor", EDITOR_DIR);
 
 // Step 3: flatten the deploy tree.
 console.log("[build:pages] flattening…");
