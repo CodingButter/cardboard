@@ -12,6 +12,7 @@ import {
   DockPanelHeaderOrnamentsContext,
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
+import { useCtrlDragHostListeners } from "./useCtrlDragFloatToggle";
 import { assetUrl } from "../../lib/assetUrl";
 
 /**
@@ -327,6 +328,12 @@ export function DockShell({
   // share the same api), populate that too.
   const internalApiRef = React.useRef<DockviewApi | null>(null);
   const apiRef = externalApiRef ?? internalApiRef;
+
+  // Mount the global Ctrl-key listeners that arm the Ctrl-drag float
+  // toggle. The handlers themselves live on `DockPanelHeader` (each
+  // tab has its own pointerdown/up); this hook is purely the
+  // keyboard tracker + body-attribute toggle for visual feedback.
+  useCtrlDragHostListeners();
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
