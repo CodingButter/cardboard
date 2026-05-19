@@ -306,7 +306,7 @@ function SelectionSection({
     >
       <div className={containerClass} data-section={section.key}>
         <span className={labelClass}>{section.label}</span>
-        <span className={valueClass} title={value}>
+        <span className={valueClass}>
           {value}
         </span>
       </div>

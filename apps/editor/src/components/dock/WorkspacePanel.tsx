@@ -97,7 +97,6 @@ function RailIconButton({
     <button
       type="button"
       onClick={onClick}
-      title={label}
       aria-label={label}
       aria-pressed={active}
       data-active={active ? "true" : "false"}

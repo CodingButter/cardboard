@@ -651,7 +651,6 @@ function LogRow({ line }: LogRowProps): React.JSX.Element {
       <span
         className={["shrink-0 mt-0.5 inline-flex items-center gap-1", meta.text].join(" ")}
         aria-label={meta.label}
-        title={meta.label}
       >
         <span
           aria-hidden="true"

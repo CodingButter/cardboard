@@ -670,7 +670,6 @@ function PropertyControl({
     >
       <span
         className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate cursor-help"
-        title={propKey}
       >
         {propKey}
       </span>

@@ -579,7 +579,6 @@ function PresetRow({
             "text-[11px] leading-tight",
             "uppercase tracking-wide",
           ].join(" ")}
-          title={preset.name}
         >
           {preset.name}
         </span>

@@ -490,7 +490,6 @@ function PrefabTile({
             "block text-[9px] leading-tight truncate",
             "uppercase tracking-wide",
           ].join(" ")}
-          title={prefab.name}
         >
           {prefab.name}
         </span>

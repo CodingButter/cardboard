@@ -609,7 +609,6 @@ function AssetRow({
               ? "text-(--color-fg-primary) font-medium"
               : "text-(--color-fg-secondary)",
           ].join(" ")}
-          title={asset.name}
         >
           {asset.name}
         </span>
@@ -621,7 +620,6 @@ function AssetRow({
               "min-w-0 shrink truncate text-[10px]",
               "text-(--color-fg-muted) max-w-[55%]",
             ].join(" ")}
-            title={asset.path}
           >
             {asset.path}
           </span>

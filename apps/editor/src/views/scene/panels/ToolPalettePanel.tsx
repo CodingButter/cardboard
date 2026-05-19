@@ -272,7 +272,6 @@ export function ToolPalettePanel(): React.JSX.Element {
                 key={s.id}
                 type="button"
                 aria-pressed={active}
-                title={s.name}
                 onClick={() => handleSubToolClick(s.id)}
                 className={[
                   "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",

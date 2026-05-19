@@ -69,8 +69,6 @@ export function TopBar({
   userInitials = "JD",
   className,
 }: ShellTopBarProps) {
-  const NOT_AVAILABLE_HINT = "Not available in this view.";
-
   // Register the four TopBar commands once. Each callback closes over
   // the latest prop via a ref so the registration doesn't need to
   // re-run on every prop change.
@@ -198,13 +196,6 @@ export function TopBar({
                 playtestActive &&
                   "border-red-500/60 text-red-300 hover:bg-red-500/10",
               )}
-              title={
-                playtestDisabled
-                  ? "Open a project to run Playtest."
-                  : playtestActive
-                    ? "Exit playtest (Esc)"
-                    : "Run the pack in an embedded playtest viewport"
-              }
             >
               {playtestActive ? "Stop" : "Playtest"}
             </Button>
@@ -220,9 +211,6 @@ export function TopBar({
               disabled={!exportAvailable}
               leadingIcon={<Upload size={12} />}
               className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
-              title={
-                exportAvailable ? "Export pack to .apg" : NOT_AVAILABLE_HINT
-              }
             >
               Export
             </Button>
@@ -248,11 +236,6 @@ export function TopBar({
                 saveState === "dirty" &&
                   "bg-transparent border-amber-500/40 text-amber-200 hover:bg-amber-500/10",
               )}
-              title={
-                saveAvailable
-                  ? "Save the current edit (Ctrl/Cmd+S)"
-                  : NOT_AVAILABLE_HINT
-              }
             >
               Save
             </Button>
@@ -267,7 +250,6 @@ export function TopBar({
               onClick={onOpenSettings}
               leadingIcon={<SettingsIcon size={12} />}
               className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
-              title="Editor settings"
             >
               Settings
             </Button>
