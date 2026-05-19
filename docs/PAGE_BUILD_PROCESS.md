@@ -170,6 +170,65 @@ hits "Reset Layout" via the workspace rail.
 
 ---
 
+## Phase 3b — Predefined layouts + opt-in panels + shared docks
+
+After the default layout, three additions are MANDATORY before moving to
+audit:
+
+### 1. Predefined layouts
+
+Register 3-5 predefined layouts for the page in
+`apps/editor/src/state/predefinedLayouts.ts` (keyed by page id). Each
+entry: an id, a label, a `SerializedDockview` JSON snapshot, and an
+optional description. The Workspace rail's Layouts modal reads these
+and lets the user one-click apply.
+
+Typical set for a page:
+- `<page>-default` — the page's standard view (current default layout).
+- `<page>-<focused-mode>` — emphasizes a specific panel (e.g.
+  `scene-wide-inspector`, `prefabs-json-focused`).
+- `<page>-browse` — list/library-dominant variant.
+
+Mirror the Scene page's existing entries in `predefinedLayouts.ts` for
+the registration pattern.
+
+### 2. Page-specific opt-in dock panels
+
+Beyond the default-visible panels, every page should expose additional
+opt-in panels via the Docks modal (`DocksModal.tsx`). These are panels
+that make sense for the page but aren't worth using default real estate
+for. Users add them via the rail.
+
+Examples:
+- Scene page: Minimap / History / PrefabBrowser / Lighting / Notes / AssetReferences.
+- Prefabs page: ComponentLibrary / TagManager / AnimationTimeline / TestPlayfield (build stubs in Phase 1, bodies in a later wave).
+
+Pick 2-4 sensible ones per page. Register them in the PANELS array with
+manifest + component, mark them as opt-in by leaving them out of the
+default layout JSON.
+
+### 3. Shared dock panels across pages
+
+Some panels make sense on EVERY page — they're project-wide tools:
+
+| Panel | Scope |
+|---|---|
+| Output | project-global (one log stream) |
+| Problems | project-global (one diagnostic list) |
+| Notes | page-scoped (per page) |
+| History | page-scoped (per page) |
+| AssetReferences | project-global (project's asset graph) |
+
+These panels are factored into `apps/editor/src/views/sharedPanels.ts`
+(if it doesn't exist, create it). Each page's view spreads
+`SHARED_PANELS` into its own PANELS array so the Docks modal shows them
+as available on every page. Persistence keys for page-scoped panels use
+the page id prefix (`cardboard.<page>.notes.text`).
+
+**Commit:** `editor: <PageName> — predefined layouts + opt-in panels + shared docks`.
+
+---
+
 ## Phase 4 — Holistic visual audit
 
 After Phase 3, the orchestrator runs a full-page visual audit via
