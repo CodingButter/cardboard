@@ -84,6 +84,9 @@ export type { FilePickerProps } from "./FilePicker";
 export { ScrollArea } from "./ScrollArea";
 export type { ScrollAreaProps } from "./ScrollArea";
 
+export { ScrollRow } from "./ScrollRow";
+export type { ScrollRowProps } from "./ScrollRow";
+
 export { Toolbar } from "./Toolbar";
 export type { ToolbarProps, ToolbarGroup } from "./Toolbar";
 

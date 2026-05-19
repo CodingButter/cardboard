@@ -72,10 +72,12 @@
   --color-bg-panel: oklch(0.17 0 0);
   --color-bg-card: oklch(0.22 0 0);
   --color-bg-card-elev: #2f2f2f;
-  /* Panel-body surface — used by every dock group with surface != false.
-   * Distinctly lighter than the new darker page bg so cards read as
-   * raised. Paired with `--color-border-strong` as the hairline. */
-  --color-bg-panel-surface: oklch(0.23 0 0);
+  /* Panel-body surface — translucent white overlay. Paints a slight
+   * lighter tint over whatever's behind the panel (the darker page
+   * bg, a popout's body, an embedded preview frame — anything). The
+   * low alpha keeps the effect subtle; the border + drop shadow do
+   * most of the visual lifting to mark the card boundary. */
+  --color-bg-panel-surface: oklch(1 0 0 / 0.02);
   --color-bg-active: oklch(0.74 0.18 65 / 0.1);
   --color-bg-hover: oklch(0.32 0 0);
 
