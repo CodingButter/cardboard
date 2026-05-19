@@ -18,17 +18,69 @@ export interface TilePresetRow {
   name: string;
   category: TilePresetCategory;
   thumbnail?: string;
+  /** Long-form tooltip body. Used by the tile-preset panel's
+   *  progressive reveal tooltip — appears after a longer hover than
+   *  the bare preset name. */
+  description?: string;
 }
 
 export const MOCK_TILE_PRESETS = [
-  { id: "wall-brick", name: "Brick", category: "walls" },
-  { id: "wall-concrete", name: "Concrete", category: "walls" },
-  { id: "wall-wood", name: "Wood Panel", category: "walls" },
-  { id: "floor-stone", name: "Stone Floor", category: "floors" },
-  { id: "floor-grass", name: "Grass", category: "floors" },
-  { id: "ceil-wood", name: "Wood Ceiling", category: "ceilings" },
-  { id: "ceil-sky", name: "Open Sky", category: "ceilings" },
-  { id: "decor-barrel", name: "Barrel", category: "decor" },
+  {
+    id: "wall-brick",
+    name: "Brick",
+    category: "walls",
+    description:
+      "Painted brick — solid wall material with high durability and a warm red tone.",
+  },
+  {
+    id: "wall-concrete",
+    name: "Concrete",
+    category: "walls",
+    description:
+      "Poured concrete — cold gray wall surface, ideal for industrial interiors.",
+  },
+  {
+    id: "wall-wood",
+    name: "Wood Panel",
+    category: "walls",
+    description:
+      "Vertical wood paneling — interior wall material with a mid-warm tone.",
+  },
+  {
+    id: "floor-stone",
+    name: "Stone Floor",
+    category: "floors",
+    description:
+      "Flagstone floor — durable interior flooring with subtle tile seams.",
+  },
+  {
+    id: "floor-grass",
+    name: "Grass",
+    category: "floors",
+    description:
+      "Outdoor grass cover — soft green ground surface for exterior scenes.",
+  },
+  {
+    id: "ceil-wood",
+    name: "Wood Ceiling",
+    category: "ceilings",
+    description:
+      "Exposed wood beam ceiling — warm overhead surface for indoor levels.",
+  },
+  {
+    id: "ceil-sky",
+    name: "Open Sky",
+    category: "ceilings",
+    description:
+      "Open sky — no ceiling geometry; renders the skybox above this cell.",
+  },
+  {
+    id: "decor-barrel",
+    name: "Barrel",
+    category: "decor",
+    description:
+      "Wooden barrel decor — placeable solid prop for filling level space.",
+  },
 ] as const satisfies readonly TilePresetRow[];
 
 // ---------------------------------------------------------------------------
