@@ -72,7 +72,7 @@ const INITIAL: SceneStateData = {
   },
 };
 
-function cellKey(x: number, y: number): string {
+export function cellKey(x: number, y: number): string {
   return `${x},${y}`;
 }
 

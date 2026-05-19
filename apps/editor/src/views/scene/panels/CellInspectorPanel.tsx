@@ -1,6 +1,7 @@
-// TODO: wire to selection store + cell store. For now the panel
-// imports MOCK_CELL as if it were the currently-selected cell and
-// keeps its edits in local state (no persistence; reset on remount).
+// Wave 3.3 panel migration #6: wired to useSelectionStore (selected cell),
+// useSceneStore (per-cell data, multi-layer), and useLayerStore (active
+// layer + ordered layer list). The panel synthesizes a flat render-time
+// `cell` view at the active layer so the body JSX stays compact.
 import React from "react";
 import { SlidersHorizontal, X, Plus, ChevronDown } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
@@ -10,7 +11,10 @@ import { ToggleSwitch } from "../../../components/ui/controls";
 import { TextInput } from "../../../components/ui/TextInput";
 import { NumberInput } from "../../../components/ui/NumberInput";
 import { registerCommand } from "../../../state/useCommandStore";
-import { MOCK_CELL, MOCK_LAYERS, type CellRow } from "../scene-fixtures";
+import { useSelectionStore } from "../../../state/useSelectionStore";
+import { useSceneStore, cellKey } from "../../../state/useSceneStore";
+import { useLayerStore } from "../../../state/useLayerStore";
+import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
  * CellInspectorPanel — per-cell property editor.
@@ -82,9 +86,9 @@ const TAG_DESCRIPTIONS: Record<string, string> = {
   loot: "Marks a loot drop or container spawn.",
 };
 
-/** Descriptions for the well-known property keys on `MOCK_CELL`. New
- *  property keys created by `editProperty` fall back to a generic
- *  per-type blurb. */
+/** Descriptions for well-known property keys (kept from the original
+ *  fixture set). New property keys created by `editProperty` fall back
+ *  to a generic per-type blurb. */
 const PROPERTY_DESCRIPTIONS: Record<string, string> = {
   blocksMovement: "Entities cannot pathfind through this cell.",
   blocksLight: "Light samples cannot pass through this cell.",
@@ -105,14 +109,66 @@ function propertyDescription(key: string, value: unknown): string {
   return `Property: ${key}.`;
 }
 
+/** Synthesized render-time view of a cell at the active layer. The body
+ *  JSX consumes this flat shape; it is derived from the multi-layer
+ *  `SceneCell` on every render and is never written to directly. */
+interface CellView {
+  x: number;
+  y: number;
+  /** Tile preset id at the active layer, or empty string if unset. */
+  type: string;
+  height: number;
+  layer: string;
+  tags: string[];
+  properties: Record<string, unknown>;
+}
+
 export function CellInspectorPanel(): React.JSX.Element {
-  // Local panel state — owns the mutable copy of MOCK_CELL.
-  // `null` means "deselected" (the deselect command clears it).
-  const [cell, setCell] = React.useState<CellRow | null>(() => ({
-    ...MOCK_CELL,
-    tags: [...MOCK_CELL.tags],
-    properties: { ...MOCK_CELL.properties },
-  }));
+  // Cross-panel store subscriptions. Keep each selector keyed/primitive
+  // so this panel does not re-render on every paint elsewhere on the map.
+  const selected = useSelectionStore((s) => s.selected);
+  const activeLayer = useLayerStore((s) => s.activeId);
+  const layerOrder = useLayerStore((s) => s.order);
+  const customLayers = useLayerStore((s) => s.customLayers);
+  const cellData = useSceneStore((s) =>
+    selected ? s.cells[cellKey(selected.x, selected.y)] : undefined,
+  );
+
+  // Synthesized flat view at the active layer. `null` ↔ no selection
+  // OR no painted content at the selected coord (the body switches on
+  // `selected` + `cellData` separately so an empty cell still renders
+  // a header).
+  const cell = React.useMemo<CellView | null>(() => {
+    if (!selected || !cellData) return null;
+    return {
+      x: selected.x,
+      y: selected.y,
+      type: cellData.layers[activeLayer] ?? "",
+      height: cellData.height,
+      layer: activeLayer,
+      tags: cellData.tags,
+      properties: cellData.properties,
+    };
+  }, [selected, cellData, activeLayer]);
+
+  // Resolved layer dropdown list — built-in fixtures + custom layers,
+  // ordered by `useLayerStore.order`. Names come from the fixture row
+  // for built-ins and from the custom layer record otherwise. Ids not
+  // present in either source are skipped (the active layer is always
+  // present in `order`, so the dropdown never has to fall back to an
+  // "unknown layer" option).
+  const layerOptions = React.useMemo<Array<{ id: string; name: string }>>(() => {
+    const nameById = new Map<string, string>();
+    for (const l of MOCK_LAYERS) nameById.set(l.id, l.name);
+    for (const c of customLayers) nameById.set(c.id, c.name);
+    const out: Array<{ id: string; name: string }> = [];
+    for (const id of layerOrder) {
+      const name = nameById.get(id);
+      if (!name) continue;
+      out.push({ id, name });
+    }
+    return out;
+  }, [layerOrder, customLayers]);
 
   const [addingTag, setAddingTag] = React.useState(false);
   const [tagDraft, setTagDraft] = React.useState("");
@@ -146,62 +202,92 @@ export function CellInspectorPanel(): React.JSX.Element {
   }, [addingTag]);
 
   // ────────────────────────────────────────────────────────────────
-  // Mutators (used by both the UI and the registered commands).
+  // Mutators — all writes go to the scene store (or the selection /
+  // layer stores). Each mutator is a no-op when no cell is selected.
 
-  const toggleTag = React.useCallback((tag: string) => {
-    setCell((prev) => {
-      if (!prev) return prev;
-      const has = prev.tags.includes(tag);
-      return {
-        ...prev,
-        tags: has ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag],
-      };
-    });
-  }, []);
+  const toggleTag = React.useCallback(
+    (tag: string) => {
+      if (!selected) return;
+      useSceneStore.getState().toggleCellTag(selected.x, selected.y, tag);
+    },
+    [selected],
+  );
 
-  const commitNewTag = React.useCallback((raw: string) => {
-    const tag = raw.trim();
-    if (!tag) {
-      setAddingTag(false);
+  const commitNewTag = React.useCallback(
+    (raw: string) => {
+      const tag = raw.trim();
+      if (!tag) {
+        setAddingTag(false);
+        setTagDraft("");
+        return;
+      }
+      if (selected) {
+        // Preserve the panel's no-dup guard — the store's toggle would
+        // otherwise REMOVE the tag if it already exists.
+        const existing = cellData?.tags ?? [];
+        if (!existing.includes(tag)) {
+          useSceneStore.getState().toggleCellTag(selected.x, selected.y, tag);
+        }
+      }
       setTagDraft("");
-      return;
-    }
-    setCell((prev) => {
-      if (!prev) return prev;
-      if (prev.tags.includes(tag)) return prev;
-      return { ...prev, tags: [...prev.tags, tag] };
-    });
-    setTagDraft("");
-    setAddingTag(false);
-  }, []);
+      setAddingTag(false);
+    },
+    [selected, cellData],
+  );
 
-  const toggleProperty = React.useCallback((key: string) => {
-    setCell((prev) => {
-      if (!prev) return prev;
-      const cur = prev.properties[key];
-      if (typeof cur !== "boolean") return prev;
-      return {
-        ...prev,
-        properties: { ...prev.properties, [key]: !cur },
-      };
-    });
-  }, []);
+  const toggleProperty = React.useCallback(
+    (key: string) => {
+      if (!selected) return;
+      const cur = cellData?.properties[key];
+      if (typeof cur !== "boolean") return;
+      useSceneStore
+        .getState()
+        .setProperty(selected.x, selected.y, key, !cur);
+    },
+    [selected, cellData],
+  );
 
   const setPropertyValue = React.useCallback(
     (key: string, value: unknown) => {
-      setCell((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          properties: { ...prev.properties, [key]: value },
-        };
-      });
+      if (!selected) return;
+      useSceneStore
+        .getState()
+        .setProperty(selected.x, selected.y, key, value);
     },
-    [],
+    [selected],
   );
 
+  const setHeight = React.useCallback(
+    (next: number) => {
+      if (!selected) return;
+      useSceneStore.getState().setCellHeight(selected.x, selected.y, next);
+    },
+    [selected],
+  );
+
+  const setType = React.useCallback(
+    (next: string) => {
+      if (!selected) return;
+      const trimmed = next;
+      if (trimmed === "") {
+        useSceneStore
+          .getState()
+          .eraseCell(selected.x, selected.y, activeLayer);
+      } else {
+        useSceneStore
+          .getState()
+          .paintCell(selected.x, selected.y, activeLayer, trimmed);
+      }
+    },
+    [selected, activeLayer],
+  );
+
+  const changeActiveLayer = React.useCallback((next: string) => {
+    useLayerStore.getState().activate(next);
+  }, []);
+
   const deselect = React.useCallback(() => {
-    setCell(null);
+    useSelectionStore.getState().select(null);
     setAddingTag(false);
     setTagDraft("");
   }, []);
@@ -318,9 +404,12 @@ export function CellInspectorPanel(): React.JSX.Element {
   }, [propertyKeysSig, cell !== null]);
 
   // ────────────────────────────────────────────────────────────────
-  // Render — deselected state first.
+  // Render — three states:
+  //   1. No selection         → "No cell selected" empty state.
+  //   2. Selected but empty   → minimal header with coord + paint hint.
+  //   3. Selected + painted   → full property sheet (below).
 
-  if (!cell) {
+  if (!selected) {
     return (
       <div
         ref={rootRef}
@@ -329,6 +418,67 @@ export function CellInspectorPanel(): React.JSX.Element {
       >
         <div className="text-[11px] uppercase tracking-wider text-(--color-fg-muted)">
           No cell selected
+        </div>
+      </div>
+    );
+  }
+
+  if (!cellData || !cell) {
+    return (
+      <div
+        ref={rootRef}
+        data-panel="cell-inspector"
+        className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
+      >
+        <header className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 flex items-baseline gap-1.5 truncate">
+            {!compactHeader && (
+              <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
+                Cell
+              </span>
+            )}
+            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none min-w-0">
+              ({selected.x}, {selected.y})
+            </span>
+          </div>
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Deselect cell</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div className="max-w-[400px]">
+                    <div className="font-semibold">Deselect</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                      Clear the current cell selection. Equivalent to
+                      pressing Escape in the canvas.
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <button
+              type="button"
+              aria-label="Deselect cell"
+              onClick={deselect}
+              className={[
+                "shrink-0 w-6 inline-flex items-center justify-center",
+                "h-5 rounded border text-(--color-fg-secondary)",
+                "border-(--color-border-strong) bg-transparent",
+                "hover:text-(--color-fg-primary) hover:border-amber-500/60",
+                "transition-colors",
+              ].join(" ")}
+            >
+              <X size={11} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        </header>
+        <div className="text-[11px] text-(--color-fg-muted) text-center px-2 mt-2">
+          Empty cell at ({selected.x}, {selected.y})
+          <div className="text-[10px] mt-1">
+            Paint a tile to begin editing properties.
+          </div>
         </div>
       </div>
     );
@@ -478,11 +628,7 @@ export function CellInspectorPanel(): React.JSX.Element {
           >
             <TextInput
               value={cell.type}
-              onChange={(e) =>
-                setCell((prev) =>
-                  prev ? { ...prev, type: e.target.value } : prev,
-                )
-              }
+              onChange={(e) => setType(e.target.value)}
               aria-label="Cell type"
             />
           </Tooltip>
@@ -636,9 +782,7 @@ export function CellInspectorPanel(): React.JSX.Element {
           <div className="flex-1 min-w-0">
             <NumberInput
               value={cell.height}
-              onChange={(next) =>
-                setCell((prev) => (prev ? { ...prev, height: next } : prev))
-              }
+              onChange={(next) => setHeight(next)}
               precision={2}
               step={0.1}
               min={0}
@@ -685,8 +829,9 @@ export function CellInspectorPanel(): React.JSX.Element {
                 <div className="max-w-[400px]">
                   <div className="font-semibold">Active Layer</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    The render layer this cell's tile belongs to.
-                    Changing this moves the cell between layers.
+                    Switches which layer the inspector surfaces. The
+                    Type field shows the tile preset painted on the
+                    chosen layer for this cell.
                   </div>
                 </div>
               ),
@@ -696,11 +841,7 @@ export function CellInspectorPanel(): React.JSX.Element {
           <div className="relative">
             <select
               value={cell.layer}
-              onChange={(e) =>
-                setCell((prev) =>
-                  prev ? { ...prev, layer: e.target.value } : prev,
-                )
-              }
+              onChange={(e) => changeActiveLayer(e.target.value)}
               className={[
                 "w-full appearance-none rounded-md border bg-(--color-bg-card)",
                 "border-(--color-border-strong) text-(--color-fg-primary)",
@@ -709,16 +850,11 @@ export function CellInspectorPanel(): React.JSX.Element {
               ].join(" ")}
               aria-label="Cell layer"
             >
-              {MOCK_LAYERS.map((l) => (
+              {layerOptions.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
                 </option>
               ))}
-              {/* If the cell references a layer not in MOCK_LAYERS, keep
-                  it as an option so we don't silently lose it. */}
-              {MOCK_LAYERS.every((l) => l.id !== cell.layer) && (
-                <option value={cell.layer}>{cell.layer}</option>
-              )}
             </select>
             <ChevronDown
               size={10}
