@@ -464,3 +464,85 @@ export const MOCK_HISTORY = [
     description: "Hid the Lights layer.",
   },
 ] as const satisfies readonly HistoryEntryRow[];
+
+// ---------------------------------------------------------------------------
+// Prefabs
+
+export type PrefabCategory = "enemy" | "item" | "trigger" | "decor" | "spawn";
+
+export interface PrefabRow {
+  id: string;
+  name: string;
+  category: PrefabCategory;
+  description: string;
+}
+
+export const MOCK_PREFABS = [
+  { id: "prefab-grunt", name: "Grunt", category: "enemy", description: "Basic melee enemy. Patrols a fixed path." },
+  { id: "prefab-sniper", name: "Sniper", category: "enemy", description: "Long-range hitscan enemy. Telegraphs before firing." },
+  { id: "prefab-bossA", name: "Boss A", category: "enemy", description: "Level boss with multi-stage attack patterns." },
+  { id: "prefab-medkit", name: "Medkit", category: "item", description: "Restores 25 HP on pickup." },
+  { id: "prefab-armor", name: "Armor", category: "item", description: "Grants 50 armor on pickup." },
+  { id: "prefab-keycard", name: "Keycard", category: "item", description: "Unlocks doors of matching color." },
+  { id: "prefab-trigger-door", name: "Door Trigger", category: "trigger", description: "Opens a tagged door when entered." },
+  { id: "prefab-trigger-checkpoint", name: "Checkpoint", category: "trigger", description: "Saves player progress when crossed." },
+  { id: "prefab-spawn-player", name: "Player Spawn", category: "spawn", description: "Marks a valid player spawn point." },
+  { id: "prefab-spawn-enemy", name: "Enemy Spawn", category: "spawn", description: "Marks an enemy spawn point — can be wave-triggered." },
+  { id: "prefab-decor-torch", name: "Torch", category: "decor", description: "Wall-mounted light source with flicker." },
+  { id: "prefab-decor-banner", name: "Banner", category: "decor", description: "Hanging banner. Pure decoration." },
+] as const satisfies readonly PrefabRow[];
+
+// ---------------------------------------------------------------------------
+// Lights
+
+export type LightKind = "point" | "spot" | "directional" | "area";
+
+export interface LightRow {
+  id: string;
+  name: string;
+  kind: LightKind;
+  position: { x: number; y: number; z: number };
+  /** 6-digit `#RRGGBB` hex color of the light. */
+  color: string;
+  /** 0..10 brightness multiplier. */
+  intensity: number;
+  enabled: boolean;
+  description: string;
+}
+
+export const MOCK_LIGHTS = [
+  { id: "light-sun", name: "Sun", kind: "directional", position: { x: 0, y: 50, z: 0 }, color: "#fef9c3", intensity: 1.0, enabled: true, description: "Primary scene sunlight. Cast direction from above." },
+  { id: "light-torch-1", name: "Torch 1", kind: "point", position: { x: 12, y: 2, z: 7 }, color: "#fb923c", intensity: 2.5, enabled: true, description: "Wall torch near the entrance. Flickers." },
+  { id: "light-torch-2", name: "Torch 2", kind: "point", position: { x: 24, y: 2, z: 7 }, color: "#fb923c", intensity: 2.5, enabled: true, description: "Wall torch in the corridor." },
+  { id: "light-spotlight-boss", name: "Boss Spotlight", kind: "spot", position: { x: 40, y: 6, z: 40 }, color: "#a78bfa", intensity: 4.0, enabled: false, description: "Dramatic spot on the boss arena. Triggers on encounter." },
+  { id: "light-ambient-pit", name: "Pit Ambient", kind: "area", position: { x: 20, y: 0, z: 20 }, color: "#22d3ee", intensity: 1.2, enabled: true, description: "Cool fill light in the pit chamber." },
+] as const satisfies readonly LightRow[];
+
+// ---------------------------------------------------------------------------
+// Asset references
+
+export type AssetKind = "texture" | "sound" | "music" | "prefab" | "script";
+
+export interface AssetRefRow {
+  id: string;
+  name: string;
+  kind: AssetKind;
+  path: string;
+  /** Number of references to this asset across the scene. */
+  refCount: number;
+  /** Whether the asset is missing on disk. */
+  missing: boolean;
+  description: string;
+}
+
+export const MOCK_ASSETS = [
+  { id: "tex-wall-brick", name: "wall-brick.png", kind: "texture", path: "textures/walls/brick.png", refCount: 142, missing: false, description: "Brick wall texture, 256x256." },
+  { id: "tex-wall-concrete", name: "wall-concrete.png", kind: "texture", path: "textures/walls/concrete.png", refCount: 78, missing: false, description: "Concrete wall texture." },
+  { id: "tex-wall-glass", name: "wall-glass.png", kind: "texture", path: "textures/walls/glass.png", refCount: 4, missing: true, description: "Glass wall texture. MISSING — referenced but not on disk." },
+  { id: "tex-floor-stone", name: "floor-stone.png", kind: "texture", path: "textures/floors/stone.png", refCount: 220, missing: false, description: "Stone floor tile." },
+  { id: "snd-door-open", name: "door-open.ogg", kind: "sound", path: "sounds/door/open.ogg", refCount: 12, missing: false, description: "Door opening SFX." },
+  { id: "snd-grunt-alert", name: "grunt-alert.ogg", kind: "sound", path: "sounds/enemies/grunt-alert.ogg", refCount: 8, missing: false, description: "Grunt enemy alert vocal." },
+  { id: "music-level-01", name: "level-01.mp3", kind: "music", path: "music/level-01.mp3", refCount: 1, missing: false, description: "Level 01 background music loop." },
+  { id: "prefab-barrel-ref", name: "barrel.prefab", kind: "prefab", path: "prefabs/barrel.prefab", refCount: 7, missing: false, description: "Standard barrel prop prefab." },
+  { id: "script-trigger-door", name: "trigger-door.ts", kind: "script", path: "scripts/triggers/door.ts", refCount: 3, missing: false, description: "Door trigger behavior script." },
+] as const satisfies readonly AssetRefRow[];
