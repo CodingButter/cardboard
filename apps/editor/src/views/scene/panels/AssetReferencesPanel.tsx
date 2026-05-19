@@ -13,7 +13,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
-import { ScrollRow } from "../../../components/ui/ScrollRow";
+import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
   MOCK_ASSETS,
@@ -82,7 +82,21 @@ interface FilterMeta {
   id: FilterId;
   name: string;
   description: string;
+  /**
+   * Lucide icon — used for the per-row asset icons (NOT the chip
+   * strip, which uses a coloured dot for parity with the canonical
+   * filter pattern from PrefabBrowser / TilePresetPanel / Output /
+   * Problems).
+   */
   icon: LucideIcon;
+  /** Tailwind colour utility for the chip's leading dot. */
+  dotClass: string;
+  /**
+   * Empty-state description shown when the filter resolves to zero
+   * assets. Keeps the empty-state copy filter-specific without forcing
+   * the renderer to branch on the id.
+   */
+  emptyDescription: string;
 }
 
 const FILTER_META: readonly FilterMeta[] = [
@@ -91,6 +105,8 @@ const FILTER_META: readonly FilterMeta[] = [
     name: "All",
     description: "Every asset referenced by the scene, regardless of kind.",
     icon: LayersIcon,
+    dotClass: "bg-zinc-500",
+    emptyDescription: "No assets referenced by the scene yet.",
   },
   {
     id: "missing",
@@ -98,36 +114,49 @@ const FILTER_META: readonly FilterMeta[] = [
     description:
       "Only assets that are referenced but not present on disk — fix these to avoid runtime errors.",
     icon: TriangleAlert,
+    dotClass: "bg-red-500",
+    emptyDescription:
+      "No missing assets — every reference resolves on disk.",
   },
   {
     id: "texture",
     name: "Textures",
     description: "Image assets used for wall, floor, ceiling, and sprite faces.",
     icon: Image,
+    dotClass: "bg-sky-400",
+    emptyDescription: "No textures referenced.",
   },
   {
     id: "sound",
     name: "Sounds",
     description: "Sound effect clips triggered by entities, doors, weapons, etc.",
     icon: Volume2,
+    dotClass: "bg-emerald-400",
+    emptyDescription: "No sounds referenced.",
   },
   {
     id: "music",
     name: "Music",
     description: "Background music tracks looped during gameplay.",
     icon: Music,
+    dotClass: "bg-violet-400",
+    emptyDescription: "No musics referenced.",
   },
   {
     id: "prefab",
     name: "Prefabs",
     description: "Reusable entity templates instantiated by the scene.",
     icon: Box,
+    dotClass: "bg-amber-500",
+    emptyDescription: "No prefabs referenced.",
   },
   {
     id: "script",
     name: "Scripts",
     description: "Behaviour scripts attached to triggers, entities, and macros.",
     icon: FileCode,
+    dotClass: "bg-zinc-400",
+    emptyDescription: "No scripts referenced.",
   },
 ] as const;
 
@@ -158,10 +187,37 @@ function findAsset(id: string): AssetRefRow | undefined {
 //   ≥ COMPACT  — full row: icon + name + path + ref-count + missing dot
 //   < COMPACT  — drop the subdued path
 //   < TINY     — drop the ref count too: icon + name + missing dot
-// Filter chip strip survives every width via ScrollRow's hover-area.
+// Filter chip strip uses flex-wrap so chips spill onto a second row
+// at narrow widths instead of horizontally scrolling — filter chips
+// are primary navigation and must be visible at a glance.
 
 const COMPACT_WIDTH_PX = 220;
 const TINY_WIDTH_PX = 150;
+
+/**
+ * Per-filter counts (incl. the "all" + "missing" pseudo-filters). Memo
+ * deps are empty because MOCK_ASSETS is a module-level const today; the
+ * memo will need to depend on the real asset registry once that lands.
+ */
+function useFilterCounts(): Record<FilterId, number> {
+  return React.useMemo(() => {
+    const all = MOCK_ASSETS as readonly AssetRefRow[];
+    const counts: Record<FilterId, number> = {
+      all: all.length,
+      missing: 0,
+      texture: 0,
+      sound: 0,
+      music: 0,
+      prefab: 0,
+      script: 0,
+    };
+    for (const a of all) {
+      counts[a.kind] += 1;
+      if (a.missing) counts.missing += 1;
+    }
+    return counts;
+  }, []);
+}
 
 // ---------------------------------------------------------------------------
 // Panel
@@ -323,11 +379,7 @@ export function AssetReferencesPanel(): React.JSX.Element {
     return all.filter((a) => a.kind === filter);
   }, [filter]);
 
-  const missingCount = React.useMemo(
-    () =>
-      (MOCK_ASSETS as readonly AssetRefRow[]).filter((a) => a.missing).length,
-    [],
-  );
+  const counts = useFilterCounts();
 
   // ---- Render ------------------------------------------------------------
 
@@ -343,7 +395,7 @@ export function AssetReferencesPanel(): React.JSX.Element {
     >
       <HeaderRow
         filter={filter}
-        missingCount={missingCount}
+        counts={counts}
         onFilterClick={handleFilterClick}
         onRefresh={handleRefresh}
       />
@@ -354,6 +406,7 @@ export function AssetReferencesPanel(): React.JSX.Element {
           activeId={activeId}
           compact={compact}
           tiny={tiny}
+          filter={filter}
           onFocus={handleFocus}
         />
       </div>
@@ -366,80 +419,88 @@ export function AssetReferencesPanel(): React.JSX.Element {
 
 interface HeaderRowProps {
   filter: FilterId;
-  missingCount: number;
+  counts: Record<FilterId, number>;
   onFilterClick: (next: FilterId) => void;
   onRefresh: () => void;
 }
 
+/**
+ * Wrapping filter chip strip + a trailing refresh button. Uses
+ * `flex flex-wrap` so chips spill onto a second row at narrow panel
+ * widths instead of horizontally scrolling — filter chips are primary
+ * navigation and must be visible at a glance, per project convention.
+ *
+ * Mirrors the canonical PrefabBrowser / TilePresetPanel / Output /
+ * Problems chip pattern: coloured dot + uppercase label + `(N)` count,
+ * sized at `px-2 py-1 text-[10px]`. No icon prefix — the Lucide kind
+ * icons still live on the asset row itself where they identify
+ * content.
+ */
 function HeaderRow({
   filter,
-  missingCount,
+  counts,
   onFilterClick,
   onRefresh,
 }: HeaderRowProps): React.JSX.Element {
   return (
-    <div className="shrink-0 flex items-center gap-1 h-7">
-      <div className="flex-1 min-w-0 h-full">
-        <ScrollRow contentClassName="flex items-center gap-1">
-          {FILTER_META.map((f) => {
-            const active = f.id === filter;
-            const Icon = f.icon;
-            const isMissing = f.id === "missing";
-            // Subtle ambient badge so users can tell at a glance how
-            // many missing assets exist without flipping the filter.
-            const showMissingBadge = isMissing && missingCount > 0;
-            return (
-              <Tooltip
-                key={f.id}
-                side="bottom"
-                stages={[
-                  { delay: 1000, content: <span>{f.name}</span> },
-                  {
-                    delay: 3000,
-                    content: (
-                      <div>
-                        <div className="font-semibold">{f.name}</div>
-                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                          {f.description}
-                        </div>
+    <div className="shrink-0 flex items-start gap-1">
+      <div className="flex-1 min-w-0 flex flex-wrap items-center gap-1">
+        {FILTER_META.map((f) => {
+          const active = f.id === filter;
+          const count = counts[f.id];
+          return (
+            <Tooltip
+              key={f.id}
+              side="bottom"
+              stages={[
+                { delay: 1000, content: <span>{`Filter: ${f.name}`}</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">{`Filter: ${f.name}`}</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        {f.description}
                       </div>
-                    ),
-                  },
-                ]}
+                    </div>
+                  ),
+                },
+              ]}
+            >
+              <button
+                type="button"
+                aria-label={`Filter ${f.name}`}
+                aria-pressed={active}
+                onClick={() => onFilterClick(f.id)}
+                className={[
+                  "shrink-0 inline-flex items-center gap-1",
+                  "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide",
+                  "border transition-colors whitespace-nowrap",
+                  active
+                    ? "bg-amber-500 border-amber-500 text-zinc-950"
+                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                ].join(" ")}
               >
-                <button
-                  type="button"
-                  aria-label={`Filter ${f.name}`}
-                  aria-pressed={active}
-                  onClick={() => onFilterClick(f.id)}
+                <span
+                  aria-hidden="true"
                   className={[
-                    "shrink-0 inline-flex items-center gap-1",
-                    "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                    "border transition-colors",
-                    active
-                      ? isMissing
-                        ? "bg-amber-500 border-amber-500 text-zinc-950"
-                        : "bg-amber-500 border-amber-500 text-zinc-950"
-                      : isMissing && missingCount > 0
-                        ? "bg-transparent border-amber-500/40 text-amber-300 hover:border-amber-500/80"
-                        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                    "inline-block w-1.5 h-1.5 rounded-full",
+                    f.dotClass,
+                  ].join(" ")}
+                />
+                <span>{f.name}</span>
+                <span
+                  className={[
+                    "tabular-nums",
+                    active ? "text-zinc-950/70" : "text-(--color-fg-muted)",
                   ].join(" ")}
                 >
-                  <Icon size={10} aria-hidden="true" />
-                  <span>{f.name}</span>
-                  {showMissingBadge && !active ? (
-                    <span
-                      className="ml-0.5 rounded-full bg-amber-500/30 text-amber-200 px-1 leading-tight"
-                      aria-hidden="true"
-                    >
-                      {missingCount}
-                    </span>
-                  ) : null}
-                </button>
-              </Tooltip>
-            );
-          })}
-        </ScrollRow>
+                  ({count})
+                </span>
+              </button>
+            </Tooltip>
+          );
+        })}
       </div>
 
       <Tooltip
@@ -488,20 +549,36 @@ interface AssetListProps {
   activeId: string;
   compact: boolean;
   tiny: boolean;
+  filter: FilterId;
   onFocus: (assetId: string) => void;
 }
 
+/**
+ * Vertical list of asset rows. Empty state uses the shared
+ * `<EmptyState/>` component so this panel scans identically to the
+ * rest of the editor's empty surfaces, with a filter-specific
+ * description so the user knows whether the list is empty because the
+ * scene has no assets, or because the current filter excludes them
+ * all.
+ */
 function AssetList({
   assets,
   activeId,
   compact,
   tiny,
+  filter,
   onFocus,
 }: AssetListProps): React.JSX.Element {
   if (assets.length === 0) {
+    const meta =
+      FILTER_META.find((f) => f.id === filter) ?? FILTER_META[0]!;
     return (
-      <div className="text-[10px] text-(--color-fg-muted) px-1 py-2">
-        No assets match this filter.
+      <div className="h-full flex items-center justify-center">
+        <EmptyState
+          icon={<Link size={28} />}
+          title="No assets match this filter"
+          description={meta.emptyDescription}
+        />
       </div>
     );
   }
@@ -577,10 +654,14 @@ function AssetRow({
         className={[
           "w-full flex items-center gap-1.5 min-h-[24px] px-1.5 rounded text-left",
           "border transition-colors",
+          // Missing rows ALWAYS carry a thick red left edge so the
+          // "missing on disk" signal survives both inactive and active
+          // states. Top/right/bottom borders switch to amber on active
+          // selection while `border-l-red-500` wins via the override.
           asset.missing
             ? active
-              ? "bg-amber-500/15 border-amber-500"
-              : "bg-amber-500/[0.06] border-l-2 border-l-amber-500/70 border-(--color-border-strong) hover:border-amber-500/60"
+              ? "bg-amber-500/15 border-amber-500 border-l-2 border-l-red-500"
+              : "bg-red-500/[0.06] border-l-2 border-l-red-500/70 border-(--color-border-strong) hover:border-amber-500/60"
             : active
               ? "bg-amber-500/10 border-amber-500"
               : "bg-transparent border-(--color-border-strong) hover:border-amber-500/40",
