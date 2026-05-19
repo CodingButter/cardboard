@@ -16,6 +16,7 @@ import type { PackManifest } from "@two_5_d/engine";
 import { HomeScreen } from "../views/HomeScreen";
 import { ProjectView, type WorkflowMode } from "../views/ProjectView";
 import { MapView } from "../views/MapView";
+import { PrefabsView } from "../views/PrefabsView";
 import { ProjectTabView } from "../views/project/ProjectTabView";
 import { AssetsView } from "../views/AssetsView";
 import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
@@ -872,6 +873,17 @@ function ShellBody({
     return (
       <div className="h-full overflow-hidden">
         <MapView key={`scene::${projectId}`} />
+      </div>
+    );
+  }
+
+  // Prefabs tab routes to PrefabsView — the dockview-driven entity
+  // definition editor mirroring `Editor Design/Entities.png`. Wave 1
+  // ships the shell + empty panel stubs; Wave 2 fills the bodies.
+  if (tab === "prefabs") {
+    return (
+      <div className="h-full overflow-hidden">
+        <PrefabsView key={`prefabs::${projectId}`} />
       </div>
     );
   }
