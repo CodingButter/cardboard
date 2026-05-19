@@ -23,6 +23,7 @@ import { ScriptsView } from "../views/ScriptsView";
 import { ComponentsView } from "../views/ComponentsView";
 import { EditorSettingsModal } from "../views/EditorSettingsModal";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Tooltip } from "../components/ui/Tooltip";
 import { StatusBarProvider } from "./StatusBarContext";
 import { TopBar } from "./TopBar";
 import {
@@ -777,12 +778,31 @@ function ShellBody({
           title="No project open"
           description="Choose a project from the Home tab to work in this view."
           action={
-            <button
-              onClick={onNavigateHome}
-              className="inline-flex items-center justify-center rounded-md bg-amber-500 text-zinc-950 hover:bg-amber-400 h-8 px-3 text-xs font-medium"
+            <Tooltip
+              stages={[
+                { delay: 1000, content: <span>Go to Home</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">Go to Home</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Switches to the Home tab where you can open or
+                        create a project. The rest of the editor needs an
+                        open project to render meaningful content.
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
             >
-              Go to Home
-            </button>
+              <button
+                onClick={onNavigateHome}
+                className="inline-flex items-center justify-center rounded-md bg-amber-500 text-zinc-950 hover:bg-amber-400 h-8 px-3 text-xs font-medium"
+              >
+                Go to Home
+              </button>
+            </Tooltip>
           }
         />
       </div>

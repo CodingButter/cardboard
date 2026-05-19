@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Kbd } from "../ui/Kbd";
+import { Tooltip } from "../ui/Tooltip";
 import {
   useCommandStore,
   useCommandList,
@@ -339,40 +340,63 @@ function PaletteRow({ row, selected, onSelect, onRun }: PaletteRowProps) {
   const keybinding = row.kind === "command" ? row.cmd.keybinding : undefined;
   const description = row.kind === "command" ? row.cmd.description : undefined;
 
+  const stages = [
+    { delay: 1000, content: <span>{title}</span> },
+    {
+      delay: 3000,
+      content: (
+        <div>
+          <div className="font-semibold">{title}</div>
+          {description ? (
+            <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+              {description}
+            </div>
+          ) : null}
+          {category ? (
+            <div className="text-[10px] text-(--color-fg-muted) mt-1 italic">
+              {category}
+            </div>
+          ) : null}
+        </div>
+      ),
+    },
+  ];
+
   return (
-    <button
-      ref={rowRef}
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onMouseEnter={onSelect}
-      onClick={onRun}
-      title={description}
-      className={cn(
-        "w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px]",
-        "border-l-2",
-        selected
-          ? "bg-amber-500/10 border-amber-400 text-zinc-100"
-          : "border-transparent text-zinc-300 hover:bg-zinc-800/40",
-      )}
-    >
-      <span className="w-4 h-4 inline-flex items-center justify-center text-zinc-400 shrink-0">
-        {icon ?? <ChevronRight size={12} />}
-      </span>
-      <span className="flex-1 truncate">
-        <HighlightedText text={title} matches={row.matches} />
-      </span>
-      {category && (
-        <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800/60 shrink-0">
-          {category}
+    <Tooltip stages={stages} side="right">
+      <button
+        ref={rowRef}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        onMouseEnter={onSelect}
+        onClick={onRun}
+        className={cn(
+          "w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px]",
+          "border-l-2",
+          selected
+            ? "bg-amber-500/10 border-amber-400 text-zinc-100"
+            : "border-transparent text-zinc-300 hover:bg-zinc-800/40",
+        )}
+      >
+        <span className="w-4 h-4 inline-flex items-center justify-center text-zinc-400 shrink-0">
+          {icon ?? <ChevronRight size={12} />}
         </span>
-      )}
-      {keybinding && (
-        <span className="text-[10px] text-zinc-400 shrink-0">
-          <Kbd>{formatKeybinding(keybinding)}</Kbd>
+        <span className="flex-1 truncate">
+          <HighlightedText text={title} matches={row.matches} />
         </span>
-      )}
-    </button>
+        {category && (
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800/60 shrink-0">
+            {category}
+          </span>
+        )}
+        {keybinding && (
+          <span className="text-[10px] text-zinc-400 shrink-0">
+            <Kbd>{formatKeybinding(keybinding)}</Kbd>
+          </span>
+        )}
+      </button>
+    </Tooltip>
   );
 }
 

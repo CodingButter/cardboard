@@ -1,5 +1,6 @@
 import React from "react";
 import { DropdownMenu } from "../../components/ui/DropdownMenu";
+import { Tooltip } from "../../components/ui/Tooltip";
 import { useActiveScene } from "../../shell/ActiveSceneContext";
 
 /**
@@ -39,13 +40,28 @@ export function SceneTabContextPicker(): React.JSX.Element {
   const currentSceneId = sceneOption?.path ?? "";
   const disabled = scenes.length === 0;
 
+  const tipShort = disabled ? "No scenes yet" : "Active scene";
+  const tipLong = disabled
+    ? "This project has no scenes/*.json assets yet. Add one from the Assets tab to populate this picker."
+    : `Switch the scene tab's active scene. Currently showing ${sceneName || "—"}.`;
   return (
-    <div
-      className="flex items-center gap-2"
-      title={
-        disabled ? "This project has no scenes/*.json assets yet." : undefined
-      }
+    <Tooltip
+      stages={[
+        { delay: 1000, content: <span>{tipShort}</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">{tipShort}</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                {tipLong}
+              </div>
+            </div>
+          ),
+        },
+      ]}
     >
+    <div className="flex items-center gap-2">
       <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500 font-semibold">
         Scene
       </span>
@@ -70,6 +86,7 @@ export function SceneTabContextPicker(): React.JSX.Element {
         width={224}
       />
     </div>
+    </Tooltip>
   );
 }
 

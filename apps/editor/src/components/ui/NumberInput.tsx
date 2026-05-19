@@ -1,5 +1,38 @@
 import React from "react";
 import { cn } from "../../lib/cn";
+import { Tooltip } from "./Tooltip";
+
+const STEPPER_STAGES_UP = [
+  { delay: 1000, content: <span>Increment</span> },
+  {
+    delay: 3000,
+    content: (
+      <div>
+        <div className="font-semibold">Increment</div>
+        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+          Bumps the value up by one step. Hold Shift while clicking to
+          step by 10. Respects the field's min/max clamp.
+        </div>
+      </div>
+    ),
+  },
+];
+
+const STEPPER_STAGES_DOWN = [
+  { delay: 1000, content: <span>Decrement</span> },
+  {
+    delay: 3000,
+    content: (
+      <div>
+        <div className="font-semibold">Decrement</div>
+        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+          Bumps the value down by one step. Hold Shift while clicking to
+          step by 10. Respects the field's min/max clamp.
+        </div>
+      </div>
+    ),
+  },
+];
 
 /**
  * NumberInput — Phase 1 primitive.
@@ -132,30 +165,34 @@ export function NumberInput({
       </div>
       {showSteppers && (
         <div className="inline-flex flex-col shrink-0">
-          <button
-            type="button"
-            tabIndex={-1}
-            disabled={disabled}
-            onClick={() => bump(1)}
-            aria-label="Increment"
-            className="icon-button w-5 h-4 rounded-sm"
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M6 15l6-6 6 6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            tabIndex={-1}
-            disabled={disabled}
-            onClick={() => bump(-1)}
-            aria-label="Decrement"
-            className="icon-button w-5 h-4 rounded-sm"
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
+          <Tooltip stages={STEPPER_STAGES_UP}>
+            <button
+              type="button"
+              tabIndex={-1}
+              disabled={disabled}
+              onClick={() => bump(1)}
+              aria-label="Increment"
+              className="icon-button w-5 h-4 rounded-sm"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 15l6-6 6 6" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip stages={STEPPER_STAGES_DOWN}>
+            <button
+              type="button"
+              tabIndex={-1}
+              disabled={disabled}
+              onClick={() => bump(-1)}
+              aria-label="Decrement"
+              className="icon-button w-5 h-4 rounded-sm"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
       )}
     </div>

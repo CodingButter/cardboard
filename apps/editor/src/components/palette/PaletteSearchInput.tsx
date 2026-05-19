@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { usePaletteUI } from "./CommandPalette";
 import { isMacOS } from "../../lib/keybinding";
+import { Tooltip } from "../ui/Tooltip";
 
 /**
  * PaletteSearchInput — the TopBar's centred search affordance.
@@ -20,31 +21,49 @@ import { isMacOS } from "../../lib/keybinding";
 export function PaletteSearchInput() {
   const open = usePaletteUI((s) => s.openPalette);
   return (
-    <button
-      type="button"
-      onClick={() => open("file")}
-      className={cn(
-        "group relative h-7 w-full inline-flex items-center gap-2 px-2.5",
-        "rounded-md bg-(--color-bg-card) border border-(--color-border)",
-        "text-[12px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600",
-        "focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60",
-        "transition-colors",
-      )}
-      title="Search files (Ctrl+P) • commands (Ctrl+Shift+P)"
-      aria-label="Open command palette"
+    <Tooltip
+      stages={[
+        { delay: 1000, content: <span>Search files & commands</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">Search files & commands</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                Opens the command palette — files (Ctrl+P) or commands
+                (Ctrl+Shift+P). Fuzzy-matches everything you can do in the
+                editor.
+              </div>
+            </div>
+          ),
+        },
+      ]}
     >
-      <Search size={12} className="text-zinc-500 shrink-0" />
-      <span className="flex-1 text-left truncate">Search files & commands…</span>
-      <span
-        aria-hidden="true"
+      <button
+        type="button"
+        onClick={() => open("file")}
         className={cn(
-          "ml-2 inline-flex items-center px-1 py-0.5 rounded",
-          "text-[10px] font-mono text-zinc-500 border border-zinc-700/80",
-          "group-hover:text-zinc-300 group-hover:border-zinc-600",
+          "group relative h-7 w-full inline-flex items-center gap-2 px-2.5",
+          "rounded-md bg-(--color-bg-card) border border-(--color-border)",
+          "text-[12px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600",
+          "focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60",
+          "transition-colors",
         )}
+        aria-label="Open command palette"
       >
-        {isMacOS() ? "⌘P" : "Ctrl+P"}
-      </span>
-    </button>
+        <Search size={12} className="text-zinc-500 shrink-0" />
+        <span className="flex-1 text-left truncate">Search files & commands…</span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            "ml-2 inline-flex items-center px-1 py-0.5 rounded",
+            "text-[10px] font-mono text-zinc-500 border border-zinc-700/80",
+            "group-hover:text-zinc-300 group-hover:border-zinc-600",
+          )}
+        >
+          {isMacOS() ? "⌘P" : "Ctrl+P"}
+        </span>
+      </button>
+    </Tooltip>
   );
 }

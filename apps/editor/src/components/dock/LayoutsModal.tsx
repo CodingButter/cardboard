@@ -5,6 +5,7 @@ import type { DockviewApi, SerializedDockview } from "dockview";
 import { cn } from "../../lib/cn";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
+import { Tooltip } from "../ui/Tooltip";
 import { LayoutSkeleton } from "./LayoutSkeleton";
 import {
   useWorkspaceStore,
@@ -168,6 +169,24 @@ function LayoutCard({
 
   return (
     <>
+      <Tooltip
+        stages={[
+          { delay: 1000, content: <span>{name}</span> },
+          {
+            delay: 3000,
+            content: (
+              <div>
+                <div className="font-semibold">{name}</div>
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                  {builtIn
+                    ? `Built-in workspace layout. Click to apply ${name} to the current page. Built-ins can't be edited or deleted.`
+                    : `Saved workspace preset. Click to restore this layout. Right-click or use the kebab menu to rename or delete.`}
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      >
       <button
         type="button"
         data-layouts-card={id}
@@ -181,7 +200,6 @@ function LayoutCard({
             ? "border-(--color-accent) bg-(--color-accent)/10"
             : "border-(--color-border) hover:border-(--color-border-strong) bg-(--color-bg-card)",
         )}
-        title={name}
       >
         {/* Thumbnail */}
         <div
@@ -241,6 +259,23 @@ function LayoutCard({
             />
           ) : null}
           {!builtIn ? (
+            <Tooltip
+              stages={[
+                { delay: 1000, content: <span>More actions</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">More actions</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Rename or delete the {name} preset. Right-clicking the
+                        card also opens this menu.
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            >
             <span
               role="button"
               tabIndex={0}
@@ -265,9 +300,11 @@ function LayoutCard({
             >
               <MoreVertical size={14} />
             </span>
+            </Tooltip>
           ) : null}
         </div>
       </button>
+      </Tooltip>
 
       {menu.kind === "confirm-delete"
         ? createPortal(
@@ -462,36 +499,64 @@ export function LayoutsModal({
          *   - "Resave Current" enables only when there's an applied
          *     user preset AND the live layout differs from it. */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onSaveAsNew}
-            disabled={matchedPresetId !== null}
-            title={
-              matchedPresetId !== null
-                ? "Current layout already matches a saved layout"
-                : "Save the current layout as a new preset"
-            }
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Save current as new</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">Save current as new</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      {matchedPresetId !== null
+                        ? "Current layout already matches a saved layout — no point creating a duplicate."
+                        : "Captures the current dockview layout (panel positions + sizes) as a new user preset for this page."}
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
           >
-            <Plus size={14} className="mr-1" />
-            Save current as new
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onResave}
-            disabled={!activeUserPresetDirty}
-            title={
-              activeUserPreset == null
-                ? "Apply a saved layout first to enable resave"
-                : !activeUserPresetDirty
-                  ? `"${activeUserPreset.name}" already matches the current layout`
-                  : `Overwrite "${activeUserPreset.name}" with the current layout`
-            }
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={onSaveAsNew}
+              disabled={matchedPresetId !== null}
+            >
+              <Plus size={14} className="mr-1" />
+              Save current as new
+            </Button>
+          </Tooltip>
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Resave current</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">Resave current</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      {activeUserPreset == null
+                        ? "Apply a saved layout first to enable resave."
+                        : !activeUserPresetDirty
+                          ? `"${activeUserPreset.name}" already matches the current layout — nothing to overwrite.`
+                          : `Overwrites "${activeUserPreset.name}" with the current dockview layout.`}
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
           >
-            <Save size={14} className="mr-1" />
-            Resave current
-          </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onResave}
+              disabled={!activeUserPresetDirty}
+            >
+              <Save size={14} className="mr-1" />
+              Resave current
+            </Button>
+          </Tooltip>
         </div>
 
         {/* Card grid */}

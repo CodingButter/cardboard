@@ -3,6 +3,7 @@ import type { DockviewApi } from "dockview";
 import { GripVertical } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Modal } from "../ui/Modal";
+import { Tooltip } from "../ui/Tooltip";
 import type { DockPanelDef } from "./DockShell";
 
 /**
@@ -104,9 +105,31 @@ export function DocksModal({
             }
             onClose();
           };
+          const shortLabel = isMounted
+            ? `${def.title} already in layout`
+            : `Add ${def.title}`;
+          const longLabel = isMounted
+            ? `${def.title} is already mounted in the current page's dockview layout. Close it from its tab strip to be able to re-add it.`
+            : `Adds the ${def.title} panel to the current page. It lands split right of the rightmost group; drag its tab to reposition.`;
           return (
-            <button
+            <Tooltip
               key={def.id}
+              stages={[
+                { delay: 1000, content: <span>{shortLabel}</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">{shortLabel}</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        {longLabel}
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            >
+            <button
               type="button"
               onClick={onAdd}
               disabled={isMounted}
@@ -118,11 +141,6 @@ export function DocksModal({
                   ? "border-(--color-border) bg-(--color-bg-card) opacity-60 cursor-not-allowed"
                   : "border-(--color-border) bg-(--color-bg-card) hover:border-(--color-border-strong) cursor-pointer",
               )}
-              title={
-                isMounted
-                  ? `${def.title} is already in the layout`
-                  : `Add ${def.title} to the layout`
-              }
             >
               {/* Large icon block */}
               <div
@@ -153,6 +171,7 @@ export function DocksModal({
                 </span>
               )}
             </button>
+            </Tooltip>
           );
         })}
       </div>

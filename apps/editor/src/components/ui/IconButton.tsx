@@ -1,12 +1,18 @@
 import React from "react";
 import { cn } from "../../lib/cn";
+import { Tooltip } from "./Tooltip";
 
 /**
  * IconButton — §4.9.
  *
  * Icon-only button. The `tooltip` prop is the accessible name AND the
- * hover hint. In R2 we use the browser-native `title` attribute; R5
- * polish swaps the wrapper for the `Tooltip` primitive.
+ * hover hint, wired through the project's progressive `Tooltip`
+ * primitive (1s short label, 3s label + description). The optional
+ * `description` prop drives the second-stage longer copy; if omitted
+ * the tooltip stays as the single short label.
+ *
+ * No native `title=` attribute is used — that would conflict with the
+ * portal-rendered tooltip body.
  */
 
 type IconButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -17,7 +23,10 @@ export interface IconButtonProps
     "children" | "title"
   > {
   icon: React.ReactNode;
+  /** Short label — used for stage-1 tooltip + aria-label. */
   tooltip: string;
+  /** Optional longer description shown in the stage-2 tooltip. */
+  description?: string;
   variant?: IconButtonVariant;
   /** sm = 32x32, md = 36x36. */
   size?: "sm" | "md";
@@ -36,14 +45,29 @@ const VARIANT_CLASSES: Record<IconButtonVariant, string> = {
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   function IconButton(
-    { icon, tooltip, variant = "ghost", size = "sm", className, ...rest },
+    { icon, tooltip, description, variant = "ghost", size = "sm", className, ...rest },
     ref,
   ) {
-    return (
+    const stages = [
+      { delay: 1000, content: <span>{tooltip}</span> },
+      {
+        delay: 3000,
+        content: (
+          <div>
+            <div className="font-semibold">{tooltip}</div>
+            {description ? (
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                {description}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+    ];
+    const button = (
       <button
         ref={ref}
         type="button"
-        title={tooltip}
         aria-label={tooltip}
         className={cn(
           "inline-flex items-center justify-center rounded-md",
@@ -60,5 +84,6 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
         </span>
       </button>
     );
+    return <Tooltip stages={stages}>{button}</Tooltip>;
   },
 );

@@ -645,7 +645,6 @@ function AssetRow({
           <span
             className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500"
             aria-label="Missing on disk"
-            title="Missing on disk"
           />
         ) : null}
       </button>

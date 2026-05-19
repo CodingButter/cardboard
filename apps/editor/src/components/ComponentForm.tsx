@@ -3,6 +3,43 @@ import {
   findComponentSchema,
   type ComponentFieldSpec,
 } from "../lib/componentSchemas";
+import { Tooltip } from "./ui/Tooltip";
+
+/**
+ * Renders a field label with an optional hint exposed via the project's
+ * progressive Tooltip (1s short label, 3s label + hint). When `hint` is
+ * absent the label still renders inside a Tooltip wrapper so hover
+ * behaviour stays consistent across the form.
+ */
+function FieldLabel({
+  label,
+  hint,
+}: {
+  label: string;
+  hint?: string;
+}): React.JSX.Element {
+  const stages = hint
+    ? [
+        { delay: 1000, content: <span>{label}</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">{label}</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                {hint}
+              </div>
+            </div>
+          ),
+        },
+      ]
+    : [{ delay: 1000, content: <span>{label}</span> }];
+  return (
+    <Tooltip stages={stages}>
+      <div className="text-zinc-500 mb-1">{label}</div>
+    </Tooltip>
+  );
+}
 
 /**
  * Schema-driven component form widget.
@@ -146,9 +183,7 @@ export function ComponentField({
       const n = typeof value === "number" ? value : 0;
       return (
         <div>
-          <div className="text-zinc-500 mb-1" title={field.hint}>
-            {label}
-          </div>
+          <FieldLabel label={label} hint={field.hint} />
           <NumberSlider
             value={n}
             onChange={onChange}
@@ -189,9 +224,7 @@ export function ComponentField({
       if (spriteFieldKey && spriteIds && spriteIds.length > 0) {
         return (
           <div>
-            <div className="text-zinc-500 mb-1" title={field.hint}>
-              {label}
-            </div>
+            <FieldLabel label={label} hint={field.hint} />
             <select
               value={s}
               onChange={(e) => onChange(e.target.value)}
@@ -209,9 +242,7 @@ export function ComponentField({
       }
       return (
         <div>
-          <div className="text-zinc-500 mb-1" title={field.hint}>
-            {label}
-          </div>
+          <FieldLabel label={label} hint={field.hint} />
           <input
             value={s}
             onChange={(e) => onChange(e.target.value)}
@@ -270,9 +301,7 @@ export function ComponentField({
       if (!animationNames || animationNames.length === 0) {
         return (
           <div>
-            <div className="text-zinc-500 mb-1" title={field.hint}>
-              {label}
-            </div>
+            <FieldLabel label={label} hint={field.hint} />
             <input
               value={s}
               onChange={(e) => onChange(e.target.value)}
@@ -288,9 +317,7 @@ export function ComponentField({
       }
       return (
         <div>
-          <div className="text-zinc-500 mb-1" title={field.hint}>
-            {label}
-          </div>
+          <FieldLabel label={label} hint={field.hint} />
           <select
             value={s}
             onChange={(e) => onChange(e.target.value)}
@@ -394,13 +421,32 @@ export function ComponentSubform({
             <span className="text-[10px] text-zinc-500">(JSON)</span>
           </div>
           {onRemove ? (
-            <button
-              onClick={onRemove}
-              className="text-[10px] text-zinc-500 hover:text-red-400"
-              title="Remove component"
+            <Tooltip
+              stages={[
+                { delay: 1000, content: <span>Remove component</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">Remove component</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Removes the {name} component from this entity.
+                        Schema-less components fall back to raw JSON
+                        editing — removing here clears all of its fields.
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
             >
-              ✕
-            </button>
+              <button
+                onClick={onRemove}
+                className="text-[10px] text-zinc-500 hover:text-red-400"
+                aria-label="Remove component"
+              >
+                ✕
+              </button>
+            </Tooltip>
           ) : null}
         </div>
         <JsonComponentEditor data={safe} onPatch={onPatch} />
@@ -412,13 +458,32 @@ export function ComponentSubform({
       <div className="flex items-center justify-between">
         <div className="text-zinc-300 font-medium">{name}</div>
         {onRemove ? (
-          <button
-            onClick={onRemove}
-            className="text-[10px] text-zinc-500 hover:text-red-400"
-            title="Remove component"
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Remove component</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">Remove component</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      Removes the {name} component from this entity. The
+                      component's fields are cleared and the entity will
+                      no longer match systems that require {name}.
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
           >
-            ✕
-          </button>
+            <button
+              onClick={onRemove}
+              className="text-[10px] text-zinc-500 hover:text-red-400"
+              aria-label="Remove component"
+            >
+              ✕
+            </button>
+          </Tooltip>
         ) : null}
       </div>
       {header ?? null}

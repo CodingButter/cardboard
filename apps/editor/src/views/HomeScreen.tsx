@@ -51,7 +51,26 @@ import { StatsBlock } from "../components/ui/StatsBlock";
 
 import { useStatusBar } from "../shell/StatusBarContext";
 import type { StatusBarSection } from "../components/ui/StatusBar";
+import { Tooltip } from "../components/ui/Tooltip";
 import { cn } from "../lib/cn";
+
+/** Helper: build the two-stage tooltip stages for a label + description. */
+function tipStages(label: string, description: string) {
+  return [
+    { delay: 1000, content: <span>{label}</span> },
+    {
+      delay: 3000,
+      content: (
+        <div>
+          <div className="font-semibold">{label}</div>
+          <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+            {description}
+          </div>
+        </div>
+      ),
+    },
+  ];
+}
 
 /**
  * Home view — R4a redesign.
@@ -383,32 +402,41 @@ export function HomeScreen({
                   !isCurrent && p.id === mostRecent?.id;
                 return (
                   <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => onOpenProject(p.id)}
-                      aria-current={isCurrent ? "true" : undefined}
-                      className={cn(
-                        "w-full text-left rounded-md px-3 py-2 transition-colors",
-                        "hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+                    <Tooltip
+                      stages={tipStages(
+                        `Open ${p.name}`,
                         isCurrent
-                          ? // Active project (carried in the URL hash) —
-                            // distinct left-accent rail so it stands out
-                            // even when it's also the most-recent item.
-                            "bg-amber-500/15 border border-amber-500/60 border-l-4 border-l-amber-400 text-amber-50"
-                          : isMostRecent
-                            ? "bg-amber-500/5 border border-amber-500/30 text-amber-100"
-                            : "border border-transparent text-zinc-200",
+                          ? `${p.name} is the project you're currently working in. Click to navigate back to its scene editor.`
+                          : `Switch to the ${p.name} project — last modified ${formatRelative(p.modifiedAt)}.`,
                       )}
                     >
-                      <div className="text-sm font-medium truncate">
-                        {p.name}
-                      </div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-                        {isCurrent
-                          ? "Current project"
-                          : formatRelative(p.modifiedAt)}
-                      </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenProject(p.id)}
+                        aria-current={isCurrent ? "true" : undefined}
+                        className={cn(
+                          "w-full text-left rounded-md px-3 py-2 transition-colors",
+                          "hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+                          isCurrent
+                            ? // Active project (carried in the URL hash) —
+                              // distinct left-accent rail so it stands out
+                              // even when it's also the most-recent item.
+                              "bg-amber-500/15 border border-amber-500/60 border-l-4 border-l-amber-400 text-amber-50"
+                            : isMostRecent
+                              ? "bg-amber-500/5 border border-amber-500/30 text-amber-100"
+                              : "border border-transparent text-zinc-200",
+                        )}
+                      >
+                        <div className="text-sm font-medium truncate">
+                          {p.name}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                          {isCurrent
+                            ? "Current project"
+                            : formatRelative(p.modifiedAt)}
+                        </div>
+                      </button>
+                    </Tooltip>
                   </li>
                 );
               })}
@@ -445,13 +473,20 @@ export function HomeScreen({
           <div className="mb-4 rounded-md border border-red-700/60 bg-red-900/30 px-4 py-3 text-sm text-red-200">
             <div className="font-medium">Something went wrong</div>
             <div className="mt-1 text-red-300/90">{error}</div>
-            <button
-              type="button"
-              className="mt-2 text-xs text-red-200 hover:text-white underline underline-offset-2"
-              onClick={() => setError(null)}
+            <Tooltip
+              stages={tipStages(
+                "Dismiss error",
+                "Clears this error banner. The underlying problem isn't retried — re-run the action that failed if you want another attempt.",
+              )}
             >
-              Dismiss
-            </button>
+              <button
+                type="button"
+                className="mt-2 text-xs text-red-200 hover:text-white underline underline-offset-2"
+                onClick={() => setError(null)}
+              >
+                Dismiss
+              </button>
+            </Tooltip>
           </div>
         ) : null}
 
@@ -502,24 +537,38 @@ export function HomeScreen({
                 co-equal entry points (Create vs Open) rather than a
                 primary + afterthought. */}
             <div className="flex gap-2">
-              <Button
-                variant="primary"
-                className="flex-1"
-                onClick={() => setCreateOpen(true)}
-                disabled={busy !== null}
-                leadingIcon={<Plus size={14} />}
+              <Tooltip
+                stages={tipStages(
+                  "New project",
+                  "Opens the project setup dialog — pick a starter template, name your project, and Cardboard seeds it locally in IndexedDB.",
+                )}
               >
-                New project
-              </Button>
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setUrlOpen(true)}
-                disabled={busy !== null}
-                leadingIcon={<LinkIcon size={14} />}
+                <Button
+                  variant="primary"
+                  className="flex-1"
+                  onClick={() => setCreateOpen(true)}
+                  disabled={busy !== null}
+                  leadingIcon={<Plus size={14} />}
+                >
+                  New project
+                </Button>
+              </Tooltip>
+              <Tooltip
+                stages={tipStages(
+                  "Open pack from URL",
+                  "Fetches a .apg pack from a URL and imports it as a new local project. Optional SHA-256 pin verifies integrity before import.",
+                )}
               >
-                Open URL
-              </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => setUrlOpen(true)}
+                  disabled={busy !== null}
+                  leadingIcon={<LinkIcon size={14} />}
+                >
+                  Open URL
+                </Button>
+              </Tooltip>
             </div>
             <FilePicker
               mode="dropzone"
@@ -560,18 +609,24 @@ export function HomeScreen({
                 only the shell's TopBar cog opens it — the shell owns the
                 open/close state. Either lift via a context or expose
                 onOpenSettings through HomeScreenProps when needed. */}
-            <button
-              type="button"
-              disabled
-              className={cn(
-                "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
-                "text-zinc-500 cursor-not-allowed",
+            <Tooltip
+              stages={tipStages(
+                "Editor settings",
+                "Editor settings are only reachable from the gear icon in the top bar. This row is a stub reminder while a dedicated entry point lands.",
               )}
-              title="Open settings from the gear in the top bar"
             >
-              <Settings size={14} />
-              Editor settings (use top-bar gear)
-            </button>
+              <button
+                type="button"
+                disabled
+                className={cn(
+                  "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
+                  "text-zinc-500 cursor-not-allowed",
+                )}
+              >
+                <Settings size={14} />
+                Editor settings (use top-bar gear)
+              </button>
+            </Tooltip>
           </CardContent>
         </Card>
       </aside>
@@ -600,25 +655,39 @@ export function HomeScreen({
         width="md"
         footer={
           <>
-            <Button
-              variant="ghost"
-              disabled={busy === "import-url"}
-              onClick={() => {
-                setUrlOpen(false);
-                setUrlConfirmed(false);
-              }}
+            <Tooltip
+              stages={tipStages(
+                "Cancel",
+                "Closes this dialog without importing. Any URL or hash you typed is discarded.",
+              )}
             >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={
-                busy === "import-url" || !urlInput.trim() || !urlConfirmed
-              }
-              onClick={handleImportUrl}
+              <Button
+                variant="ghost"
+                disabled={busy === "import-url"}
+                onClick={() => {
+                  setUrlOpen(false);
+                  setUrlConfirmed(false);
+                }}
+              >
+                Cancel
+              </Button>
+            </Tooltip>
+            <Tooltip
+              stages={tipStages(
+                "Open pack",
+                "Downloads the pack from the URL, optionally verifies its SHA-256, and imports it as a new local project.",
+              )}
             >
-              {busy === "import-url" ? "Fetching…" : "Open"}
-            </Button>
+              <Button
+                variant="primary"
+                disabled={
+                  busy === "import-url" || !urlInput.trim() || !urlConfirmed
+                }
+                onClick={handleImportUrl}
+              >
+                {busy === "import-url" ? "Fetching…" : "Open"}
+              </Button>
+            </Tooltip>
           </>
         }
       >
@@ -752,16 +821,30 @@ function CreateProjectModal({
       dismissOnEsc={!busy}
       footer={
         <>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
+          <Tooltip
+            stages={tipStages(
+              "Cancel",
+              "Closes the new-project dialog without creating anything.",
+            )}
           >
-            {busy ? "Creating…" : "Create"}
-          </Button>
+            <Button variant="ghost" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+          </Tooltip>
+          <Tooltip
+            stages={tipStages(
+              "Create project",
+              "Creates the project locally in IndexedDB using the selected template, then opens it in the editor.",
+            )}
+          >
+            <Button
+              variant="primary"
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+            >
+              {busy ? "Creating…" : "Create"}
+            </Button>
+          </Tooltip>
         </>
       }
     >
@@ -851,6 +934,12 @@ function TemplateCard({
   onSelect,
 }: TemplateCardProps) {
   return (
+    <Tooltip
+      stages={tipStages(
+        template.displayName,
+        template.description,
+      )}
+    >
     <button
       type="button"
       onClick={onSelect}
@@ -906,6 +995,7 @@ function TemplateCard({
         {template.description}
       </p>
     </button>
+    </Tooltip>
   );
 }
 
@@ -951,6 +1041,12 @@ function ProjectCard({
           The bake step (Project tab in R4f) writes a PNG into IDB; the
           Home view should `<img>` it when present and fall back to this
           radial-gradient placeholder otherwise. */}
+      <Tooltip
+        stages={tipStages(
+          `Open ${project.name}`,
+          `Switches to the ${project.name} project and opens the scene editor. ${current ? "This is your current project." : highlight ? "Most recently modified project." : `Last updated ${formatRelative(project.modifiedAt)}.`}`,
+        )}
+      >
       <button
         type="button"
         onClick={onOpen}
@@ -985,9 +1081,16 @@ function ProjectCard({
           </span>
         </div>
       </button>
+      </Tooltip>
 
       <div className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-2">
+          <Tooltip
+            stages={tipStages(
+              `Open ${project.name}`,
+              `Switches to the ${project.name} project and opens the scene editor.`,
+            )}
+          >
           <button
             type="button"
             onClick={onOpen}
@@ -1000,16 +1103,19 @@ function ProjectCard({
               Updated {formatRelative(project.modifiedAt)}
             </div>
           </button>
+          </Tooltip>
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
             <IconButton
               icon={<Pencil size={14} />}
-              tooltip="Rename"
+              tooltip="Rename project"
+              description={`Renames "${project.name}". The new name must be unique across your local projects.`}
               variant="ghost"
               onClick={onRename}
             />
             <IconButton
               icon={<Trash2 size={14} />}
-              tooltip="Delete"
+              tooltip="Delete project"
+              description={`Permanently removes "${project.name}" and all its assets from your browser's IndexedDB. This cannot be undone.`}
               variant="ghost"
               className="text-red-400 hover:text-red-200 hover:bg-red-900/30"
               onClick={onDelete}
@@ -1025,9 +1131,23 @@ function ProjectCard({
             {
               label: "Source",
               value: project.forkedFrom?.url ? (
-                <span title={project.forkedFrom.url}>URL import</span>
+                <Tooltip
+                  stages={tipStages(
+                    "URL import",
+                    `Imported from ${project.forkedFrom.url}`,
+                  )}
+                >
+                  <span>URL import</span>
+                </Tooltip>
               ) : project.sourcePackId ? (
-                <span title={project.sourcePackId}>Pack fork</span>
+                <Tooltip
+                  stages={tipStages(
+                    "Pack fork",
+                    `Forked from pack ${project.sourcePackId}`,
+                  )}
+                >
+                  <span>Pack fork</span>
+                </Tooltip>
               ) : (
                 <span className="text-zinc-500">Local</span>
               ),
@@ -1053,19 +1173,26 @@ function QuickLink({
   label: string;
 }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      className={cn(
-        "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
-        "text-zinc-300 hover:bg-zinc-800/60 hover:text-amber-300 transition-colors",
+    <Tooltip
+      stages={tipStages(
+        label,
+        `Opens ${href} in a new tab.`,
       )}
     >
-      <span className="text-zinc-500">{icon}</span>
-      <span className="flex-1 truncate">{label}</span>
-      <ExternalLink size={12} className="text-zinc-500" aria-hidden="true" />
-    </a>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        className={cn(
+          "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs",
+          "text-zinc-300 hover:bg-zinc-800/60 hover:text-amber-300 transition-colors",
+        )}
+      >
+        <span className="text-zinc-500">{icon}</span>
+        <span className="flex-1 truncate">{label}</span>
+        <ExternalLink size={12} className="text-zinc-500" aria-hidden="true" />
+      </a>
+    </Tooltip>
   );
 }
 

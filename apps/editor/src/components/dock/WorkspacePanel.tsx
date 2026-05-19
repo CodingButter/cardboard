@@ -541,12 +541,30 @@ export function WorkspaceRail({
        *
        *  pointer-events:none during the idle (non-drag) state keeps
        *  this from intercepting clicks elsewhere on the rail. */}
+      <Tooltip
+        stages={[
+          { delay: 1000, content: <span>Drop to remove panel</span> },
+          {
+            delay: 3000,
+            content: (
+              <div>
+                <div className="font-semibold">Drop to remove panel</div>
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                  Drag a docked panel onto this trash target to close it.
+                  This only appears while a dockview panel drag is in
+                  progress.
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      >
       <button
         type="button"
         ref={trashRef}
         tabIndex={-1}
         aria-hidden={!dragActive}
-        title="Drop here to remove panel"
+        aria-label="Drop here to remove panel"
         // HTML5 drag-and-drop shows the "not-allowed" cursor by
         // default UNLESS the drop target preventDefaults dragover.
         // Without this the browser overrides our cursor styling
@@ -577,6 +595,7 @@ export function WorkspaceRail({
           <Trash2 />
         </span>
       </button>
+      </Tooltip>
 
       <div className="flex-1" aria-hidden />
 

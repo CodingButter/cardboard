@@ -1,6 +1,7 @@
 import React from "react";
 import { User as UserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { Tooltip } from "../components/ui/Tooltip";
 
 /**
  * UserAvatar — small circular avatar that lives in the TopBar to the
@@ -35,25 +36,43 @@ export function UserAvatar({
 }: UserAvatarProps) {
   const trimmed = initials?.trim().slice(0, 2).toUpperCase();
   return (
-    <button
-      type="button"
-      onClick={onOpenUserMenu}
-      aria-label="Open user menu"
-      title="Account"
-      className={cn(
-        "inline-flex items-center justify-center w-8 h-8 rounded-full shrink-0",
-        "bg-(--color-bg-card-elev) border border-(--color-border)",
-        "text-zinc-300 hover:text-zinc-100 hover:border-(--color-border-accent)",
-        "transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-        className,
-      )}
+    <Tooltip
+      stages={[
+        { delay: 1000, content: <span>Account</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">Account</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                Opens the user menu. Sign-in and cloud-sync controls land
+                here once CLOUD_SYNC ships; for now this is a placeholder
+                affordance.
+              </div>
+            </div>
+          ),
+        },
+      ]}
     >
-      {trimmed ? (
-        <span className="text-[11px] font-semibold tracking-wide">{trimmed}</span>
-      ) : (
-        <UserIcon size={16} strokeWidth={2} />
-      )}
-    </button>
+      <button
+        type="button"
+        onClick={onOpenUserMenu}
+        aria-label="Open user menu"
+        className={cn(
+          "inline-flex items-center justify-center w-8 h-8 rounded-full shrink-0",
+          "bg-(--color-bg-card-elev) border border-(--color-border)",
+          "text-zinc-300 hover:text-zinc-100 hover:border-(--color-border-accent)",
+          "transition-colors duration-150",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+          className,
+        )}
+      >
+        {trimmed ? (
+          <span className="text-[11px] font-semibold tracking-wide">{trimmed}</span>
+        ) : (
+          <UserIcon size={16} strokeWidth={2} />
+        )}
+      </button>
+    </Tooltip>
   );
 }
