@@ -1,5 +1,4 @@
 import React from "react";
-import { Check } from "lucide-react";
 import { Tooltip } from "../../components/ui/Tooltip";
 import { useActiveScene } from "../../shell/ActiveSceneContext";
 import { MOCK_SCENE_SETTINGS } from "./scene-fixtures";
@@ -13,27 +12,29 @@ import { MOCK_SCENE_SETTINGS } from "./scene-fixtures";
  * context readouts — mirroring the design comp in `Editor Design/Map.png`.
  *
  * The readouts surface:
- *   - A small "All changes saved" pip (status indicator, green check).
+ *   - The active scene's NAME (e.g. "level-01") — a quick orientation
+ *     anchor for which scene the panels are bound to.
  *   - The active scene's dimensions ("64 × 64") in tabular numerals.
  *   - The painted-cell count in the fixture scene ("247 cells"), which
  *     gives the user a sense of scene density without opening a panel.
+ *
+ * NOTE: This slot previously rendered an "All changes saved" pip. That
+ * indicator has been removed to avoid duplicating the SaveStatusPill
+ * already shown in the shell TopBar (next to the Playtest/Save action
+ * cluster). Save state is a global concern and lives in TopBar; this
+ * slot is reserved for SCENE-scoped readouts only.
  *
  * Why a separate component (not inline in MapView):
  *   - Keeps `MapView` short and the slot content easy to swap.
  *   - The component can read its own context — `useActiveScene` gives us
  *     the active scene name for the tooltip without prop drilling.
- *   - Wave 3 will wire the "saved" pip and cell-count to real stores;
+ *   - Wave 3 will wire the cell-count and dimensions to real stores;
  *     keeping this self-contained makes that a one-file change.
  *
  * Progressive tooltips:
  *   - Every readout pairs with a 2-stage Tooltip (label at 1s, full
  *     description at 3s) per the project-wide hover standard.
  */
-
-/** Mock saved-state — Wave 3 wires this to the editor dirty-tracking
- *  store. For now we surface a steady "All changes saved" affordance
- *  so the slot reads as intended in the design comp. */
-const MOCK_SAVED = true;
 
 /** Mock painted-cell count. Mirrors the fixture cells used by the
  *  MapCanvasPanel (~247 cells in the sample dungeon). Wave 3 reads the
@@ -48,16 +49,14 @@ export function SceneTopBarSlot(): React.JSX.Element {
     ? sceneOption.label
     : resolvedScene
       ? resolvedScene.replace(/^scenes\//, "")
-      : "—";
+      : MOCK_SCENE_SETTINGS.name;
 
   const dims = MOCK_SCENE_SETTINGS.dimensions;
   const dimsLabel = `${dims.w} × ${dims.h}`;
   const cellLabel = `${MOCK_CELL_COUNT} cells`;
 
-  const savedShort = MOCK_SAVED ? "All changes saved" : "Unsaved changes";
-  const savedLong = MOCK_SAVED
-    ? "The Scene tab has no pending changes. The dirty-state pip flips amber when an edit is unsaved."
-    : "The Scene tab has unsaved changes. Save the project to clear this indicator.";
+  const nameShort = `Scene: ${sceneName}`;
+  const nameLong = `The scene currently bound to the editor panels. Switch scenes from the project tree or the Scene tab dropdown.`;
 
   const dimsShort = `${dimsLabel} cells`;
   const dimsLong = `Active scene dimensions — width × height in cells. Edit dimensions from the Scene Settings panel. Scene: ${sceneName}.`;
@@ -73,14 +72,14 @@ export function SceneTopBarSlot(): React.JSX.Element {
     >
       <Tooltip
         stages={[
-          { delay: 1000, content: <span>{savedShort}</span> },
+          { delay: 1000, content: <span>{nameShort}</span> },
           {
             delay: 3000,
             content: (
               <div>
-                <div className="font-semibold">{savedShort}</div>
+                <div className="font-semibold">{nameShort}</div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                  {savedLong}
+                  {nameLong}
                 </div>
               </div>
             ),
@@ -88,16 +87,10 @@ export function SceneTopBarSlot(): React.JSX.Element {
         ]}
       >
         <span
-          className="flex items-center gap-1"
-          aria-label={savedShort}
-          role="status"
+          className="font-mono text-(--color-fg-primary) truncate max-w-[140px]"
+          aria-label={nameShort}
         >
-          <Check
-            size={11}
-            className={MOCK_SAVED ? "text-emerald-400" : "text-amber-400"}
-            aria-hidden="true"
-          />
-          <span>{savedShort}</span>
+          {sceneName}
         </span>
       </Tooltip>
 
