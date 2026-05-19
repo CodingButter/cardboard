@@ -546,12 +546,24 @@ export function MapCanvasPanel(): React.JSX.Element {
     const showDetail = cell >= 5;
     const showFineDetail = cell >= 12;
 
+    // Compute pixel-aligned cell boundaries up-front. Every overlay
+    // (painted cells, hover, selection, grid lattice) snaps to these
+    // same boundaries, which is what makes the visuals align. Using
+    // `Math.floor(offX + N * cell)` per boundary guarantees:
+    //   right_edge(N) === left_edge(N+1)
+    // so adjacent cells tile without overlap or gap, and the lattice
+    // sitting between them lands exactly on the cell edge.
+    const colEdges = new Array<number>(dims.w + 1);
+    for (let i = 0; i <= dims.w; i++) colEdges[i] = Math.floor(offX + i * cell);
+    const rowEdges = new Array<number>(dims.h + 1);
+    for (let i = 0; i <= dims.h; i++) rowEdges[i] = Math.floor(offY + i * cell);
+
     for (const c of cellsByOrder) {
       if (!visibility[c.layerId]) continue;
-      const x = Math.round(offX + c.x * cell);
-      const y = Math.round(offY + c.y * cell);
-      const w = Math.ceil(cell);
-      const h = Math.ceil(cell);
+      const x = colEdges[c.x]!;
+      const y = rowEdges[c.y]!;
+      const w = colEdges[c.x + 1]! - x;
+      const h = rowEdges[c.y + 1]! - y;
       const tint = c.color ?? layerColorById[c.layerId] ?? "#888";
 
       if (c.layerId === "walls") {
@@ -656,31 +668,40 @@ export function MapCanvasPanel(): React.JSX.Element {
 
     // Grid lattice — warm gray-brown so the lines feel like floor
     // grout in a stone dungeon, not pure white-alpha. Skip when each
-    // cell is sub-pixel.
+    // cell is sub-pixel. Uses the precomputed `colEdges` / `rowEdges`
+    // so the lines sit exactly on the painted-cell boundaries; the
+    // +0.5 offset puts the 1px stroke in the center of a pixel row
+    // (crisp instead of antialiased across two rows).
     if (cell >= 2) {
+      const latticeTop = rowEdges[0]!;
+      const latticeBottom = rowEdges[dims.h]!;
+      const latticeLeft = colEdges[0]!;
+      const latticeRight = colEdges[dims.w]!;
       ctx.strokeStyle = "rgba(180,160,140,0.08)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = 0; x <= dims.w; x++) {
-        const px = Math.round(offX + x * cell) + 0.5;
-        ctx.moveTo(px, offY);
-        ctx.lineTo(px, offY + gridH);
+        const px = colEdges[x]! + 0.5;
+        ctx.moveTo(px, latticeTop);
+        ctx.lineTo(px, latticeBottom);
       }
       for (let y = 0; y <= dims.h; y++) {
-        const py = Math.round(offY + y * cell) + 0.5;
-        ctx.moveTo(offX, py);
-        ctx.lineTo(offX + gridW, py);
+        const py = rowEdges[y]! + 0.5;
+        ctx.moveTo(latticeLeft, py);
+        ctx.lineTo(latticeRight, py);
       }
       ctx.stroke();
     }
 
     // Entity markers — entry/spawn/exit glyphs over their cells.
-    // Drawn AFTER the grid so they sit on top like map pins.
+    // Drawn AFTER the grid so they sit on top like map pins. Center
+    // is computed from the precomputed cell edges so the disc sits
+    // exactly in the middle of the cell as drawn (not as floated).
     if (cell >= 6) {
       for (const m of ENTITY_MARKERS) {
         if (m.x < 0 || m.x >= dims.w || m.y < 0 || m.y >= dims.h) continue;
-        const cx = offX + m.x * cell + cell / 2;
-        const cy = offY + m.y * cell + cell / 2;
+        const cx = (colEdges[m.x]! + colEdges[m.x + 1]!) / 2;
+        const cy = (rowEdges[m.y]! + rowEdges[m.y + 1]!) / 2;
         const r = Math.max(4, cell * 0.42);
         // Drop-shadow halo for legibility.
         ctx.fillStyle = "rgba(0,0,0,0.55)";
@@ -713,31 +734,48 @@ export function MapCanvasPanel(): React.JSX.Element {
 
     // Atmospheric vignette — soft radial darkening from the playfield
     // center outward. Drawn over the cells but under the selection
-    // overlay so the selected cell still pops.
+    // overlay so the selected cell still pops. Uses integer edges so
+    // the gradient matches the visible cell grid exactly.
     {
-      const cx = offX + gridW / 2;
-      const cy = offY + gridH / 2;
-      const rInner = Math.min(gridW, gridH) * 0.35;
-      const rOuter = Math.hypot(gridW, gridH) * 0.62;
+      const playLeft = colEdges[0]!;
+      const playTop = rowEdges[0]!;
+      const playRight = colEdges[dims.w]!;
+      const playBottom = rowEdges[dims.h]!;
+      const playWInt = playRight - playLeft;
+      const playHInt = playBottom - playTop;
+      const cx = playLeft + playWInt / 2;
+      const cy = playTop + playHInt / 2;
+      const rInner = Math.min(playWInt, playHInt) * 0.35;
+      const rOuter = Math.hypot(playWInt, playHInt) * 0.62;
       const vignette = ctx.createRadialGradient(cx, cy, rInner, cx, cy, rOuter);
       vignette.addColorStop(0, "rgba(0,0,0,0)");
       vignette.addColorStop(1, "rgba(0,0,0,0.45)");
       ctx.fillStyle = vignette;
-      ctx.fillRect(offX, offY, gridW, gridH);
+      ctx.fillRect(playLeft, playTop, playWInt, playHInt);
     }
 
     // Playfield border — slightly warmer than the old white-alpha.
-    ctx.strokeStyle = "rgba(180,160,140,0.22)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      Math.round(offX) + 0.5,
-      Math.round(offY) + 0.5,
-      Math.round(gridW),
-      Math.round(gridH),
-    );
+    // Wraps the integer-aligned cell grid so the border is flush with
+    // the lattice edges (not a sub-pixel offset away).
+    {
+      const playLeft = colEdges[0]!;
+      const playTop = rowEdges[0]!;
+      const playRight = colEdges[dims.w]!;
+      const playBottom = rowEdges[dims.h]!;
+      ctx.strokeStyle = "rgba(180,160,140,0.22)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        playLeft + 0.5,
+        playTop + 0.5,
+        playRight - playLeft - 1,
+        playBottom - playTop - 1,
+      );
+    }
 
     // Hover cell indicator — amber outline, only when inside the
-    // playfield.
+    // playfield. Snaps to the same integer edges as the painted cells
+    // so the outline sits exactly on the cell boundary (no 1px drift
+    // from the lattice).
     if (
       hoverCell &&
       hoverCell.x >= 0 &&
@@ -746,14 +784,13 @@ export function MapCanvasPanel(): React.JSX.Element {
       hoverCell.y < dims.h &&
       cell >= 2
     ) {
+      const hx = colEdges[hoverCell.x]!;
+      const hy = rowEdges[hoverCell.y]!;
+      const hw = colEdges[hoverCell.x + 1]! - hx;
+      const hh = rowEdges[hoverCell.y + 1]! - hy;
       ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(
-        Math.round(offX + hoverCell.x * cell) + 0.5,
-        Math.round(offY + hoverCell.y * cell) + 0.5,
-        Math.ceil(cell) - 1,
-        Math.ceil(cell) - 1,
-      );
+      ctx.strokeRect(hx + 0.5, hy + 0.5, hw - 1, hh - 1);
     }
 
     // Selected cell — solid amber outline + faint fill + a small
@@ -766,18 +803,15 @@ export function MapCanvasPanel(): React.JSX.Element {
       selectedCell.y >= 0 &&
       selectedCell.y < dims.h
     ) {
-      const sx = Math.round(offX + selectedCell.x * cell);
-      const sy = Math.round(offY + selectedCell.y * cell);
+      const sx = colEdges[selectedCell.x]!;
+      const sy = rowEdges[selectedCell.y]!;
+      const sw = colEdges[selectedCell.x + 1]! - sx;
+      const sh = rowEdges[selectedCell.y + 1]! - sy;
       ctx.fillStyle = "rgba(245, 158, 11, 0.18)";
-      ctx.fillRect(sx, sy, Math.ceil(cell), Math.ceil(cell));
+      ctx.fillRect(sx, sy, sw, sh);
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 2;
-      ctx.strokeRect(
-        sx + 0.5,
-        sy + 0.5,
-        Math.ceil(cell) - 1,
-        Math.ceil(cell) - 1,
-      );
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
 
       // Lookup the topmost painted cell's tile-type name at this
       // coord (highest layer wins). If nothing's painted, surface
@@ -804,12 +838,16 @@ export function MapCanvasPanel(): React.JSX.Element {
         const chipW = Math.ceil(textW + padX * 2);
         const chipH = 18;
         // Center the chip on the selection; clamp to playfield.
-        let chipX = sx + Math.ceil(cell) / 2 - chipW / 2;
-        let chipY = sy + Math.ceil(cell) + 4;
-        chipX = Math.max(offX + 2, Math.min(offX + gridW - chipW - 2, chipX));
+        const playLeft = colEdges[0]!;
+        const playTop = rowEdges[0]!;
+        const playRight = colEdges[dims.w]!;
+        const playBottom = rowEdges[dims.h]!;
+        let chipX = sx + sw / 2 - chipW / 2;
+        let chipY = sy + sh + 4;
+        chipX = Math.max(playLeft + 2, Math.min(playRight - chipW - 2, chipX));
         // If the chip would clip the bottom edge, flip it above the
         // selection.
-        if (chipY + chipH > offY + gridH - 2) {
+        if (chipY + chipH > playBottom - 2) {
           chipY = sy - chipH - 4;
         }
         // Drop-shadow.
@@ -889,8 +927,10 @@ export function MapCanvasPanel(): React.JSX.Element {
         const tickH = 4;
         const tickW = 4;
         // X-axis ticks — vertical dashes at the bottom of the top band.
+        // Use the same `colEdges` as the cell grid so ticks land on the
+        // visible cell boundaries (not on a re-rounded approximation).
         for (let x = 0; x <= dims.w; x++) {
-          const px = Math.round(offX + x * cell);
+          const px = colEdges[x]!;
           if (px < RULER_LEFT_PX || px > layout.canvasW) continue;
           // Major ticks (every stride) reach further into the band.
           const isMajor = x % stride === 0;
@@ -899,7 +939,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         }
         // Y-axis ticks — horizontal dashes at the right of the left band.
         for (let y = 0; y <= dims.h; y++) {
-          const py = Math.round(offY + y * cell);
+          const py = rowEdges[y]!;
           if (py < RULER_TOP_PX || py > layout.canvasH) continue;
           const isMajor = y % stride === 0;
           const reach = isMajor ? tickW + 2 : tickW;
@@ -913,13 +953,13 @@ export function MapCanvasPanel(): React.JSX.Element {
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = 0; x <= dims.w; x++) {
-          const px = Math.round(offX + x * cell) + 0.5;
+          const px = colEdges[x]! + 0.5;
           if (px < RULER_LEFT_PX || px > layout.canvasW) continue;
           ctx.moveTo(px, 0);
           ctx.lineTo(px, RULER_TOP_PX);
         }
         for (let y = 0; y <= dims.h; y++) {
-          const py = Math.round(offY + y * cell) + 0.5;
+          const py = rowEdges[y]! + 0.5;
           if (py < RULER_TOP_PX || py > layout.canvasH) continue;
           ctx.moveTo(0, py);
           ctx.lineTo(RULER_LEFT_PX, py);
@@ -937,12 +977,15 @@ export function MapCanvasPanel(): React.JSX.Element {
         "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.textBaseline = "middle";
 
-      // X axis — column numbers along the top band.
+      // X axis — column numbers along the top band. Use cell-center
+      // derived from the integer edges so labels sit dead-center over
+      // the visible cells.
       ctx.textAlign = "center";
       for (let x = 0; x <= dims.w; x += stride) {
         // Don't label x=0 if it would crash into the corner cell —
         // start at the next stride instead.
-        const px = offX + x * cell + cell / 2;
+        if (x >= dims.w) break;
+        const px = (colEdges[x]! + colEdges[x + 1]!) / 2;
         if (px < RULER_LEFT_PX + 8) continue;
         if (px > layout.canvasW - 4) continue;
         ctx.fillText(String(x), px, RULER_TOP_PX / 2);
@@ -951,7 +994,8 @@ export function MapCanvasPanel(): React.JSX.Element {
       // Y axis — row numbers along the left band.
       ctx.textAlign = "right";
       for (let y = 0; y <= dims.h; y += stride) {
-        const py = offY + y * cell + cell / 2;
+        if (y >= dims.h) break;
+        const py = (rowEdges[y]! + rowEdges[y + 1]!) / 2;
         if (py < RULER_TOP_PX + 8) continue;
         if (py > layout.canvasH - 4) continue;
         ctx.fillText(String(y), RULER_LEFT_PX - 5, py);
