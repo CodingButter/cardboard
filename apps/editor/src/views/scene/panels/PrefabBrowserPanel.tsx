@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Box,
   Boxes,
   Flame,
   Layers as LayersIcon,
@@ -11,7 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
-import { ScrollRow } from "../../../components/ui/ScrollRow";
+import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
   MOCK_PREFABS,
@@ -77,7 +78,14 @@ interface CategoryMeta {
   id: CategoryFilter;
   name: string;
   description: string;
+  /**
+   * Lucide icon — used for the per-tile thumbnail (NOT the chip strip,
+   * which uses a coloured dot for parity with TilePresetPanel /
+   * Output / Problems).
+   */
   icon: LucideIcon;
+  /** Tailwind colour utility for the chip's leading dot. */
+  dotClass: string;
   /** Tailwind colour utility for the placeholder thumbnail tint. */
   swatchClass: string;
 }
@@ -88,6 +96,7 @@ const CATEGORY_META: readonly CategoryMeta[] = [
     name: "All",
     description: "Show every prefab across all categories.",
     icon: LayersIcon,
+    dotClass: "bg-zinc-500",
     swatchClass: "bg-zinc-700/40",
   },
   {
@@ -95,35 +104,40 @@ const CATEGORY_META: readonly CategoryMeta[] = [
     name: "Enemy",
     description: "Hostile NPC prefabs — grunts, snipers, bosses.",
     icon: Skull,
-    swatchClass: "bg-rose-500/30",
+    dotClass: "bg-rose-500",
+    swatchClass: "bg-rose-500/40",
   },
   {
     id: "item",
     name: "Item",
     description: "Pickup prefabs — medkits, armor, keycards.",
     icon: Package,
-    swatchClass: "bg-amber-500/30",
+    dotClass: "bg-amber-500",
+    swatchClass: "bg-amber-500/40",
   },
   {
     id: "trigger",
     name: "Trigger",
     description: "Event-volume prefabs — door triggers, checkpoints, zones.",
     icon: Zap,
-    swatchClass: "bg-sky-500/30",
+    dotClass: "bg-sky-400",
+    swatchClass: "bg-sky-500/40",
   },
   {
     id: "spawn",
     name: "Spawn",
     description: "Spawn-point prefabs — player and enemy spawn markers.",
     icon: MapPin,
-    swatchClass: "bg-emerald-500/30",
+    dotClass: "bg-emerald-400",
+    swatchClass: "bg-emerald-500/40",
   },
   {
     id: "decor",
     name: "Decor",
     description: "Decorative non-interactive prefabs — torches, banners, dressing.",
     icon: Flame,
-    swatchClass: "bg-violet-500/30",
+    dotClass: "bg-violet-400",
+    swatchClass: "bg-violet-500/40",
   },
 ] as const;
 
@@ -144,6 +158,23 @@ function isCategoryFilter(value: string | null): value is CategoryFilter {
 
 function capitalize(value: string): string {
   return value.length === 0 ? value : value[0]!.toUpperCase() + value.slice(1);
+}
+
+/** Per-category counts (incl. the "all" pseudo-category). */
+function useCategoryCounts(): Record<CategoryFilter, number> {
+  return React.useMemo(() => {
+    const all = MOCK_PREFABS as readonly PrefabRow[];
+    const counts: Record<CategoryFilter, number> = {
+      all: all.length,
+      enemy: 0,
+      item: 0,
+      trigger: 0,
+      spawn: 0,
+      decor: 0,
+    };
+    for (const p of all) counts[p.category] += 1;
+    return counts;
+  }, []);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +293,8 @@ export function PrefabBrowserPanel(): React.JSX.Element {
     return () => unregs.forEach((u) => u());
   }, []);
 
+  const counts = useCategoryCounts();
+
   const visiblePrefabs = React.useMemo(() => {
     const all = MOCK_PREFABS as readonly PrefabRow[];
     if (activeCategory === "all") return all;
@@ -280,6 +313,7 @@ export function PrefabBrowserPanel(): React.JSX.Element {
     >
       <CategoryFilterRow
         activeCategory={activeCategory}
+        counts={counts}
         onCategoryClick={handleCategoryClick}
       />
 
@@ -300,64 +334,84 @@ export function PrefabBrowserPanel(): React.JSX.Element {
 
 interface CategoryFilterRowProps {
   activeCategory: CategoryFilter;
+  counts: Record<CategoryFilter, number>;
   onCategoryClick: (cat: CategoryFilter) => void;
 }
 
 /**
- * Horizontal category chip strip. Uses `ScrollRow` so narrow panel
- * widths surface the themed hover-area affordance instead of a native
- * horizontal scrollbar (per project convention).
+ * Wrapping category chip strip. Uses `flex flex-wrap` so chips spill
+ * onto a second row at narrow panel widths instead of horizontally
+ * scrolling — category filters are primary navigation and must be
+ * visible at a glance, per project convention.
+ *
+ * Mirrors the canonical TilePresetPanel / Output / Problems chip
+ * pattern: coloured dot + uppercase label + `(N)` count, sized at
+ * `px-2 py-1 text-[10px]`. No icon prefix — the icon lives in the
+ * tile thumbnail below where it actually identifies content.
  */
 function CategoryFilterRow({
   activeCategory,
+  counts,
   onCategoryClick,
 }: CategoryFilterRowProps): React.JSX.Element {
   return (
-    <div className="shrink-0 h-7">
-      <ScrollRow contentClassName="flex items-center gap-1">
-        {CATEGORY_META.map((cat) => {
-          const Icon = cat.icon;
-          const active = cat.id === activeCategory;
-          return (
-            <Tooltip
-              key={cat.id}
-              side="bottom"
-              stages={[
-                { delay: 1000, content: <span>{cat.name}</span> },
-                {
-                  delay: 3000,
-                  content: (
-                    <div>
-                      <div className="font-semibold">{cat.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                        {cat.description}
-                      </div>
+    <div className="flex flex-wrap items-center gap-1">
+      {CATEGORY_META.map((cat) => {
+        const active = cat.id === activeCategory;
+        const count = counts[cat.id];
+        return (
+          <Tooltip
+            key={cat.id}
+            side="bottom"
+            stages={[
+              { delay: 1000, content: <span>{`Filter: ${cat.name}`}</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">{`Filter: ${cat.name}`}</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      {cat.description}
                     </div>
-                  ),
-                },
-              ]}
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <button
+              type="button"
+              aria-label={`Filter ${cat.name}`}
+              aria-pressed={active}
+              onClick={() => onCategoryClick(cat.id)}
+              className={[
+                "shrink-0 inline-flex items-center gap-1",
+                "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide",
+                "border transition-colors whitespace-nowrap",
+                active
+                  ? "bg-amber-500 border-amber-500 text-zinc-950"
+                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+              ].join(" ")}
             >
-              <button
-                type="button"
-                aria-label={`Filter ${cat.name}`}
-                aria-pressed={active}
-                onClick={() => onCategoryClick(cat.id)}
+              <span
+                aria-hidden="true"
                 className={[
-                  "shrink-0 inline-flex items-center gap-1",
-                  "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                  "border transition-colors",
-                  active
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
-                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                  "inline-block w-1.5 h-1.5 rounded-full",
+                  cat.dotClass,
+                ].join(" ")}
+              />
+              <span>{cat.name}</span>
+              <span
+                className={[
+                  "tabular-nums",
+                  active ? "text-zinc-950/70" : "text-(--color-fg-muted)",
                 ].join(" ")}
               >
-                <Icon size={10} aria-hidden="true" />
-                <span>{cat.name}</span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </ScrollRow>
+                ({count})
+              </span>
+            </button>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -373,11 +427,15 @@ interface PrefabGridProps {
 }
 
 /**
- * Fluid auto-fit grid of prefab tiles. Column count adapts to
- * available width: each tile clamps between 64px (narrow rail) and
- * 108px (wider span) so the thumbnail + truncated label remain
- * readable at any panel size. Tile body is a vertical stack:
- * category-tinted thumbnail square + tight name label.
+ * Fluid auto-fill grid of prefab tiles. Column count adapts to
+ * available width: each tile clamps between 80px (narrow rail) and
+ * 140px (wider span). `auto-fill` is used (not `auto-fit`) so the
+ * track count is driven purely by available space — at wide panel
+ * widths tiles fluidly fill the row up to the 140px max instead of
+ * being capped to a tiny island of fixed-size tiles.
+ *
+ * Empty state uses the shared `<EmptyState/>` component so the panel
+ * scans identically to the rest of the editor's empty surfaces.
  */
 function PrefabGrid({
   prefabs,
@@ -387,8 +445,12 @@ function PrefabGrid({
 }: PrefabGridProps): React.JSX.Element {
   if (prefabs.length === 0) {
     return (
-      <div className="text-[10px] text-(--color-fg-muted) px-1 py-2">
-        No prefabs in this category.
+      <div className="h-full flex items-center justify-center">
+        <EmptyState
+          icon={<Box size={28} />}
+          title="No prefabs"
+          description="No prefabs available in this category. Switch the filter to ALL to see every prefab."
+        />
       </div>
     );
   }
@@ -397,7 +459,7 @@ function PrefabGrid({
     <div
       className="grid gap-1.5 p-px"
       style={{
-        gridTemplateColumns: "repeat(auto-fit, minmax(64px, 108px))",
+        gridTemplateColumns: "repeat(auto-fill, minmax(80px, 140px))",
       }}
     >
       {prefabs.map((prefab) => (
