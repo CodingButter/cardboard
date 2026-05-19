@@ -263,14 +263,46 @@ export interface BrushRow {
   id: string;
   name: string;
   kind: string;
+  /** Long-form tooltip body. Used by the brush panel's progressive
+   *  reveal tooltip — appears after a longer hover than the bare name. */
+  description?: string;
 }
 
 export const MOCK_BRUSHES = [
-  { id: "brush-single", name: "Single", kind: "point" },
-  { id: "brush-square-3", name: "Square 3x3", kind: "square" },
-  { id: "brush-circle-5", name: "Circle 5", kind: "circle" },
-  { id: "brush-line", name: "Line", kind: "line" },
-  { id: "brush-rect", name: "Rectangle", kind: "rect" },
+  {
+    id: "brush-single",
+    name: "Single",
+    kind: "point",
+    description: "Single-cell point brush — paints one cell at a time.",
+  },
+  {
+    id: "brush-square-3",
+    name: "Square 3x3",
+    kind: "square",
+    description:
+      "Square footprint brush — paints an N×N block centered on the cursor (size controls N).",
+  },
+  {
+    id: "brush-circle-5",
+    name: "Circle 5",
+    kind: "circle",
+    description:
+      "Circular footprint brush — paints a disc of radius `size` centered on the cursor.",
+  },
+  {
+    id: "brush-line",
+    name: "Line",
+    kind: "line",
+    description:
+      "Line brush — click + drag to paint a straight line of cells between the press and release points.",
+  },
+  {
+    id: "brush-rect",
+    name: "Rectangle",
+    kind: "rect",
+    description:
+      "Rectangle brush — click + drag to fill an axis-aligned rectangle between the press and release points.",
+  },
 ] as const satisfies readonly BrushRow[];
 
 // ---------------------------------------------------------------------------
