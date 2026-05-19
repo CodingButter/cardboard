@@ -1,18 +1,13 @@
 import React from "react";
 import {
-  AlertTriangle,
-  CircleAlert,
   Copy,
-  Info,
-  ListFilter,
   MoreVertical,
   Terminal,
   Trash2,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
-import { ScrollRow } from "../../../components/ui/ScrollRow";
+import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
   MOCK_LOG_LINES,
@@ -80,33 +75,23 @@ function isFilterValue(value: string | null): value is FilterValue {
 // Severity + filter metadata
 
 interface SeverityMeta {
-  /** Tailwind text colour for the timestamp + dot in the log row. */
-  text: string;
-  /** Tailwind bg colour for the dot. */
+  /** Tailwind bg colour for the row's severity dot. */
   dot: string;
-  /** Inline icon for the row (small lucide glyph). */
-  icon: LucideIcon;
   /** Short label used in tooltips and aria. */
   label: string;
 }
 
 const SEVERITY_META: Record<LogSeverity, SeverityMeta> = {
   info: {
-    text: "text-(--color-fg-secondary)",
     dot: "bg-sky-400",
-    icon: Info,
     label: "Info",
   },
   warn: {
-    text: "text-amber-400",
     dot: "bg-amber-500",
-    icon: AlertTriangle,
     label: "Warn",
   },
   error: {
-    text: "text-red-400",
     dot: "bg-red-500",
-    icon: CircleAlert,
     label: "Error",
   },
 };
@@ -115,8 +100,8 @@ interface FilterMeta {
   id: FilterValue;
   name: string;
   description: string;
-  /** Tailwind colour class for the chip's dot. `null` for "all". */
-  dot: string | null;
+  /** Tailwind colour class for the chip's dot. */
+  dot: string;
 }
 
 const FILTER_META: readonly FilterMeta[] = [
@@ -124,7 +109,7 @@ const FILTER_META: readonly FilterMeta[] = [
     id: "all",
     name: "All",
     description: "Show every log entry regardless of severity.",
-    dot: null,
+    dot: "bg-zinc-500",
   },
   {
     id: "info",
@@ -145,6 +130,26 @@ const FILTER_META: readonly FilterMeta[] = [
     dot: "bg-red-500",
   },
 ] as const;
+
+/**
+ * Active-state background + border + text for each filter id. Each
+ * matches the severity hue so an "active WARN" chip can't be mistaken
+ * for an "active ERROR" chip at a glance. ALL stays on the neutral
+ * amber accent — it is the panel's catch-all.
+ */
+function activeChipClassesFor(id: FilterValue): string {
+  switch (id) {
+    case "info":
+      return "bg-sky-400 border-sky-400 text-zinc-950";
+    case "warn":
+      return "bg-amber-500 border-amber-500 text-zinc-950";
+    case "error":
+      return "bg-red-500 border-red-500 text-zinc-950";
+    case "all":
+    default:
+      return "bg-amber-500 border-amber-500 text-zinc-950";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Timestamp formatting
@@ -340,7 +345,7 @@ function OutputToolbar({
   narrow,
 }: OutputToolbarProps): React.JSX.Element {
   return (
-    <div className="shrink-0 h-7 flex items-center gap-1 min-w-0">
+    <div className="shrink-0 flex items-start gap-1 min-w-0">
       <div className="flex-1 min-w-0">
         <FilterChipRow active={filter} onClick={onFilterClick} />
       </div>
@@ -379,61 +384,59 @@ interface FilterChipRowProps {
 }
 
 function FilterChipRow({ active, onClick }: FilterChipRowProps): React.JSX.Element {
+  // No horizontal scroll for navigation — chips wrap to a second row
+  // when the toolbar is narrow. `flex-wrap` + `gap-1` is enough; the
+  // outer toolbar absorbs the extra row height because the toolbar
+  // no longer constrains to `h-7`.
   return (
-    <div className="h-7">
-      <ScrollRow contentClassName="flex items-center gap-1">
-        {FILTER_META.map((f) => {
-          const isActive = f.id === active;
-          return (
-            <Tooltip
-              key={f.id}
-              side="bottom"
-              stages={[
-                { delay: 1000, content: <span>{`Filter: ${f.name}`}</span> },
-                {
-                  delay: 3000,
-                  content: (
-                    <div>
-                      <div className="font-semibold">{`Filter: ${f.name}`}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                        {f.description}
-                      </div>
+    <div className="flex flex-wrap items-center gap-1">
+      {FILTER_META.map((f) => {
+        const isActive = f.id === active;
+        return (
+          <Tooltip
+            key={f.id}
+            side="bottom"
+            stages={[
+              { delay: 1000, content: <span>{`Filter: ${f.name}`}</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">{`Filter: ${f.name}`}</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      {f.description}
                     </div>
-                  ),
-                },
-              ]}
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <button
+              type="button"
+              aria-label={`Filter ${f.name}`}
+              aria-pressed={isActive}
+              onClick={() => onClick(f.id)}
+              className={[
+                "shrink-0 inline-flex items-center gap-1",
+                "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide",
+                "border transition-colors",
+                isActive
+                  ? activeChipClassesFor(f.id)
+                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+              ].join(" ")}
             >
-              <button
-                type="button"
-                aria-label={`Filter ${f.name}`}
-                aria-pressed={isActive}
-                onClick={() => onClick(f.id)}
+              <span
+                aria-hidden="true"
                 className={[
-                  "shrink-0 inline-flex items-center gap-1",
-                  "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                  "border transition-colors",
-                  isActive
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
-                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                  "inline-block w-1.5 h-1.5 rounded-full",
+                  f.dot,
                 ].join(" ")}
-              >
-                {f.dot ? (
-                  <span
-                    aria-hidden="true"
-                    className={[
-                      "inline-block w-1.5 h-1.5 rounded-full",
-                      f.dot,
-                    ].join(" ")}
-                  />
-                ) : (
-                  <ListFilter size={10} aria-hidden="true" />
-                )}
-                <span>{f.name}</span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </ScrollRow>
+              />
+              <span>{f.name}</span>
+            </button>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -609,9 +612,13 @@ const OutputList = React.forwardRef<HTMLDivElement, OutputListProps>(
       return (
         <div
           ref={ref}
-          className="flex-1 min-h-0 overflow-y-auto font-mono text-[11px] text-(--color-fg-muted) italic flex items-center justify-center py-4"
+          className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center"
         >
-          No log entries.
+          <EmptyState
+            icon={<Terminal size={28} />}
+            title="No log entries"
+            description="Engine and build logs will appear here."
+          />
         </div>
       );
     }
@@ -637,7 +644,6 @@ interface LogRowProps {
 
 function LogRow({ line }: LogRowProps): React.JSX.Element {
   const meta = SEVERITY_META[line.severity];
-  const Icon = meta.icon;
   return (
     <div
       className={[
@@ -645,19 +651,17 @@ function LogRow({ line }: LogRowProps): React.JSX.Element {
         "hover:bg-(--color-bg-hover)",
       ].join(" ")}
     >
-      {/* Severity glyph + dot. Dot is the always-visible affordance;
-          the inline icon is a tiny extra hint that survives at narrow
-          widths where colour alone is fragile. */}
+      {/* Severity dot — the colour alone telegraphs severity, in line
+          with the terminal aesthetic. The dot carries the `aria-label`
+          so AT users still get the severity name. */}
       <span
-        className={["shrink-0 mt-0.5 inline-flex items-center gap-1", meta.text].join(" ")}
+        role="img"
         aria-label={meta.label}
-      >
-        <span
-          aria-hidden="true"
-          className={["inline-block w-1.5 h-1.5 rounded-full", meta.dot].join(" ")}
-        />
-        <Icon size={10} aria-hidden="true" />
-      </span>
+        className={[
+          "shrink-0 mt-1.5 inline-block w-1.5 h-1.5 rounded-full",
+          meta.dot,
+        ].join(" ")}
+      />
       {/* Monospace timestamp — fixed-width so the message column lines
           up across rows. */}
       <span className="shrink-0 text-(--color-fg-muted) tabular-nums">
