@@ -39,7 +39,7 @@ function pwaHeaders(pathname: string): HeadersInit | undefined {
 }
 
 const server = Bun.serve({
-  port: 3001,
+  port: Number(process.env.PORT) || 3001,
   routes: {
     "/": index,
     "/*": async (req) => {

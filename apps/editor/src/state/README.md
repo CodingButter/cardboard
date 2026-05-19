@@ -211,3 +211,23 @@ hook for snapshot reads.
 Adding a new command or setting only requires the registration call at
 the owning component — the palette and settings modal pick them up
 automatically.
+
+---
+
+## Cross-window DnD verification
+
+The cross-window drag-and-drop subsystem (`docs/plans/CROSS_WINDOW_DND.md`)
+rests on a platform assumption — that native HTML5 `dataTransfer.setData`
+/ `getData` round-trips losslessly across dockview popouts. Phase D2
+verified this empirically on Chromium 130 (Playwright bundle) with
+dockview 6.3.0: a `DragEvent` dispatched on a drag source in the
+orchestrator populated `dataTransfer` under both the per-kind MIME
+(`application/x-cardboard-script`) and the JSON fallback; the same
+DataTransfer reference re-read in the popped-out target via
+`readDataTransfer` returned the structurally-identical payload, and
+`useDragStore.currentDrag` propagated null → payload → null across
+both windows via the LocalStorage storage-event spine in
+`createSyncedStore`. The smoke harness lived at
+`src/components/dnd/__d2_smoke__.tsx` and was torn down after the test.
+Firefox is per §7.1 of the plan less consistent here; re-verify before
+shipping a Firefox build.

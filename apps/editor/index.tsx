@@ -11,6 +11,7 @@ import { useSelectionStore } from "./src/state/useSelectionStore";
 import { useSceneStore } from "./src/state/useSceneStore";
 import { useHistoryStore } from "./src/state/useHistoryStore";
 import { useDiagnosticsStore } from "./src/state/useDiagnosticsStore";
+import { useDragStore } from "./src/state/useDragStore";
 
 // Debug-only global exposure for the Wave 3 cross-panel stores. Keeps
 // the playwright cross-tab verification self-contained without having
@@ -29,6 +30,7 @@ declare global {
         scene: typeof useSceneStore;
         history: typeof useHistoryStore;
         diagnostics: typeof useDiagnosticsStore;
+        drag: typeof useDragStore;
       };
     };
   }
@@ -44,8 +46,18 @@ if (typeof window !== "undefined") {
       scene: useSceneStore,
       history: useHistoryStore,
       diagnostics: useDiagnosticsStore,
+      drag: useDragStore,
     },
   };
+
+  // Bootstrap-clear any stale `currentDrag` left behind in LS by a
+  // previous session that crashed mid-drag. `useDragStore` persists
+  // its descriptor under `cardboard.sync.drag` so a window popped
+  // DURING a drag rehydrates the live payload — the same persistence
+  // means a hard crash can leave a non-null `currentDrag` lingering
+  // across reloads. Clearing once at boot is the cleanup. See
+  // `docs/plans/CROSS_WINDOW_DND.md` §3.2.
+  useDragStore.getState().endDrag();
 }
 
 /**
