@@ -63,7 +63,7 @@ interface SectionDef {
 const SECTIONS: readonly SectionDef[] = [
   {
     key: "position",
-    label: "Pos",
+    label: "Position",
     longLabel: "Cursor Position",
     description:
       "Current mouse coordinates in scene-space units (continuous, sub-cell precision).",
@@ -84,7 +84,7 @@ const SECTIONS: readonly SectionDef[] = [
   },
   {
     key: "selection",
-    label: "Sel",
+    label: "Selection",
     longLabel: "Selection",
     description:
       "Summary of the current selection — count of selected cells or entities.",
@@ -229,16 +229,14 @@ export function SelectionInfoPanel(): React.JSX.Element {
             : "flex flex-col gap-1",
       ].join(" ")}
     >
-      {SECTIONS.map((section, idx) => {
+      {SECTIONS.map((section) => {
         const value = info[section.key];
-        const showDivider = layout === "row" && idx > 0;
         return (
           <SelectionSection
             key={section.key}
             section={section}
             value={value}
             layout={layout}
-            withLeftDivider={showDivider}
           />
         );
       })}
@@ -250,24 +248,19 @@ interface SelectionSectionProps {
   section: SectionDef;
   value: string;
   layout: "row" | "grid" | "stack";
-  withLeftDivider: boolean;
 }
 
 function SelectionSection({
   section,
   value,
   layout,
-  withLeftDivider,
 }: SelectionSectionProps) {
-  // Row mode: each section flex-1 with a subtle left border acting as
-  // the section divider (border-l on every section except the first).
-  // Grid + stack: no divider, the grid/flex gap handles separation.
+  // Row mode: each section flex-1, content centred horizontally — Map.png
+  // pattern. Sections are separated by the flex distribution alone, no
+  // dividers. Grid + stack: gap handles separation.
   const containerClass =
     layout === "row"
-      ? [
-          "flex-1 min-w-[100px] flex flex-col justify-center px-2",
-          withLeftDivider ? "border-l border-(--color-border-subtle)" : "",
-        ].join(" ")
+      ? "flex-1 min-w-[100px] flex flex-col justify-center px-2 text-center"
       : layout === "grid"
         ? "min-w-0 flex flex-col"
         : // stack: single column of label/value rows
@@ -275,8 +268,8 @@ function SelectionSection({
 
   const labelClass =
     layout === "stack"
-      ? "text-[9px] uppercase tracking-wider text-(--color-fg-muted) shrink-0 w-10"
-      : "text-[9px] uppercase tracking-wider text-(--color-fg-muted)";
+      ? "text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0 w-10"
+      : "text-[10px] uppercase tracking-wider text-(--color-fg-muted)";
 
   const valueClass = [
     "font-mono tabular-nums text-[11px] leading-tight",

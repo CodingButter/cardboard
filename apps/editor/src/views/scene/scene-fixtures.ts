@@ -312,7 +312,7 @@ export interface SelectionInfoRow {
 }
 
 export const MOCK_SELECTION_INFO = {
-  position: "x: 12.50  y: 7.25",
+  position: "(12.5, 7.25, 0)",
   cell: "(12, 7)",
   layer: "Walls",
   selection: "1 cell",
