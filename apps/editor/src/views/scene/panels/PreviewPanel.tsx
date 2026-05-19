@@ -41,11 +41,12 @@ import { registerCommand } from "../../../state/useCommandStore";
  * Responsive contract:
  *   - The canvas fills `100% × 100%`; aspect + renderer size are
  *     refreshed on every `ResizeObserver` callback.
- *   - Below ~120px in either dimension we render an `EmptyState`-style
+ *   - Below ~130px in either dimension we render an `EmptyState`-style
  *     "Too small" message instead of mounting Three (degenerate aspect
  *     ratios crash internal projection math).
- *   - Overlay toolbar auto-hides below ~200px width — at that size
- *     the canvas alone is enough.
+ *   - Overlay toolbar auto-hides below ~140px width — at that size
+ *     the canvas alone is enough. Default panel width (~181px) shows
+ *     the toolbar out of the box.
  */
 
 // ---------------------------------------------------------------------------
@@ -56,9 +57,13 @@ const LS_CAM_DISTANCE = "cardboard.scene.preview.camDistance";
 const LS_CAM_YAW = "cardboard.scene.preview.camYaw";
 const LS_CAM_PITCH = "cardboard.scene.preview.camPitch";
 
-const DEFAULT_DISTANCE = 5;
-const DEFAULT_YAW = Math.PI / 4;
-const DEFAULT_PITCH = -Math.PI / 6;
+const DEFAULT_DISTANCE = 7;
+const DEFAULT_YAW = Math.PI / 5;
+// Positive pitch = camera elevation above target (the math below uses
+// `d * sin(pitch) + targetY` for py, so positive lifts the camera up).
+// A ~35° elevation tilts the camera down enough to put the floor in
+// frame while still letting the back wall + corridor depth read.
+const DEFAULT_PITCH = Math.PI / 5;
 
 const MIN_DISTANCE = 2;
 const MAX_DISTANCE = 25;
@@ -67,10 +72,14 @@ const ZOOM_STEP = 0.75;
 const MIN_PITCH = -Math.PI / 2 + 0.05;
 const MAX_PITCH = Math.PI / 2 - 0.05;
 
-// Below either dimension we bail to the EmptyState fallback.
-const MIN_CANVAS_DIM = 120;
-// Below this width we hide the overlay toolbar.
-const MIN_TOOLBAR_WIDTH = 200;
+// Below either dimension we bail to the EmptyState fallback. The 130
+// floor leaves a touch of headroom for PanelSurface padding so the
+// canvas isn't squeezed to a degenerate aspect at the boundary.
+const MIN_CANVAS_DIM = 130;
+// Below this width we hide the overlay toolbar. The default panel
+// width is ~181px, so we keep this comfortably below that so the
+// toolbar is visible out of the box.
+const MIN_TOOLBAR_WIDTH = 140;
 
 function readLSNumber(key: string, fallback: number): number {
   try {
@@ -110,12 +119,14 @@ interface PreviewSceneHandle {
 
 function buildPreviewScene(): PreviewSceneHandle {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1c2230); // soft sky color
+  // Warm dungeon-dark background. Matches MapCanvasPanel's playfield
+  // tone so the preview reads as part of the same room.
+  scene.background = new THREE.Color(0x1a1814);
 
   // --- Floor -------------------------------------------------------------
   const floorGeo = new THREE.PlaneGeometry(20, 20);
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x3a3f4b,
+    color: 0x3a3027,
     roughness: 0.9,
     metalness: 0.0,
   });
@@ -124,16 +135,26 @@ function buildPreviewScene(): PreviewSceneHandle {
   floor.position.y = 0;
   scene.add(floor);
 
-  // --- Walls (three placeholder cubes) -----------------------------------
-  const wallSpec: Array<[number, number, number]> = [
-    [-1.5, 0.75, -0.5],
-    [1.5, 0.75, 0.5],
-    [0.0, 0.75, -2.0],
+  // --- Walls (corridor-shape placeholder) --------------------------------
+  // Hardcoded "back wall + two side walls + a center pillar" arrangement,
+  // hinting at a corridor / room corner. Wave 2 swaps this for real
+  // scene-derived geometry.
+  const wallSpec: Array<[number, number, number, number, number, number]> = [
+    // [x, y, z, width, height, depth]
+    // Back wall — two segments forming the far end of the corridor.
+    [-1.5, 0.75, -3.5, 1.5, 1.5, 1],
+    [1.5, 0.75, -3.5, 1.5, 1.5, 1],
+    // Left side wall — runs along the corridor.
+    [-2.5, 0.75, -1.5, 1, 1.5, 2],
+    // Right side wall — mirror.
+    [2.5, 0.75, -1.5, 1, 1.5, 2],
+    // Center pillar — gives the camera something interesting to look at.
+    [0.0, 0.5, -1.5, 0.6, 1.0, 0.6],
   ];
   const wallColor = 0xb88a4a; // warm wood/amber tone
   const wireframeMaterials: THREE.MeshStandardMaterial[] = [floorMat];
-  for (const [x, y, z] of wallSpec) {
-    const geo = new THREE.BoxGeometry(1, 1.5, 1);
+  for (const [x, y, z, w, h, d] of wallSpec) {
+    const geo = new THREE.BoxGeometry(w, h, d);
     const mat = new THREE.MeshStandardMaterial({
       color: wallColor,
       roughness: 0.7,
@@ -145,12 +166,32 @@ function buildPreviewScene(): PreviewSceneHandle {
     wireframeMaterials.push(mat);
   }
 
+  // Back wall plane behind the corridor — a flat backdrop so the camera
+  // never sees through to the void at the far end.
+  const backWallGeo = new THREE.PlaneGeometry(12, 4);
+  const backWallMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2118,
+    roughness: 0.95,
+    metalness: 0.0,
+    side: THREE.DoubleSide,
+  });
+  const backWall = new THREE.Mesh(backWallGeo, backWallMat);
+  backWall.position.set(0, 2, -6);
+  scene.add(backWall);
+  wireframeMaterials.push(backWallMat);
+
   // --- Lights ------------------------------------------------------------
-  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+  // Softer ambient — the warm key light below carries the dungeon tone.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.45);
   scene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  // Cool overhead-ish key light, slight blue tinge to balance the warm fill.
+  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
   dir.position.set(4, 6, 3);
   scene.add(dir);
+  // Warm torchlight-like fill from the front-left, low altitude.
+  const warmFill = new THREE.DirectionalLight(0xfbbf24, 0.35);
+  warmFill.position.set(-3, 1.5, 4);
+  scene.add(warmFill);
 
   // --- Grid (hidden by default; toggled via command) ---------------------
   const grid = new THREE.GridHelper(20, 20, 0x666b78, 0x3a3f4b);
@@ -551,21 +592,21 @@ export function PreviewPanel(): React.JSX.Element {
             tooltipDescription="Restore the 3D preview camera to its default angle."
             onClick={resetCamera}
           >
-            <RotateCcw size={12} />
+            <RotateCcw size={14} />
           </PreviewIconButton>
           <PreviewIconButton
             tooltipLabel="Zoom in"
             tooltipDescription="Move the preview camera closer to the scene."
             onClick={zoomIn}
           >
-            <ZoomIn size={12} />
+            <ZoomIn size={14} />
           </PreviewIconButton>
           <PreviewIconButton
             tooltipLabel="Zoom out"
             tooltipDescription="Move the preview camera farther from the scene."
             onClick={zoomOut}
           >
-            <ZoomOut size={12} />
+            <ZoomOut size={14} />
           </PreviewIconButton>
           <PreviewIconButton
             tooltipLabel="Toggle grid"
@@ -573,7 +614,7 @@ export function PreviewPanel(): React.JSX.Element {
             pressed={gridVisibleRef.current}
             onClick={toggleGrid}
           >
-            <Grid3x3 size={12} />
+            <Grid3x3 size={14} />
           </PreviewIconButton>
           <PreviewIconButton
             tooltipLabel="Toggle wireframe"
@@ -581,7 +622,7 @@ export function PreviewPanel(): React.JSX.Element {
             pressed={wireframeRef.current}
             onClick={toggleWireframe}
           >
-            <Maximize2 size={12} />
+            <Maximize2 size={14} />
           </PreviewIconButton>
         </div>
       )}
@@ -652,7 +693,7 @@ function PreviewIconButton({
         aria-pressed={pressed ?? undefined}
         onClick={onClick}
         className={[
-          "flex items-center justify-center w-5 h-5 rounded",
+          "flex items-center justify-center w-6 h-6 rounded",
           "border transition-colors",
           pressed
             ? "bg-amber-500 border-amber-500 text-zinc-950"
