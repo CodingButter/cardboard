@@ -13,6 +13,7 @@ import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { useBrushStore } from "../../../state/useBrushStore";
 import { MOCK_BRUSHES, type BrushRow } from "../scene-fixtures";
 
 /**
@@ -21,8 +22,7 @@ import { MOCK_BRUSHES, type BrushRow } from "../scene-fixtures";
  * Visual target: the BRUSH dropdown + size slider stack that lived
  * inside the leftmost column of `Editor Design/Map.png`, just under
  * the TOOLS row. Split off from the legacy `ToolsPanel` so brush
- * authoring can dock independently. Wave 2 wires this to the editor's
- * active brush state.
+ * authoring can dock independently.
  *
  * Visual parity with sibling ToolPalettePanel: tiles render an icon
  * stacked over a small uppercase name label so the affordance is
@@ -30,15 +30,20 @@ import { MOCK_BRUSHES, type BrushRow } from "../scene-fixtures";
  * `minmax(54px, 64px)` grid template, same ~60px tile height, same
  * `aria-pressed` a11y pattern.
  *
- * Persistence contract (page-scope localStorage):
- *   - `cardboard.scene.brush.activeKind`  string, default first brush id.
- *   - `cardboard.scene.brush.size`        number, default 1 (1..20).
+ * State source: Wave 3.3 — reads / writes via `useBrushStore`. The
+ * synced store handles persistence (`cardboard.sync.brush`) and size
+ * clamping (1..20), so this panel owns no localStorage logic of its
+ * own. The brush list itself (`MOCK_BRUSHES`) still lives in
+ * `scene-fixtures.ts` since the catalog of brush kinds is panel
+ * presentation data, not synced runtime state.
  *
  * Command-registry contract: every clickable affordance ALSO exists
  * as a runtime-registered command so the command palette + global
  * keybinding handler can drive the same actions. The per-brush
  * commands are registered dynamically in a `useEffect` keyed on the
- * brush list so adding/removing a row re-registers cleanly.
+ * brush list so adding/removing a row re-registers cleanly. Each
+ * command body calls `useBrushStore.getState()` directly — no
+ * closure-ref dance needed.
  */
 
 /** Brush kind → icon component. The brush "kind" field in
@@ -52,12 +57,6 @@ const BRUSH_ICON_BY_KIND: Record<string, LucideIcon> = {
   rect: RectangleHorizontal,
 };
 
-const LS_ACTIVE_KIND = "cardboard.scene.brush.activeKind";
-const LS_SIZE = "cardboard.scene.brush.size";
-
-const DEFAULT_BRUSH_ID =
-  (MOCK_BRUSHES as readonly BrushRow[])[0]?.id ?? "brush-single";
-const DEFAULT_SIZE = 1;
 const MIN_SIZE = 1;
 const MAX_SIZE = 20;
 
@@ -66,58 +65,18 @@ const MAX_SIZE = 20;
  *  size controls disappear off the right edge. */
 const MIN_PANEL_WIDTH = 120;
 
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
 function findBrush(brushId: string): BrushRow | undefined {
   return (MOCK_BRUSHES as readonly BrushRow[]).find((b) => b.id === brushId);
-}
-
-function clampSize(n: number): number {
-  if (!Number.isFinite(n)) return DEFAULT_SIZE;
-  return Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(n)));
 }
 
 export function BrushPanel(): React.JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [panelWidth, setPanelWidth] = React.useState<number>(0);
 
-  const [activeKind, setActiveKind] = React.useState<string>(() => {
-    const stored = readLS(LS_ACTIVE_KIND);
-    if (stored && findBrush(stored)) return stored;
-    return DEFAULT_BRUSH_ID;
-  });
-
-  const [size, setSize] = React.useState<number>(() => {
-    const raw = readLS(LS_SIZE);
-    if (raw === null) return DEFAULT_SIZE;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? clampSize(parsed) : DEFAULT_SIZE;
-  });
-
-  // Persist on change.
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_KIND, activeKind);
-  }, [activeKind]);
-
-  React.useEffect(() => {
-    writeLS(LS_SIZE, String(size));
-  }, [size]);
+  // Subscribe to the synced brush store. Each selector returns a stable
+  // primitive so unrelated store changes don't re-render the panel.
+  const activeKind = useBrushStore((s) => s.kind);
+  const size = useBrushStore((s) => s.size);
 
   // ResizeObserver — drives the tiny-width fallback so we don't render
   // a half-hidden, unusable panel when Dockview squeezes us below
@@ -138,44 +97,30 @@ export function BrushPanel(): React.JSX.Element {
   }, []);
 
   // --- Canonical handlers (single source of truth) -----------------
-  // Both button onClicks and command `run` delegate to these via
-  // handler refs, matching the pattern in `state/README.md`.
+  // Both button onClicks and command `run` delegate through these by
+  // calling `useBrushStore.getState()` directly, matching the
+  // ToolPalettePanel pattern.
 
   const handleSelectBrush = React.useCallback((brushId: string) => {
     if (!findBrush(brushId)) return;
-    setActiveKind(brushId);
+    useBrushStore.getState().setKind(brushId);
   }, []);
 
   const handleSizeUp = React.useCallback(() => {
-    setSize((s) => clampSize(s + 1));
+    useBrushStore.getState().sizeUp();
   }, []);
 
   const handleSizeDown = React.useCallback(() => {
-    setSize((s) => clampSize(s - 1));
+    useBrushStore.getState().sizeDown();
   }, []);
 
   const handleSizeSet = React.useCallback((next: number) => {
-    setSize(clampSize(next));
+    useBrushStore.getState().setSize(next);
   }, []);
 
-  // --- Command-registry refs ---------------------------------------
-  // Keep refs current so the registration effects don't need to
-  // re-run on every handler identity change.
-  const selectBrushRef = React.useRef(handleSelectBrush);
-  const sizeUpRef = React.useRef(handleSizeUp);
-  const sizeDownRef = React.useRef(handleSizeDown);
-
-  React.useEffect(() => {
-    selectBrushRef.current = handleSelectBrush;
-  }, [handleSelectBrush]);
-  React.useEffect(() => {
-    sizeUpRef.current = handleSizeUp;
-  }, [handleSizeUp]);
-  React.useEffect(() => {
-    sizeDownRef.current = handleSizeDown;
-  }, [handleSizeDown]);
-
   // Static commands (size up / down). Registered once on mount.
+  // Command bodies read live setters via `useBrushStore.getState()`
+  // so no ref dance is required.
   React.useEffect(() => {
     const unregUp = registerCommand({
       id: "scene.brush.sizeUp",
@@ -183,7 +128,7 @@ export function BrushPanel(): React.JSX.Element {
       category: "Brush",
       keywords: ["brush", "size", "increase", "bigger", "grow"],
       icon: <Plus size={14} />,
-      run: () => sizeUpRef.current(),
+      run: () => useBrushStore.getState().sizeUp(),
     });
     const unregDown = registerCommand({
       id: "scene.brush.sizeDown",
@@ -191,7 +136,7 @@ export function BrushPanel(): React.JSX.Element {
       category: "Brush",
       keywords: ["brush", "size", "decrease", "smaller", "shrink"],
       icon: <Minus size={14} />,
-      run: () => sizeDownRef.current(),
+      run: () => useBrushStore.getState().sizeDown(),
     });
     return () => {
       unregUp();
@@ -201,7 +146,8 @@ export function BrushPanel(): React.JSX.Element {
 
   // Dynamic per-brush commands. Re-registers when the brush list
   // identity changes; returns an unregister array per
-  // `state/README.md`'s "Dynamic registrations" pattern.
+  // `state/README.md`'s "Dynamic registrations" pattern. MOCK_BRUSHES
+  // is a module-level constant so empty deps are correct.
   React.useEffect(() => {
     const unregs = (MOCK_BRUSHES as readonly BrushRow[]).map((b) =>
       registerCommand({
@@ -210,14 +156,12 @@ export function BrushPanel(): React.JSX.Element {
         category: "Brush",
         keywords: ["brush", "set", b.name, b.kind],
         description: b.description,
-        run: () => selectBrushRef.current(b.id),
+        run: () => useBrushStore.getState().setKind(b.id),
       }),
     );
     return () => {
       for (const u of unregs) u();
     };
-    // MOCK_BRUSHES is a module-level constant; empty deps mirror
-    // BrushPanel/ToolPalettePanel — identity is stable per module load.
   }, []);
 
   const sizeAtMin = size <= MIN_SIZE;
