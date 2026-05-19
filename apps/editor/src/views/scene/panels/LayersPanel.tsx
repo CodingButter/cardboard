@@ -6,10 +6,15 @@ import {
   EyeOff,
   Layers,
   Plus,
+  Trash2,
 } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import {
+  useLayerStore,
+  type CustomLayer,
+} from "../../../state/useLayerStore";
 import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
 
 /**
@@ -22,17 +27,22 @@ import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
  * active painting layer (the one new paint strokes target) is shown
  * with an accent border + faint background tint.
  *
- * Persistence contract (Wave 2 placeholder; replaced by the real
- * scene-layer store in a later wave):
- *   - `cardboard.scene.layers.activeId`    string layer id
- *   - `cardboard.scene.layers.visibility`  JSON Record<id, boolean>
- *   - `cardboard.scene.layers.order`       JSON string[] of layer ids
+ * State source: Wave 3.3 — reads / writes via `useLayerStore`. The
+ * synced store handles persistence (`cardboard.sync.layer`) and
+ * cross-window propagation, so this panel owns no localStorage logic
+ * of its own. The built-in layer catalog (`MOCK_LAYERS`) still lives
+ * in `scene-fixtures.ts` since the built-in roster is panel
+ * presentation data; user-added layers live in `customLayers` on the
+ * store and are merged in at render time.
  *
- * Every interactive control is also registered as a command via
- * `registerCommand` so the command palette and any future
- * keybindings can drive the same actions. Per-layer commands are
- * dynamic — re-registered whenever the order array changes (because
- * the up/down command titles reflect the layer's *current* name).
+ * Command-registry contract: every clickable affordance ALSO exists
+ * as a runtime-registered command so the command palette + global
+ * keybinding handler can drive the same actions. Per-layer commands
+ * (toggle, activate, move up/down, delete) are registered dynamically
+ * in a `useEffect` keyed on the resolved layer list so the up/down
+ * command *titles* reflect each layer's current position. Each
+ * command body calls `useLayerStore.getState()` directly — no
+ * closure-ref dance.
  */
 
 // ---------------------------------------------------------------------------
@@ -51,86 +61,11 @@ const LAYER_DESCRIPTIONS: Record<string, string> = {
 
 interface LayerView extends LayerRow {
   description: string;
-}
-
-// ---------------------------------------------------------------------------
-// localStorage helpers (mirror ToolPalettePanel's pattern). The two
-// JSON-shaped keys get safe parse/stringify wrappers; both swallow
-// quota / private-mode / corrupt-value failures so the panel always
-// renders something even if storage is wedged.
-
-const LS_ACTIVE_ID = "cardboard.scene.layers.activeId";
-const LS_VISIBILITY = "cardboard.scene.layers.visibility";
-const LS_ORDER = "cardboard.scene.layers.order";
-
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
-function readJSON<T>(key: string, fallback: T): T {
-  const raw = readLS(key);
-  if (raw == null) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJSON(key: string, value: unknown): void {
-  try {
-    writeLS(key, JSON.stringify(value));
-  } catch {
-    /* JSON.stringify can throw on circular refs — defensive only */
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Initial-state builders. Defaults are computed from MOCK_LAYERS so a
-// future fixture edit (added/removed layer) flows through without
-// touching this file.
-
-function defaultVisibility(): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const l of MOCK_LAYERS) out[l.id] = l.visible;
-  return out;
-}
-
-function defaultOrder(): string[] {
-  return MOCK_LAYERS.map((l) => l.id);
-}
-
-function defaultActiveId(): string {
-  return MOCK_LAYERS[0]?.id ?? "";
-}
-
-// Sanitize a persisted order array: keep only ids that still exist in
-// MOCK_LAYERS, then append any new layer ids that weren't in storage.
-// This makes the panel resilient to fixture additions across reloads.
-function reconcileOrder(stored: string[]): string[] {
-  // Widen to string so `stored` (plain strings) can be tested against
-  // the set without TS complaining that user-supplied ids aren't one
-  // of MOCK_LAYERS' literal-union keys.
-  const known = new Set<string>(MOCK_LAYERS.map((l) => l.id));
-  const filtered = stored.filter((id) => known.has(id));
-  for (const l of MOCK_LAYERS) {
-    if (!filtered.includes(l.id)) filtered.push(l.id);
-  }
-  return filtered;
+  /**
+   * `true` if the layer is user-added (lives in `customLayers`) and
+   * therefore deletable. Built-in fixture layers are not deletable.
+   */
+  isCustom: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,33 +76,43 @@ function reconcileOrder(stored: string[]): string[] {
 // breakpoint is cheaper than wiring `@container`.
 const COMPACT_WIDTH_PX = 160;
 
+/**
+ * Mint a fresh, collision-free id for a user-added layer. The pattern
+ * is `custom-N` where N is the smallest positive integer not already
+ * present in `order`. Idempotent enough for rapid clicks since the
+ * store's `add` action is itself idempotent on id collisions.
+ */
+function mintCustomLayerId(existingIds: readonly string[]): string {
+  const taken = new Set(existingIds);
+  for (let i = 1; i < 10_000; i++) {
+    const id = `custom-${i}`;
+    if (!taken.has(id)) return id;
+  }
+  return `custom-${Date.now()}`;
+}
+
+/** Default color palette for newly-minted custom layers — cycles
+ *  through a handful of pleasant tailwind hues so consecutive
+ *  Add Layer clicks don't all look identical. */
+const CUSTOM_LAYER_PALETTE = [
+  "#f97316", // orange-500
+  "#22d3ee", // cyan-400
+  "#a3e635", // lime-400
+  "#f472b6", // pink-400
+  "#facc15", // yellow-400
+  "#60a5fa", // blue-400
+] as const;
+
 export function LayersPanel(): React.JSX.Element {
-  // ---- State -------------------------------------------------------------
+  // ---- Store subscriptions ----------------------------------------------
 
-  const [order, setOrder] = React.useState<string[]>(() =>
-    reconcileOrder(readJSON<string[]>(LS_ORDER, defaultOrder())),
-  );
+  const activeId = useLayerStore((s) => s.activeId);
+  const visibility = useLayerStore((s) => s.visibility);
+  const order = useLayerStore((s) => s.order);
+  const customLayers = useLayerStore((s) => s.customLayers);
 
-  const [visibility, setVisibility] = React.useState<Record<string, boolean>>(
-    () => {
-      const stored = readJSON<Record<string, boolean>>(
-        LS_VISIBILITY,
-        defaultVisibility(),
-      );
-      // Merge stored values over defaults so newly-added fixture layers
-      // pick up their initial `visible` flag without losing existing
-      // user toggles.
-      return { ...defaultVisibility(), ...stored };
-    },
-  );
+  // ---- Compact mode -----------------------------------------------------
 
-  const [activeId, setActiveId] = React.useState<string>(() => {
-    const stored = readLS(LS_ACTIVE_ID);
-    if (stored && MOCK_LAYERS.some((l) => l.id === stored)) return stored;
-    return defaultActiveId();
-  });
-
-  // Compact-mode flag driven by the panel root's measured width.
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const [compact, setCompact] = React.useState(false);
 
@@ -182,94 +127,64 @@ export function LayersPanel(): React.JSX.Element {
     return () => ro.disconnect();
   }, []);
 
-  // ---- Persistence -------------------------------------------------------
+  // ---- Canonical handlers (single source of truth) ----------------------
+  // Both button onClicks and command `run` delegate through these by
+  // calling `useLayerStore.getState()` directly — mirrors the
+  // ToolPalette / Brush / TilePreset pattern.
 
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_ID, activeId);
-  }, [activeId]);
-
-  React.useEffect(() => {
-    writeJSON(LS_VISIBILITY, visibility);
-  }, [visibility]);
-
-  React.useEffect(() => {
-    writeJSON(LS_ORDER, order);
-  }, [order]);
-
-  // ---- Handlers ----------------------------------------------------------
-
-  const toggleVisibility = React.useCallback((layerId: string) => {
-    setVisibility((prev) => ({
-      ...prev,
-      [layerId]: !(prev[layerId] ?? true),
-    }));
+  const handleActivate = React.useCallback((layerId: string) => {
+    useLayerStore.getState().activate(layerId);
   }, []);
 
-  const activateLayer = React.useCallback((layerId: string) => {
-    setActiveId(layerId);
+  const handleToggleVisibility = React.useCallback((layerId: string) => {
+    useLayerStore.getState().toggleVisibility(layerId);
   }, []);
 
-  const moveLayer = React.useCallback(
-    (layerId: string, direction: -1 | 1) => {
-      setOrder((prev) => {
-        const idx = prev.indexOf(layerId);
-        if (idx < 0) return prev;
-        const target = idx + direction;
-        if (target < 0 || target >= prev.length) return prev;
-        const next = prev.slice();
-        const [removed] = next.splice(idx, 1);
-        if (removed === undefined) return prev;
-        next.splice(target, 0, removed);
-        return next;
-      });
-    },
-    [],
-  );
-
-  // Add-layer is a stub for now — wave 2 of the scene-layer store
-  // will replace this with a real layer-creation flow (id minting,
-  // default color, optional name prompt). Until then we just log so
-  // the affordance is wired end-to-end and the command palette can
-  // exercise the same code path the button does.
-  const addLayer = React.useCallback(() => {
-    // eslint-disable-next-line no-console
-    console.log("[LayersPanel] scene.layer.add invoked (stub)");
+  const handleMoveUp = React.useCallback((layerId: string) => {
+    useLayerStore.getState().moveUp(layerId);
   }, []);
 
-  // Stable handler refs so the per-layer command registrations don't
-  // need to re-run on every render — only when the layer list (order)
-  // itself changes. Mirrors the README's canonical handler-ref pattern.
-  const toggleRef = React.useRef(toggleVisibility);
-  const activateRef = React.useRef(activateLayer);
-  const moveRef = React.useRef(moveLayer);
-  const addRef = React.useRef(addLayer);
-  React.useEffect(() => {
-    toggleRef.current = toggleVisibility;
-    activateRef.current = activateLayer;
-    moveRef.current = moveLayer;
-    addRef.current = addLayer;
-  }, [toggleVisibility, activateLayer, moveLayer, addLayer]);
-
-  // Static command — registered once. The handler reads through the
-  // ref so future state-aware iterations of `addLayer` flow through
-  // without re-registering the command.
-  React.useEffect(() => {
-    return registerCommand({
-      id: "scene.layer.add",
-      title: "Add Layer",
-      category: "Layer",
-      keywords: ["layer", "add", "new", "create"],
-      run: () => addRef.current(),
-    });
+  const handleMoveDown = React.useCallback((layerId: string) => {
+    useLayerStore.getState().moveDown(layerId);
   }, []);
 
-  // ---- Resolved layer list (ordered) ------------------------------------
+  const handleDelete = React.useCallback((layerId: string) => {
+    useLayerStore.getState().delete(layerId);
+  }, []);
+
+  const handleAdd = React.useCallback(() => {
+    const state = useLayerStore.getState();
+    const id = mintCustomLayerId(state.order);
+    // Derive a friendly default name like "Layer 1" from the custom
+    // count; the user can rename later when a rename UI lands.
+    const n = state.customLayers.length + 1;
+    const color =
+      CUSTOM_LAYER_PALETTE[
+        state.customLayers.length % CUSTOM_LAYER_PALETTE.length
+      ] ?? "#f59e0b";
+    const layer: CustomLayer = { id, name: `Layer ${n}`, color };
+    state.add(layer);
+  }, []);
+
+  // ---- Resolved layer list (ordered, built-ins + custom) ----------------
 
   const layers: LayerView[] = React.useMemo(() => {
     // Widen the fixture rows to LayerRow so the Map's value type isn't
     // narrowed by the `as const` literal union on MOCK_LAYERS.
-    const rows: LayerRow[] = MOCK_LAYERS.map((l) => ({ ...l }));
-    const byId = new Map<string, LayerRow>(rows.map((l) => [l.id, l]));
+    const builtin: LayerRow[] = MOCK_LAYERS.map((l) => ({ ...l }));
+    const customSet = new Set(customLayers.map((c) => c.id));
+    const byId = new Map<string, LayerRow>(builtin.map((l) => [l.id, l]));
+    for (const c of customLayers) {
+      byId.set(c.id, {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        // Custom layers default to visible until toggled — the
+        // visibility map ultimately drives the eye icon, this only
+        // matters if `byId` is consulted before the visibility map.
+        visible: true,
+      });
+    }
     const out: LayerView[] = [];
     for (const id of order) {
       const row = byId.get(id);
@@ -277,19 +192,41 @@ export function LayersPanel(): React.JSX.Element {
       out.push({
         ...row,
         description: LAYER_DESCRIPTIONS[row.id] ?? `${row.name} layer.`,
+        isCustom: customSet.has(row.id),
       });
     }
     return out;
-  }, [order]);
+  }, [order, customLayers]);
 
-  // ---- Command registry (dynamic per-layer) -----------------------------
+  // ---- Static command (Add Layer) — registered once on mount -----------
+
+  React.useEffect(() => {
+    return registerCommand({
+      id: "scene.layer.add",
+      title: "Add Layer",
+      category: "Layer",
+      keywords: ["layer", "add", "new", "create"],
+      icon: <Plus size={14} />,
+      run: () => {
+        const state = useLayerStore.getState();
+        const id = mintCustomLayerId(state.order);
+        const n = state.customLayers.length + 1;
+        const color =
+          CUSTOM_LAYER_PALETTE[
+            state.customLayers.length % CUSTOM_LAYER_PALETTE.length
+          ] ?? "#f59e0b";
+        state.add({ id, name: `Layer ${n}`, color });
+      },
+    });
+  }, []);
+
+  // ---- Dynamic per-layer commands ---------------------------------------
   //
-  // Each layer contributes four commands. We flatten the per-layer
-  // unregister functions into a single array, then cleanup all of them
-  // when the order list (or layer roster) changes. We intentionally
-  // depend on `layers` so the up/down command *titles* reflect the
-  // current position — palette users see "Move Layer Up: Walls" with
-  // Walls in its real spot, not a stale snapshot.
+  // Each layer contributes up to five commands: toggle visibility,
+  // activate (select), move up (when not at top), move down (when not
+  // at bottom), and delete (custom layers only). Re-registers when
+  // `layers` (or `order`) changes so palette titles reflect the
+  // current position + roster.
 
   React.useEffect(() => {
     const unregs: Array<() => void> = [];
@@ -300,18 +237,18 @@ export function LayersPanel(): React.JSX.Element {
 
       unregs.push(
         registerCommand({
-          id: `scene.layer.toggle.${l.id}`,
+          id: `scene.layer.toggleVisible.${l.id}`,
           title: `Toggle Visibility: ${l.name}`,
           category: "Layer",
           keywords: ["layer", "visibility", "toggle", l.name.toLowerCase()],
-          run: () => toggleRef.current(l.id),
+          run: () => useLayerStore.getState().toggleVisibility(l.id),
         }),
         registerCommand({
-          id: `scene.layer.activate.${l.id}`,
+          id: `scene.layer.select.${l.id}`,
           title: `Activate Layer: ${l.name}`,
           category: "Layer",
           keywords: ["layer", "activate", "select", l.name.toLowerCase()],
-          run: () => activateRef.current(l.id),
+          run: () => useLayerStore.getState().activate(l.id),
         }),
       );
 
@@ -321,18 +258,18 @@ export function LayersPanel(): React.JSX.Element {
       if (canMoveUp) {
         unregs.push(
           registerCommand({
-            id: `scene.layer.up.${l.id}`,
+            id: `scene.layer.moveUp.${l.id}`,
             title: `Move Layer Up: ${l.name}`,
             category: "Layer",
             keywords: ["layer", "move", "up", "reorder", l.name.toLowerCase()],
-            run: () => moveRef.current(l.id, -1),
+            run: () => useLayerStore.getState().moveUp(l.id),
           }),
         );
       }
       if (canMoveDown) {
         unregs.push(
           registerCommand({
-            id: `scene.layer.down.${l.id}`,
+            id: `scene.layer.moveDown.${l.id}`,
             title: `Move Layer Down: ${l.name}`,
             category: "Layer",
             keywords: [
@@ -342,7 +279,22 @@ export function LayersPanel(): React.JSX.Element {
               "reorder",
               l.name.toLowerCase(),
             ],
-            run: () => moveRef.current(l.id, 1),
+            run: () => useLayerStore.getState().moveDown(l.id),
+          }),
+        );
+      }
+
+      // Delete is only meaningful for custom layers (the store's
+      // delete is a no-op on built-ins, but registering a delete
+      // command for an undeletable row is misleading in the palette).
+      if (l.isCustom) {
+        unregs.push(
+          registerCommand({
+            id: `scene.layer.delete.${l.id}`,
+            title: `Delete Layer: ${l.name}`,
+            category: "Layer",
+            keywords: ["layer", "delete", "remove", l.name.toLowerCase()],
+            run: () => useLayerStore.getState().delete(l.id),
           }),
         );
       }
@@ -375,10 +327,11 @@ export function LayersPanel(): React.JSX.Element {
             canMoveUp={canMoveUp}
             canMoveDown={canMoveDown}
             compact={compact}
-            onToggleVisibility={toggleVisibility}
-            onActivate={activateLayer}
-            onMoveUp={(id) => moveLayer(id, -1)}
-            onMoveDown={(id) => moveLayer(id, 1)}
+            onToggleVisibility={handleToggleVisibility}
+            onActivate={handleActivate}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+            onDelete={handleDelete}
           />
         );
       })}
@@ -386,7 +339,8 @@ export function LayersPanel(): React.JSX.Element {
       {/* Add Layer — Map.png shows a full-width ghost button below the
           list. The command (`scene.layer.add`) is registered above so
           the palette and any future keybindings can drive the same
-          action. Stub `run` logs to the console for now. */}
+          action. Mints a fresh `custom-N` id and delegates to the
+          store's `add` action. */}
       <Tooltip
         side="top"
         stages={[
@@ -397,8 +351,9 @@ export function LayersPanel(): React.JSX.Element {
               <div>
                 <div className="font-semibold">Add Layer</div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                  Adds a new custom layer to the scene. (Coming soon —
-                  currently a stub.)
+                  Adds a new custom layer to the scene. The new layer
+                  appears at the bottom of the stack and is visible by
+                  default.
                 </div>
               </div>
             ),
@@ -408,7 +363,7 @@ export function LayersPanel(): React.JSX.Element {
         <button
           type="button"
           aria-label="Add Layer"
-          onClick={addLayer}
+          onClick={handleAdd}
           className={[
             "flex items-center justify-center gap-1 w-full min-h-[22px] h-[22px]",
             "px-1.5 mt-0.5 rounded",
@@ -441,6 +396,7 @@ interface LayerRowViewProps {
   onActivate: (id: string) => void;
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
 function LayerRowView({
@@ -454,6 +410,7 @@ function LayerRowView({
   onActivate,
   onMoveUp,
   onMoveDown,
+  onDelete,
 }: LayerRowViewProps): React.JSX.Element {
   const EyeIcon = isVisible ? Eye : EyeOff;
 
@@ -662,6 +619,44 @@ function LayerRowView({
             </button>
           </Tooltip>
         </div>
+      ) : null}
+
+      {/* Delete — only rendered for user-added custom layers. Built-in
+          fixture layers are not deletable, so we omit the affordance
+          entirely rather than disable it. Hidden in compact mode (still
+          command-palette reachable via `scene.layer.delete.<id>`). */}
+      {layer.isCustom && !compact ? (
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 1000, content: <span>Delete</span> },
+            {
+              delay: 3000,
+              content: (
+                <div>
+                  <div className="font-semibold">Delete {layer.name}</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                    Removes this custom layer from the scene. Built-in
+                    layers cannot be deleted.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label={`Delete layer: ${layer.name}`}
+            onClick={() => onDelete(layer.id)}
+            className={[
+              "flex items-center justify-center w-4 h-4 rounded-sm shrink-0",
+              "text-(--color-fg-muted) hover:text-rose-400 hover:bg-rose-500/10",
+              "transition-colors",
+            ].join(" ")}
+          >
+            <Trash2 size={11} aria-hidden="true" />
+          </button>
+        </Tooltip>
       ) : null}
     </div>
   );
