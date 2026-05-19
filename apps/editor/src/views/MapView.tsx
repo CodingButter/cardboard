@@ -3,7 +3,7 @@ import { Construction } from "lucide-react";
 import type { DockviewApi, SerializedDockview } from "dockview";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useTabContextSlot } from "../lib/tabContextSlot";
-import { SceneTabContextPicker } from "./scene/SceneTabContextPicker";
+import { SceneTopBarSlot } from "./scene/SceneTopBarSlot";
 import { useRoute } from "../lib/router";
 import {
   DockShell,
@@ -101,8 +101,10 @@ import {
  * existing `LayersPanel`.
  *
  * Tab-row contextual slot:
- *   MapView registers the Scene picker (`<SceneTabContextPicker/>`)
- *   into the tab strip's per-tab right slot on mount. The hook's
+ *   MapView registers the SceneTopBarSlot (saved-state pip + scene
+ *   dimensions + painted-cell count) into the tab strip's per-tab
+ *   right slot on mount. The Scene picker itself has been relocated
+ *   under the MapCanvas panel (see `MapCanvasPanel`). The hook's
  *   cleanup clears the slot when the view unmounts.
  */
 export interface MapViewProps {
@@ -374,10 +376,10 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
   const projectId = route.projectId ?? "no-project";
 
   // Stable reference — passing a new JSX element each render would
-  // thrash the slot effect's deps. The picker reads everything it
-  // needs from `<ActiveSceneProvider/>`.
-  const picker = React.useMemo(() => <SceneTabContextPicker />, []);
-  useTabContextSlot(picker);
+  // thrash the slot effect's deps. The slot content reads everything
+  // it needs from `<ActiveSceneProvider/>` + fixtures.
+  const topBarSlot = React.useMemo(() => <SceneTopBarSlot />, []);
+  useTabContextSlot(topBarSlot);
 
   // Guard rail: if for some reason there's no project (e.g. someone
   // navigates here without one), render a polite empty state rather

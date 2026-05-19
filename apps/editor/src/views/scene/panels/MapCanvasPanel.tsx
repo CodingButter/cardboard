@@ -3,6 +3,7 @@ import { Eye, EyeOff, Map as MapIcon, Plus } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { SceneTabContextPicker } from "../SceneTabContextPicker";
 import { MOCK_LAYERS, MOCK_SCENE_SETTINGS, type LayerRow } from "../scene-fixtures";
 
 /**
@@ -59,6 +60,11 @@ const DEFAULT_ZOOM = 1.0;
 const MIN_RENDER_PX = 80;
 /** Height of the floating layer-chip strip in CSS pixels. */
 const CHIP_STRIP_HEIGHT = 40;
+/** Height of the scene-picker strip in CSS pixels. Sits ABOVE the
+ *  chip strip and BELOW the canvas content, hosting the relocated
+ *  SceneTabContextPicker (previously mounted into the top-bar slot).
+ *  Sized to fit the picker's 32px trigger + 4px of breathing room. */
+const PICKER_STRIP_HEIGHT = 36;
 /** Height (in CSS px) of the X-axis ruler band drawn ABOVE the playfield.
  *  Reserved BEFORE letterboxing so numbers always have a dedicated strip. */
 const RULER_TOP_PX = 18;
@@ -434,14 +440,14 @@ export function MapCanvasPanel(): React.JSX.Element {
   }, []);
 
   // Effective drawable area is the panel minus the bottom chip strip
-  // (so the canvas never paints under the chips). Width is unchanged.
-  // We also reserve a ruler band on the TOP and LEFT — the playfield
-  // letterbox is computed within that inset region so the rulers sit
-  // outside (not on top of) the grid.
+  // AND the bottom scene-picker strip (so the canvas never paints
+  // under either). Width is unchanged. We also reserve a ruler band on
+  // the TOP and LEFT — the playfield letterbox is computed within that
+  // inset region so the rulers sit outside (not on top of) the grid.
   const dims = MOCK_SCENE_SETTINGS.dimensions;
   const layout = React.useMemo(() => {
     const canvasW = size.w;
-    const canvasH = Math.max(0, size.h - CHIP_STRIP_HEIGHT);
+    const canvasH = Math.max(0, size.h - CHIP_STRIP_HEIGHT - PICKER_STRIP_HEIGHT);
     if (canvasW <= 0 || canvasH <= 0) {
       return {
         cell: 0,
@@ -1193,7 +1199,8 @@ export function MapCanvasPanel(): React.JSX.Element {
   const tooSmall =
     size.w > 0 &&
     size.h > 0 &&
-    (size.w < MIN_RENDER_PX || size.h < MIN_RENDER_PX + CHIP_STRIP_HEIGHT);
+    (size.w < MIN_RENDER_PX ||
+      size.h < MIN_RENDER_PX + CHIP_STRIP_HEIGHT + PICKER_STRIP_HEIGHT);
 
   const coordsLabel = hoverCell ? `${hoverCell.x}, ${hoverCell.y}` : "—, —";
 
@@ -1217,7 +1224,7 @@ export function MapCanvasPanel(): React.JSX.Element {
           onClick={handleClick}
           onWheel={handleWheel}
           className="absolute left-0 right-0 top-0 block cursor-crosshair"
-          style={{ bottom: `${CHIP_STRIP_HEIGHT}px` }}
+          style={{ bottom: `${CHIP_STRIP_HEIGHT + PICKER_STRIP_HEIGHT}px` }}
           aria-label="Scene map canvas"
         />
       )}
@@ -1236,6 +1243,22 @@ export function MapCanvasPanel(): React.JSX.Element {
           {coordsLabel}
         </div>
       )}
+
+      {/* Scene-picker strip — relocated from the top-bar slot. Sits
+       *  above the layer chip strip + below the canvas content so it
+       *  doesn't fight the X-axis ruler. Subtle background (matches
+       *  the chip strip) for a contiguous bottom-chrome stack. */}
+      <div
+        data-slot="scene-picker-strip"
+        className="absolute left-0 right-0 flex items-center border-t border-(--color-border-strong) bg-zinc-900/70 px-2 backdrop-blur"
+        style={{
+          bottom: `${CHIP_STRIP_HEIGHT}px`,
+          height: `${PICKER_STRIP_HEIGHT}px`,
+          paddingLeft: `${RULER_LEFT_PX + 6}px`,
+        }}
+      >
+        <SceneTabContextPicker />
+      </div>
 
       {/* Bottom layer-chip strip — primary navigation chips. Wraps to
        *  multiple rows at narrow widths instead of spawning a
