@@ -277,7 +277,7 @@ export const MOCK_QUICK_TOOLS = [
   },
   {
     id: "ambush-cover",
-    name: "Ambush Cover",
+    name: "Cover",
     description:
       "Tag the selection as ambush cover — AI uses it for line-of-sight breaks and flanking.",
   },

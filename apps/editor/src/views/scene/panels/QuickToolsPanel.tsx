@@ -10,10 +10,10 @@ import { MOCK_QUICK_TOOLS, type QuickToolRow } from "../scene-fixtures";
  *
  * Visual target: the QUICK TOOLS pill row in `Editor Design/Map.png`'s
  * left column. Each chip is a quick-apply tag (solid, door, trigger,
- * spawn, exit, secret, ambush-cover, decor, lit, loot). Clicking a
- * chip toggles whether that tag is "applied" to the current
- * selection. Wave 3 will hook this into the real selection store —
- * for now the applied set persists per-page in localStorage.
+ * spawn, exit, secret, cover, decor, lit, loot). Clicking a chip
+ * toggles whether that tag is "applied" to the current selection.
+ * Wave 3 will hook this into the real selection store — for now the
+ * applied set persists per-page in localStorage.
  *
  * Persistence contract (page-scope localStorage):
  *   - `cardboard.scene.quickTools.applied`  JSON string[], default [].
@@ -25,6 +25,12 @@ import { MOCK_QUICK_TOOLS, type QuickToolRow } from "../scene-fixtures";
  */
 
 const LS_APPLIED = "cardboard.scene.quickTools.applied";
+
+// Below this width the panel renders a "Resize panel" fallback instead
+// of the chip grid. Matches the LayersPanel responsive pattern — a
+// ResizeObserver on the root drives the breakpoint flip because
+// container queries aren't wired in this codebase's Tailwind setup.
+const TINY_WIDTH_PX = 110;
 
 function readLS(key: string): string | null {
   try {
@@ -88,6 +94,21 @@ export function QuickToolsPanel(): React.JSX.Element {
   React.useEffect(() => {
     writeJSON(LS_APPLIED, applied);
   }, [applied]);
+
+  // --- Tiny-width fallback driven by the panel root's measured width.
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const [tiny, setTiny] = React.useState(false);
+
+  React.useEffect(() => {
+    const node = rootRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setTiny(w > 0 && w < TINY_WIDTH_PX);
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
 
   // --- Canonical handlers (single source of truth) -----------------
   // Both chip onClicks and command `run` delegate to these via
@@ -155,113 +176,132 @@ export function QuickToolsPanel(): React.JSX.Element {
   // Outer container is just the `data-panel` hook. DockShell wraps
   // this in `<PanelSurface/>` (raised card with p-2 inner padding),
   // so this wrapper only owns layout (flex column + gap between the
-  // header readout and the chip wrap), NOT padding or surface styling.
+  // eyebrow header and the chip wrap), NOT padding or surface styling.
+  // `overflow-x-hidden` guards against the loudest chip label
+  // overflowing the container at narrow widths.
   return (
     <div
+      ref={rootRef}
       data-panel="quick-tools"
-      className="h-full w-full flex flex-col gap-2 overflow-y-auto"
+      className="h-full w-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden"
     >
-      {/*
-        Chip wrap + inline clear. flex-wrap with gap-1 lets chips reflow
-        naturally: single column at very narrow widths (~120px),
-        several columns as the panel grows. Each chip has a small
-        min-width so all 10 chips fit in ~2–3 rows inside the default
-        Scene-layout panel (~180×80px). `whitespace-nowrap` keeps
-        multi-word names ("Ambush Cover") on one line. No horizontal
-        scrollbar — the row wraps instead.
-
-        The "Clear all" affordance is rendered as a trailing ghost
-        `×` chip inline with the toggle chips, but ONLY when at least
-        one chip is applied. This removes the persistent eyebrow +
-        button bar (~16–20px of header chrome) that was eating the
-        default panel's vertical budget.
-      */}
-      <div
-        className="flex flex-wrap gap-1"
-        role="group"
-        aria-label="Quick tools"
-      >
-        {(MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) => {
-          const active = applied.includes(t.id);
-          return (
-            <Tooltip
-              key={t.id}
-              side="top"
-              stages={[
-                { delay: 1000, content: <span>{t.name}</span> },
-                {
-                  delay: 3000,
-                  content: (
-                    <div>
-                      <div className="font-semibold">{t.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                        {t.description}
+      {tiny ? (
+        <div className="flex items-center justify-center h-full text-[10px] text-(--color-fg-muted) text-center px-2">
+          Resize panel
+        </div>
+      ) : (
+        <>
+          {/*
+            Eyebrow header — matches the SCENE-style header pattern used
+            across sibling panels (Output / Problems / TilePresets).
+            Shows the panel name, an optional applied-count badge, and
+            inline Clear button (replaces the trailing × chip that
+            used to live in the chip wrap, which felt like an
+            ambiguous 11th chip).
+          */}
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+              Quick Tools{appliedCount > 0 ? ` (${appliedCount})` : ""}
+            </div>
+            {hasAny ? (
+              <Tooltip
+                side="top"
+                stages={[
+                  { delay: 1000, content: <span>Clear all</span> },
+                  {
+                    delay: 3000,
+                    content: (
+                      <div>
+                        <div className="font-semibold">Clear All</div>
+                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                          Remove every applied quick-tool tag from the current
+                          selection in one step.
+                        </div>
                       </div>
-                    </div>
-                  ),
-                },
-              ]}
-            >
-              <button
-                type="button"
-                aria-label={t.name}
-                aria-pressed={active}
-                onClick={() => handleToggle(t.id)}
-                className={[
-                  "min-w-[44px] h-5 px-1.5 rounded-full",
-                  "text-[9px] uppercase tracking-wide whitespace-nowrap",
-                  "flex items-center justify-center",
-                  "border transition-colors",
-                  active
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
-                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                ].join(" ")}
+                    ),
+                  },
+                ]}
               >
-                {t.name}
-              </button>
-            </Tooltip>
-          );
-        })}
-        {hasAny ? (
-          <Tooltip
-            side="top"
-            stages={[
-              {
-                delay: 1000,
-                content: <span>Clear all ({appliedCount})</span>,
-              },
-              {
-                delay: 3000,
-                content: (
-                  <div>
-                    <div className="font-semibold">Clear All Quick-Tools</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                      Remove every applied quick-tool tag from the current
-                      selection in one step.
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
+                <button
+                  type="button"
+                  aria-label="Clear all applied quick tools"
+                  onClick={handleClearAll}
+                  className={[
+                    "h-4 w-4 rounded-full",
+                    "flex items-center justify-center",
+                    "bg-transparent border border-(--color-border)",
+                    "text-(--color-fg-muted)",
+                    "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                    "transition-colors",
+                  ].join(" ")}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            ) : null}
+          </div>
+
+          {/*
+            Chip wrap. flex-wrap with gap-1 lets chips reflow naturally:
+            single column at very narrow widths, several columns as the
+            panel grows. `whitespace-nowrap` on each chip keeps the
+            label on one line; combined with the outer
+            `overflow-x-hidden` the row wraps instead of forcing a
+            horizontal scrollbar.
+
+            Chip pattern matches Output / Problems / TilePresets:
+            `rounded-full px-2 py-1 text-[10px] uppercase tracking-wide`.
+            The active state is a calm amber tint (mirrors the
+            CellInspector tag-chip aesthetic) rather than a full fill,
+            so multiple active chips don't visually shout.
+          */}
+          <div
+            className="flex flex-wrap gap-1"
+            role="group"
+            aria-label="Quick tools"
           >
-            <button
-              type="button"
-              aria-label={`Clear all quick-tools (${appliedCount} applied)`}
-              onClick={handleClearAll}
-              className={[
-                "h-5 w-5 rounded-full",
-                "flex items-center justify-center",
-                "bg-transparent border border-(--color-border)",
-                "text-(--color-fg-muted)",
-                "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                "transition-colors",
-              ].join(" ")}
-            >
-              <X size={10} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        ) : null}
-      </div>
+            {(MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) => {
+              const active = applied.includes(t.id);
+              return (
+                <Tooltip
+                  key={t.id}
+                  side="top"
+                  stages={[
+                    { delay: 1000, content: <span>{t.name}</span> },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div>
+                          <div className="font-semibold">{t.name}</div>
+                          <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                            {t.description}
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <button
+                    type="button"
+                    aria-label={t.name}
+                    aria-pressed={active}
+                    onClick={() => handleToggle(t.id)}
+                    className={[
+                      "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide whitespace-nowrap",
+                      "border transition-colors",
+                      active
+                        ? "bg-amber-500/15 border-amber-500 text-amber-300"
+                        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                    ].join(" ")}
+                  >
+                    {t.name}
+                  </button>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

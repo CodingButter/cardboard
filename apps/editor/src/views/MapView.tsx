@@ -260,7 +260,7 @@ function buildDefaultLayout(): SerializedDockview {
                       activeView: "cell-inspector",
                       id: "cell-inspector-group",
                     },
-                    size: 305,
+                    size: 274,
                   },
                   {
                     type: "leaf",
@@ -278,7 +278,7 @@ function buildDefaultLayout(): SerializedDockview {
                       activeView: "quick-tools",
                       id: "quick-tools-group",
                     },
-                    size: 119,
+                    size: 150,
                   },
                 ],
                 size: 255,

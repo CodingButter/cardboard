@@ -147,7 +147,7 @@ function defaultLayout(): SerializedDockview {
                       activeView: "cell-inspector",
                       id: "cell-inspector-group",
                     },
-                    size: 305,
+                    size: 274,
                   },
                   {
                     type: "leaf",
@@ -165,7 +165,7 @@ function defaultLayout(): SerializedDockview {
                       activeView: "quick-tools",
                       id: "quick-tools-group",
                     },
-                    size: 119,
+                    size: 150,
                   },
                 ],
                 size: 255,
@@ -367,7 +367,7 @@ function inspectLayout(): SerializedDockview {
                   activeView: "cell-inspector",
                   id: "cell-inspector-group",
                 },
-                size: 320,
+                size: 290,
               },
               {
                 type: "leaf",
@@ -385,7 +385,7 @@ function inspectLayout(): SerializedDockview {
                   activeView: "quick-tools",
                   id: "quick-tools-group",
                 },
-                size: 120,
+                size: 150,
               },
               {
                 type: "leaf",
