@@ -13,6 +13,7 @@ import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { ScrollRow } from "../../../components/ui/ScrollRow";
 import { registerCommand } from "../../../state/useCommandStore";
+import { useToolStore } from "../../../state/useToolStore";
 import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
 
 /**
@@ -24,9 +25,11 @@ import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
  * Tiles render an icon stacked over a small uppercase name label so
  * the affordance is self-describing without needing hover.
  *
- * Persistence contract (shared with sibling Scene panels):
- *   - `cardboard.scene.activeTool`             string, default "select"
- *   - `cardboard.scene.activeSubTool.<toolId>` string per tool
+ * State source: Wave 3.3 — reads / writes via `useToolStore`. The
+ * synced store handles persistence (`cardboard.sync.tool`) and
+ * cross-window propagation, so this panel owns no localStorage logic
+ * of its own. Sub-tool selection lives at `activeSubTool[toolId]` so
+ * each parent tool remembers its own last-picked variant.
  */
 
 /** Lucide icon name → component. Only icons referenced by `MOCK_TOOLS`
@@ -41,89 +44,46 @@ const TOOL_ICON_BY_NAME: Record<string, LucideIcon> = {
   PlusSquare,
 };
 
-const LS_ACTIVE_TOOL = "cardboard.scene.activeTool";
-const LS_ACTIVE_SUBTOOL_PREFIX = "cardboard.scene.activeSubTool.";
-
-const DEFAULT_TOOL_ID = "select";
-
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
 function findTool(toolId: string): ToolRow | undefined {
   return (MOCK_TOOLS as readonly ToolRow[]).find((t) => t.id === toolId);
 }
 
-/** Pick the persisted sub-tool for `toolId`, falling back to the first
- *  entry in `subTools` if present, else `undefined`. */
-function resolveSubTool(toolId: string): string | undefined {
+/** Pick the displayed sub-tool for `toolId`: prefer the store entry,
+ *  fall back to the first defined sub-tool. Returns undefined when the
+ *  tool has no sub-tools. Pure — never writes back. */
+function resolveSubTool(
+  toolId: string,
+  stored: Record<string, string>,
+): string | undefined {
   const tool = findTool(toolId);
   if (!tool?.subTools || tool.subTools.length === 0) return undefined;
-  const stored = readLS(LS_ACTIVE_SUBTOOL_PREFIX + toolId);
-  if (stored && tool.subTools.some((s) => s.id === stored)) return stored;
+  const hit = stored[toolId];
+  if (hit && tool.subTools.some((s) => s.id === hit)) return hit;
   return tool.subTools[0]?.id;
 }
 
 export function ToolPalettePanel(): React.JSX.Element {
-  const [activeTool, setActiveTool] = React.useState<string>(() => {
-    const stored = readLS(LS_ACTIVE_TOOL);
-    if (stored && findTool(stored)) return stored;
-    return DEFAULT_TOOL_ID;
-  });
+  // Subscribe to the synced tool store. Each selector returns a stable
+  // primitive / record reference so unrelated store changes don't
+  // re-render the panel.
+  const activeTool = useToolStore((s) => s.activeTool);
+  const activeSubToolMap = useToolStore((s) => s.activeSubTool);
 
-  const [activeSubTool, setActiveSubTool] = React.useState<string | undefined>(
-    () => resolveSubTool(activeTool),
+  const activeSubTool = React.useMemo(
+    () => resolveSubTool(activeTool, activeSubToolMap),
+    [activeTool, activeSubToolMap],
   );
 
-  // Persist active tool whenever it changes.
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_TOOL, activeTool);
-  }, [activeTool]);
-
-  // Persist active sub-tool whenever it changes (under the current
-  // tool's namespaced key).
-  React.useEffect(() => {
-    if (activeSubTool) {
-      writeLS(LS_ACTIVE_SUBTOOL_PREFIX + activeTool, activeSubTool);
-    }
-  }, [activeTool, activeSubTool]);
-
   const handleToolClick = React.useCallback((toolId: string) => {
-    setActiveTool(toolId);
-    setActiveSubTool(resolveSubTool(toolId));
+    useToolStore.getState().setActiveTool(toolId);
   }, []);
 
-  const handleSubToolClick = React.useCallback((subToolId: string) => {
-    setActiveSubTool(subToolId);
-  }, []);
-
-  // --- Command-registry refs ---------------------------------------
-  // Keep refs current so the registration effects don't need to
-  // re-run on every handler identity change. Matches the canonical
-  // pattern in `state/README.md` and the sibling `BrushPanel`.
-  const toolClickRef = React.useRef(handleToolClick);
-  const subToolClickRef = React.useRef(handleSubToolClick);
-
-  React.useEffect(() => {
-    toolClickRef.current = handleToolClick;
-  }, [handleToolClick]);
-  React.useEffect(() => {
-    subToolClickRef.current = handleSubToolClick;
-  }, [handleSubToolClick]);
+  const handleSubToolClick = React.useCallback(
+    (toolId: string, subToolId: string) => {
+      useToolStore.getState().setActiveSubTool(toolId, subToolId);
+    },
+    [],
+  );
 
   // Dynamic per-tool + per-sub-tool commands. Re-registers when the
   // tool list identity changes; aggregates unregister fns into an
@@ -131,6 +91,10 @@ export function ToolPalettePanel(): React.JSX.Element {
   // Sub-tool commands auto-activate the parent tool before selecting
   // the sub-tool so invoking e.g. "Sub-Tool: Select Polygon" from
   // the palette also switches the active tool to Select.
+  //
+  // No closure-ref dance is needed: each command body calls
+  // `useToolStore.getState()` directly, so it always reads the live
+  // setters from the store.
   React.useEffect(() => {
     const unregs: Array<() => void> = [];
     for (const t of MOCK_TOOLS as readonly ToolRow[]) {
@@ -141,7 +105,7 @@ export function ToolPalettePanel(): React.JSX.Element {
           category: "Tool",
           keywords: ["tool", "select", t.name, t.id],
           description: t.description,
-          run: () => toolClickRef.current(t.id),
+          run: () => useToolStore.getState().setActiveTool(t.id),
         }),
       );
       for (const s of t.subTools ?? []) {
@@ -153,8 +117,9 @@ export function ToolPalettePanel(): React.JSX.Element {
             keywords: ["tool", "sub-tool", "subtool", t.name, s.name, s.id],
             description: t.description,
             run: () => {
-              toolClickRef.current(t.id);
-              subToolClickRef.current(s.id);
+              const store = useToolStore.getState();
+              store.setActiveTool(t.id);
+              store.setActiveSubTool(t.id, s.id);
             },
           }),
         );
@@ -163,9 +128,8 @@ export function ToolPalettePanel(): React.JSX.Element {
     return () => {
       for (const u of unregs) u();
     };
-    // MOCK_TOOLS is a module-level constant today; the empty deps
-    // mirror BrushPanel's MOCK_BRUSHES treatment — identity is stable
-    // per module load.
+    // MOCK_TOOLS is a module-level constant — identity is stable per
+    // module load, so empty deps are correct.
   }, []);
 
   const tool = findTool(activeTool);
@@ -288,7 +252,7 @@ export function ToolPalettePanel(): React.JSX.Element {
                     type="button"
                     aria-label={s.name}
                     aria-pressed={active}
-                    onClick={() => handleSubToolClick(s.id)}
+                    onClick={() => handleSubToolClick(activeTool, s.id)}
                     className={[
                       "shrink-0 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
                       "border transition-colors",
