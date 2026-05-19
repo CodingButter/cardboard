@@ -14,8 +14,11 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
+  useTilePresetStore,
+  type TilePresetCategoryFilter,
+} from "../../../state/useTilePresetStore";
+import {
   MOCK_TILE_PRESETS,
-  type TilePresetCategory,
   type TilePresetRow,
 } from "../scene-fixtures";
 
@@ -38,48 +41,25 @@ import {
  * navigation, not a secondary control. Chips wrap to a second row
  * when the panel is narrow.
  *
- * Persistence contract (scoped to this panel):
- *   - `cardboard.scene.tilePreset.activeId`        string
- *   - `cardboard.scene.tilePreset.activeCategory`  TilePresetCategory | "all"
+ * State source: Wave 3.3 — reads / writes via `useTilePresetStore`.
+ * The synced store handles persistence (`cardboard.sync.tile-preset`)
+ * and cross-window propagation, so this panel owns no localStorage
+ * logic of its own. The preset catalog itself (`MOCK_TILE_PRESETS`)
+ * still lives in `scene-fixtures.ts` since the catalog is panel
+ * presentation data, not synced runtime state.
  *
  * Command registry contract — every interactive control here ALSO
  * registers a command via `registerCommand`. Dynamic per-preset +
  * per-category registrations live in `useEffect`s keyed on the
  * underlying list so the palette stays in sync with whatever
- * `MOCK_TILE_PRESETS` resolves to.
+ * `MOCK_TILE_PRESETS` resolves to. Each command body calls
+ * `useTilePresetStore.getState()` directly — no closure-ref dance.
  */
 
 // ---------------------------------------------------------------------------
-// Persistence keys + defaults
-
-const LS_ACTIVE_ID = "cardboard.scene.tilePreset.activeId";
-const LS_ACTIVE_CATEGORY = "cardboard.scene.tilePreset.activeCategory";
-
-type CategoryFilter = TilePresetCategory | "all";
-
-const DEFAULT_ACTIVE_ID: string = MOCK_TILE_PRESETS[0].id;
-const DEFAULT_CATEGORY: CategoryFilter = "all";
-
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Category metadata
+
+type CategoryFilter = TilePresetCategoryFilter;
 
 interface CategoryMeta {
   id: CategoryFilter;
@@ -138,17 +118,6 @@ function findCategoryMeta(id: CategoryFilter): CategoryMeta {
   return CATEGORY_META.find((c) => c.id === id) ?? CATEGORY_META[0]!;
 }
 
-function findPreset(id: string): TilePresetRow | undefined {
-  return (MOCK_TILE_PRESETS as readonly TilePresetRow[]).find(
-    (p) => p.id === id,
-  );
-}
-
-function isCategoryFilter(value: string | null): value is CategoryFilter {
-  if (!value) return false;
-  return CATEGORY_META.some((c) => c.id === value);
-}
-
 /** Per-category counts (incl. the "all" pseudo-category). */
 function useCategoryCounts(): Record<CategoryFilter, number> {
   return React.useMemo(() => {
@@ -169,52 +138,27 @@ function useCategoryCounts(): Record<CategoryFilter, number> {
 // Panel
 
 export function TilePresetPanel(): React.JSX.Element {
-  const [activeId, setActiveId] = React.useState<string>(() => {
-    const stored = readLS(LS_ACTIVE_ID);
-    if (stored && findPreset(stored)) return stored;
-    return DEFAULT_ACTIVE_ID;
-  });
+  // Subscribe to the synced tile-preset store. Each selector returns a
+  // stable primitive so unrelated store changes don't re-render the
+  // panel.
+  const activeId = useTilePresetStore((s) => s.activeId);
+  const activeCategory = useTilePresetStore((s) => s.activeCategory);
 
-  const [activeCategory, setActiveCategory] = React.useState<CategoryFilter>(
-    () => {
-      const stored = readLS(LS_ACTIVE_CATEGORY);
-      if (isCategoryFilter(stored)) return stored;
-      return DEFAULT_CATEGORY;
-    },
-  );
-
-  // Persist on change.
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_ID, activeId);
-  }, [activeId]);
-
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_CATEGORY, activeCategory);
-  }, [activeCategory]);
-
-  // Click handlers — the registered commands delegate to these via a
-  // ref so the registration effect doesn't need to re-run when the
-  // closures change.
+  // Canonical handlers (single source of truth). Both button onClicks
+  // and command `run` delegate through `useTilePresetStore.getState()`
+  // so no closure-ref dance is needed.
   const handlePresetClick = React.useCallback((presetId: string) => {
-    setActiveId(presetId);
+    useTilePresetStore.getState().setActiveId(presetId);
   }, []);
 
   const handleCategoryClick = React.useCallback((cat: CategoryFilter) => {
-    setActiveCategory(cat);
+    useTilePresetStore.getState().setActiveCategory(cat);
   }, []);
-
-  const presetHandlerRef = React.useRef(handlePresetClick);
-  React.useEffect(() => {
-    presetHandlerRef.current = handlePresetClick;
-  }, [handlePresetClick]);
-
-  const categoryHandlerRef = React.useRef(handleCategoryClick);
-  React.useEffect(() => {
-    categoryHandlerRef.current = handleCategoryClick;
-  }, [handleCategoryClick]);
 
   // Dynamic per-preset commands. Re-registers if MOCK_TILE_PRESETS
   // changes shape (which it will when the real store lands).
+  // MOCK_TILE_PRESETS is a module-level constant so empty deps are
+  // correct.
   React.useEffect(() => {
     const presets = MOCK_TILE_PRESETS as readonly TilePresetRow[];
     const unregs = presets.map((preset) =>
@@ -224,7 +168,7 @@ export function TilePresetPanel(): React.JSX.Element {
         category: "Tile",
         keywords: ["tile", "preset", preset.category, preset.name],
         description: preset.description,
-        run: () => presetHandlerRef.current(preset.id),
+        run: () => useTilePresetStore.getState().setActiveId(preset.id),
       }),
     );
     return () => unregs.forEach((u) => u());
@@ -239,7 +183,7 @@ export function TilePresetPanel(): React.JSX.Element {
         category: "Tile",
         keywords: ["tile", "filter", "category", cat.id, cat.name],
         description: cat.description,
-        run: () => categoryHandlerRef.current(cat.id),
+        run: () => useTilePresetStore.getState().setActiveCategory(cat.id),
       }),
     );
     return () => unregs.forEach((u) => u());
