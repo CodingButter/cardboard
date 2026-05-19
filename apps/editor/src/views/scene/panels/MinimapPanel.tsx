@@ -3,7 +3,7 @@ import { Grid3x3, Map, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
-import { MOCK_SCENE_SETTINGS } from "../scene-fixtures";
+import { MOCK_LAYERS, MOCK_SCENE_SETTINGS } from "../scene-fixtures";
 
 /**
  * MinimapPanel — opt-in compact overview of the whole scene.
@@ -36,6 +36,13 @@ import { MOCK_SCENE_SETTINGS } from "../scene-fixtures";
 const LS_SHOW_GRID = "cardboard.scene.minimap.showGrid";
 const LS_SHOW_VIEWPORT = "cardboard.scene.minimap.showViewport";
 const LS_ZOOM = "cardboard.scene.minimap.zoom";
+/** LS key the LayersPanel writes layer-visibility to. We READ it here
+ *  so the minimap respects layer toggles. JSON `Record<string, boolean>`. */
+const LS_LAYER_VISIBILITY = "cardboard.scene.layers.visibility";
+/** Poll interval (ms) for the layer-visibility LS key. Same-tab LS
+ *  writes don't fire `storage` events, so we poll. 500ms is the budget
+ *  the spec calls out and is well below human-perceptible "stale" UI. */
+const LAYER_VIS_POLL_MS = 500;
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3.0;
@@ -43,8 +50,10 @@ const ZOOM_STEP = 0.25;
 const DEFAULT_ZOOM = 1.0;
 
 /** Below this short-edge size in CSS pixels the panel renders an
- *  empty-state instead of a microscopic canvas. */
-const MIN_RENDER_PX = 80;
+ *  empty-state instead of a microscopic canvas. Kept low so the
+ *  default add-size (often a ~70px content area inside a ~100px column)
+ *  still shows the actual minimap rather than a placeholder. */
+const MIN_RENDER_PX = 50;
 /** Below this width the corner overlay buttons hide to free space. */
 const OVERLAY_HIDE_PX = 150;
 
@@ -72,24 +81,63 @@ function clampZoom(z: number): number {
 }
 
 /** Hard-coded decorative "tiles" — purely for visual interest. Coords
- *  are in scene-cell space; `w`/`h` are cell-sized. Wave 3 deletes
- *  this in favor of the real scene tile grid. */
+ *  are in scene-cell space; `w`/`h` are cell-sized. Each tile is tagged
+ *  with a `layerId` matching MOCK_LAYERS so the minimap can hide it
+ *  when that layer is toggled off in LayersPanel. Wave 3 deletes this
+ *  in favor of the real scene tile grid (which already carries layer
+ *  membership intrinsically). */
 interface FakeTile {
   x: number;
   y: number;
   w: number;
   h: number;
   color: string;
+  /** MOCK_LAYERS id this tile belongs to. Hidden when the layer is off. */
+  layerId: "floors" | "walls" | "doors" | "sprites" | "lights";
 }
 const FAKE_TILES: readonly FakeTile[] = [
-  { x: 6, y: 8, w: 6, h: 4, color: "#f59e0b" }, // amber — wall block
-  { x: 18, y: 12, w: 3, h: 3, color: "#38bdf8" }, // sky — water
-  { x: 28, y: 6, w: 8, h: 2, color: "#10b981" }, // green — corridor
-  { x: 44, y: 20, w: 4, h: 8, color: "#a78bfa" }, // violet — prop cluster
-  { x: 10, y: 34, w: 10, h: 6, color: "#ef4444" }, // red — hazard zone
-  { x: 36, y: 40, w: 6, h: 6, color: "#f59e0b" }, // amber — wall block
-  { x: 52, y: 48, w: 8, h: 6, color: "#38bdf8" }, // sky — water
+  { x: 6, y: 8, w: 6, h: 4, color: "#f59e0b", layerId: "floors" }, // amber — floor
+  { x: 18, y: 12, w: 3, h: 3, color: "#38bdf8", layerId: "walls" }, // sky — wall
+  { x: 28, y: 6, w: 8, h: 2, color: "#10b981", layerId: "doors" }, // green — door
+  { x: 44, y: 20, w: 4, h: 8, color: "#a78bfa", layerId: "sprites" }, // violet — sprite
+  { x: 10, y: 34, w: 10, h: 6, color: "#ef4444", layerId: "lights" }, // red — light
+  { x: 36, y: 40, w: 6, h: 6, color: "#f59e0b", layerId: "floors" }, // amber — floor
+  { x: 52, y: 48, w: 8, h: 6, color: "#38bdf8", layerId: "walls" }, // sky — wall
 ];
+
+/** Default visibility map computed from MOCK_LAYERS. Used when the LS
+ *  key is missing/corrupted so the minimap renders sensibly on first
+ *  load (before the user has ever opened LayersPanel). */
+function defaultLayerVisibility(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const l of MOCK_LAYERS) out[l.id] = l.visible;
+  return out;
+}
+
+/** Read + parse the layer-visibility LS key, falling back to defaults
+ *  on any error (missing key, malformed JSON, wrong type). */
+function readLayerVisibility(): Record<string, boolean> {
+  const raw = readLS(LS_LAYER_VISIBILITY);
+  if (raw == null) return defaultLayerVisibility();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      const out: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === "boolean") out[k] = v;
+      }
+      // Merge with defaults so layers absent from storage still resolve.
+      return { ...defaultLayerVisibility(), ...out };
+    }
+  } catch {
+    /* fall through */
+  }
+  return defaultLayerVisibility();
+}
 
 export function MinimapPanel(): React.JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -116,6 +164,44 @@ export function MinimapPanel(): React.JSX.Element {
     const parsed = stored == null ? DEFAULT_ZOOM : Number(stored);
     return clampZoom(parsed);
   });
+
+  // Layer-visibility map mirrored from the LS key the LayersPanel
+  // writes. Same-tab LS writes don't fire `storage` events so we poll
+  // at LAYER_VIS_POLL_MS — cheap (one getItem + one shallow compare)
+  // and well within human latency. Re-renders only happen when the
+  // resolved map actually differs.
+  const [layerVisibility, setLayerVisibility] = React.useState<
+    Record<string, boolean>
+  >(() => readLayerVisibility());
+
+  React.useEffect(() => {
+    // Cross-tab updates: still pick these up via `storage`.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === LS_LAYER_VISIBILITY) {
+        setLayerVisibility(readLayerVisibility());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    // Same-tab updates: poll. Only commits to state on actual change.
+    const id = window.setInterval(() => {
+      const next = readLayerVisibility();
+      setLayerVisibility((prev) => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length !== nextKeys.length) return next;
+        for (const k of nextKeys) {
+          if (prev[k] !== next[k]) return next;
+        }
+        return prev;
+      });
+    }, LAYER_VIS_POLL_MS);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(id);
+    };
+  }, []);
 
   // Viewport center, in scene-cell coords. Click-to-recenter writes
   // here; "Center Minimap" command resets it to the scene midpoint.
@@ -198,22 +284,25 @@ export function MinimapPanel(): React.JSX.Element {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    // Background — slightly inset card tone so the minimap reads
-    // as content inside the panel-surface card it lives in.
-    ctx.fillStyle = "#0c0c0e";
+    // Background — matches MapCanvasPanel's warm-dark backdrop so the
+    // minimap visually reads as a miniature of the main canvas rather
+    // than a separate cool-neutral chrome panel.
+    ctx.fillStyle = "#0a0a0c";
     ctx.fillRect(0, 0, size.w, size.h);
 
     const { cell, offX, offY, gridW, gridH } = layout;
     if (cell <= 0) return;
 
-    // Scene "floor" rectangle — slightly lighter than the panel bg
-    // so the grid sits on a visible playfield.
-    ctx.fillStyle = "#1a1a1d";
+    // Scene "floor" rectangle — same warm-brown playfield tone as
+    // MapCanvas (#1a1814) so the two views share a palette.
+    ctx.fillStyle = "#1a1814";
     ctx.fillRect(offX, offY, gridW, gridH);
 
     // Fake tiles. Drawn before the grid so the grid lattice reads
     // on top — keeps cell boundaries legible inside filled regions.
+    // Tiles on hidden layers are skipped — mirrors LayersPanel state.
     for (const t of FAKE_TILES) {
+      if (layerVisibility[t.layerId] === false) continue;
       ctx.fillStyle = t.color;
       ctx.globalAlpha = 0.85;
       ctx.fillRect(
@@ -249,7 +338,8 @@ export function MinimapPanel(): React.JSX.Element {
 
     // Playfield border — always drawn so the scene extent is visible
     // even when the grid lattice is hidden or too dense to render.
-    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    // Alpha is bumped up so the border still reads with grid off.
+    ctx.strokeStyle = "rgba(255,255,255,0.30)";
     ctx.lineWidth = 1;
     ctx.strokeRect(
       Math.round(offX) + 0.5,
@@ -288,6 +378,7 @@ export function MinimapPanel(): React.JSX.Element {
     viewport.cy,
     dims.w,
     dims.h,
+    layerVisibility,
   ]);
 
   // ---- Handlers ----------------------------------------------------
@@ -548,7 +639,7 @@ export function MinimapPanel(): React.JSX.Element {
               className={[
                 "h-6 w-6 rounded border flex items-center justify-center",
                 "transition-colors",
-                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60",
+                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
               ].join(" ")}
             >
               <Map size={12} aria-hidden="true" />
@@ -580,7 +671,7 @@ export function MinimapPanel(): React.JSX.Element {
               className={[
                 "h-6 w-6 rounded border flex items-center justify-center",
                 "transition-colors",
-                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60",
+                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 "disabled:opacity-40 disabled:hover:border-(--color-border-strong)",
               ].join(" ")}
             >
@@ -613,7 +704,7 @@ export function MinimapPanel(): React.JSX.Element {
               className={[
                 "h-6 w-6 rounded border flex items-center justify-center",
                 "transition-colors",
-                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60",
+                "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 "disabled:opacity-40 disabled:hover:border-(--color-border-strong)",
               ].join(" ")}
             >
