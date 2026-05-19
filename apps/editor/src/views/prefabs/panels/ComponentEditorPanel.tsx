@@ -20,6 +20,7 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { NumberInput } from "../../../components/ui/NumberInput";
 import { TextInput } from "../../../components/ui/TextInput";
 import { ToggleSwitch } from "../../../components/ui/controls";
+import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
   COMPONENT_SCHEMAS,
@@ -117,8 +118,10 @@ const KIND_ICON: Record<ComponentKind, LucideIcon> = {
 };
 
 /** Width breakpoints — see top-of-file docblock for semantics. */
-const NARROW_WIDTH_PX = 200;
+const NARROW_WIDTH_PX = 280;
 const TINY_WIDTH_PX = 140;
+/** Below this width the "Add Component" button collapses to icon-only. */
+const ADD_BUTTON_COLLAPSE_PX = 240;
 
 // ---------------------------------------------------------------------------
 // Field row — renders a single ComponentSchemaField + current value.
@@ -193,6 +196,17 @@ function renderControl(
       const step = field.step ?? 0.01;
       // Display precision: derive from step so 0.01 → 2dp, 0.1 → 1dp.
       const precision = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+      // Inline gradient on the track — amber fill up to the thumb,
+      // neutral track after. Mirrors the canonical Slider primitive
+      // in `components/ui/controls.tsx` so values are visible without
+      // squinting at a 1px line.
+      const pct =
+        max === min
+          ? 0
+          : Math.max(0, Math.min(100, ((num - min) / (max - min)) * 100));
+      const trackStyle: React.CSSProperties = {
+        background: `linear-gradient(to right, oklch(0.769 0.188 70.08) 0%, oklch(0.769 0.188 70.08) ${pct}%, rgba(255,255,255,0.08) ${pct}%, rgba(255,255,255,0.08) 100%)`,
+      };
       return (
         <div className="flex items-center gap-2 min-w-0">
           <Tooltip
@@ -209,10 +223,11 @@ function renderControl(
               disabled={disabled}
               aria-label={field.label}
               onChange={(e) => onChange(Number.parseFloat(e.target.value))}
-              className="w-full accent-amber-500 cb-slider h-1 rounded-full appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              style={trackStyle}
+              className="w-full accent-amber-500 cb-slider h-1.5 rounded-full appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             />
           </Tooltip>
-          <span className="shrink-0 inline-flex items-center justify-center min-w-[36px] h-5 px-1.5 text-[10px] font-mono rounded tabular-nums border border-(--color-border) text-(--color-fg-secondary)">
+          <span className="shrink-0 inline-flex items-center justify-center min-w-[36px] h-5 px-1.5 text-[10px] font-mono rounded tabular-nums bg-amber-500/10 text-amber-300 border border-amber-500/30">
             {num.toFixed(precision)}
           </span>
         </div>
@@ -311,25 +326,32 @@ function renderControl(
       return (
         <Tooltip side="top" stages={tooltipStages} wrapperClassName="block w-full">
           <span className="block w-full">
-            <select
-              value={current}
-              disabled={disabled}
-              onChange={(e) => onChange(e.target.value)}
-              aria-label={field.label}
-              className={[
-                "appearance-none w-full rounded border border-(--color-border-strong)",
-                "bg-zinc-950/60 text-(--color-fg-primary) text-xs",
-                "px-2 h-7 leading-none",
-                "focus:outline-none focus:border-amber-500/80",
-                "disabled:cursor-not-allowed disabled:opacity-60",
-              ].join(" ")}
-            >
-              {opts.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={current}
+                disabled={disabled}
+                onChange={(e) => onChange(e.target.value)}
+                aria-label={field.label}
+                className={[
+                  "appearance-none w-full rounded border border-(--color-border-strong)",
+                  "bg-zinc-950/60 text-(--color-fg-primary) text-xs",
+                  "pl-2 pr-5 h-7 leading-none",
+                  "focus:outline-none focus:border-amber-500/80",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                ].join(" ")}
+              >
+                {opts.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={10}
+                aria-hidden="true"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-(--color-fg-muted)"
+              />
+            </div>
           </span>
         </Tooltip>
       );
@@ -404,7 +426,7 @@ function ComponentCard(props: ComponentCardProps): React.JSX.Element {
     <div
       data-component-kind={component.kind}
       className={[
-        "rounded border border-(--color-border)",
+        "rounded border border-(--color-border-strong)",
         "bg-(--color-surface-raised)",
         "overflow-hidden",
       ].join(" ")}
@@ -427,7 +449,8 @@ function ComponentCard(props: ComponentCardProps): React.JSX.Element {
           }}
           className={[
             "flex items-center gap-1.5 px-2 h-8 select-none cursor-pointer",
-            "bg-zinc-900/60 hover:bg-zinc-900/80 transition-colors",
+            "bg-zinc-900/80 hover:bg-zinc-900 transition-colors",
+            "border-b border-(--color-border)",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
           ].join(" ")}
         >
@@ -595,6 +618,7 @@ export function ComponentEditorPanel(): React.JSX.Element {
   }, []);
   const narrow = width > 0 && width < NARROW_WIDTH_PX;
   const tooNarrow = width > 0 && width < TINY_WIDTH_PX;
+  const collapseAddButton = width > 0 && width < ADD_BUTTON_COLLAPSE_PX;
 
   // ────────────────────────────────────────────────────────────────
   // Canonical handlers — single source of truth shared by the UI
@@ -734,7 +758,7 @@ export function ComponentEditorPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="component-editor"
-      className="h-full w-full flex flex-col gap-1.5 overflow-y-auto"
+      className="h-full w-full flex flex-col gap-1.5 overflow-y-auto overflow-x-hidden"
     >
       {tooNarrow ? (
         <div className="flex items-center justify-center h-full text-[10px] text-(--color-fg-muted) text-center px-2">
@@ -772,37 +796,51 @@ export function ComponentEditorPanel(): React.JSX.Element {
                 aria-label="Add component"
                 onClick={handleAddComponent}
                 className={[
-                  "shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded",
+                  "shrink min-w-0 inline-flex items-center gap-1 h-6 rounded",
+                  collapseAddButton ? "px-1.5 justify-center" : "px-2",
                   "text-[10px] uppercase tracking-wider font-semibold",
                   "border border-(--color-border-strong) text-(--color-fg-secondary)",
                   "hover:border-amber-500/60 hover:text-amber-300 transition-colors",
                 ].join(" ")}
               >
                 <Plus size={12} aria-hidden="true" />
-                Add Component
+                {!collapseAddButton && (
+                  <span className="truncate">Add Component</span>
+                )}
               </button>
             </Tooltip>
           </div>
 
-          {/* Card stack. */}
-          <div className="flex flex-col gap-1.5 min-w-0">
-            {components.map((c) => (
-              <ComponentCard
-                key={c.id}
-                component={c}
-                expanded={
-                  expandedByKind[c.kind] ?? DEFAULT_EXPANDED[c.kind] ?? false
-                }
-                stacked={narrow}
-                onToggleExpand={() => handleToggleExpand(c.kind)}
-                onToggleEnabled={() => handleToggleEnabled(c.kind)}
-                onDelete={() => handleDelete(c.kind)}
-                onFieldChange={(fieldKey, value) =>
-                  handleFieldChange(c.kind, fieldKey, value)
-                }
+          {/* Card stack — or empty state when the entity has no
+              components yet. */}
+          {components.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center min-w-0">
+              <EmptyState
+                icon={<Layers size={28} />}
+                title="No components"
+                description="This entity has no components yet. Click + Add Component to start."
               />
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5 min-w-0">
+              {components.map((c) => (
+                <ComponentCard
+                  key={c.id}
+                  component={c}
+                  expanded={
+                    expandedByKind[c.kind] ?? DEFAULT_EXPANDED[c.kind] ?? false
+                  }
+                  stacked={narrow}
+                  onToggleExpand={() => handleToggleExpand(c.kind)}
+                  onToggleEnabled={() => handleToggleEnabled(c.kind)}
+                  onDelete={() => handleDelete(c.kind)}
+                  onFieldChange={(fieldKey, value) =>
+                    handleFieldChange(c.kind, fieldKey, value)
+                  }
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
