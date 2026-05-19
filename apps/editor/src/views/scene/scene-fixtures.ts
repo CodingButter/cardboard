@@ -385,3 +385,82 @@ export const MOCK_SCENE_SETTINGS = {
   fog: 0.25,
   ambient: 0.35,
 } as const satisfies SceneSettingsRow;
+
+// ---------------------------------------------------------------------------
+// History
+
+export type HistoryEntryType =
+  | "paint"
+  | "erase"
+  | "place"
+  | "delete"
+  | "edit"
+  | "select";
+
+export interface HistoryEntryRow {
+  id: string;
+  type: HistoryEntryType;
+  label: string;
+  /** Unix epoch ms. */
+  ts: number;
+  description?: string;
+}
+
+export const MOCK_HISTORY = [
+  {
+    id: "h-1",
+    type: "paint",
+    label: "Paint Brick (14 cells)",
+    ts: 1715990045000,
+    description: "Painted 14 cells with the Brick tile preset in the Walls layer.",
+  },
+  {
+    id: "h-2",
+    type: "erase",
+    label: "Erase (3 cells)",
+    ts: 1715990048000,
+    description: "Erased 3 cells from the Walls layer.",
+  },
+  {
+    id: "h-3",
+    type: "place",
+    label: "Place Barrel x4",
+    ts: 1715990060000,
+    description: "Placed 4 barrel entities.",
+  },
+  {
+    id: "h-4",
+    type: "edit",
+    label: "Edit cell (12,7) tags",
+    ts: 1715990092000,
+    description: "Modified the tag list on cell (12,7).",
+  },
+  {
+    id: "h-5",
+    type: "select",
+    label: "Select region 10x10",
+    ts: 1715990100000,
+    description: "Selected a 10x10 region around (15,15).",
+  },
+  {
+    id: "h-6",
+    type: "paint",
+    label: "Paint Stone Floor (50 cells)",
+    ts: 1715990110000,
+    description: "Painted 50 cells with the Stone Floor preset.",
+  },
+  {
+    id: "h-7",
+    type: "delete",
+    label: "Delete Barrel x1",
+    ts: 1715990120000,
+    description: "Deleted 1 barrel entity at (12,7).",
+  },
+  {
+    id: "h-8",
+    type: "edit",
+    label: "Edit layer 'Lights' visibility",
+    ts: 1715990125000,
+    description: "Hid the Lights layer.",
+  },
+] as const satisfies readonly HistoryEntryRow[];
