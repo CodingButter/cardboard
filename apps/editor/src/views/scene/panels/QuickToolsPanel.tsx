@@ -1,30 +1,42 @@
+// Wave 3.3 panel migration #8: wired to useSelectionStore (selected cell)
+// and useSceneStore (per-cell tags). Each chip toggles a tag on the
+// currently-selected cell via `toggleCellTag`. The previous localStorage
+// "applied set" is gone — tags now live on the cell itself and are read
+// fresh on every render via a keyed selector.
 import React from "react";
 import { Wrench, X } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { useSelectionStore } from "../../../state/useSelectionStore";
+import { useSceneStore, cellKey } from "../../../state/useSceneStore";
 import { MOCK_QUICK_TOOLS, type QuickToolRow } from "../scene-fixtures";
 
 /**
- * QuickToolsPanel — chip strip of one-tap tag/tool toggles.
+ * QuickToolsPanel — chip strip of one-tap tag toggles for the current
+ * cell selection.
  *
  * Visual target: the QUICK TOOLS pill row in `Editor Design/Map.png`'s
  * left column. Each chip is a quick-apply tag (solid, door, trigger,
  * spawn, exit, secret, cover, decor, lit, loot). Clicking a chip
- * toggles whether that tag is "applied" to the current selection.
- * Wave 3 will hook this into the real selection store — for now the
- * applied set persists per-page in localStorage.
+ * toggles whether that tag is present on the currently-selected cell.
  *
- * Persistence contract (page-scope localStorage):
- *   - `cardboard.scene.quickTools.applied`  JSON string[], default [].
+ * Data flow (Wave 3.3):
+ *   - Read selected coord from `useSelectionStore.selected`.
+ *   - Read tags ON that cell from `useSceneStore.cells[key].tags`
+ *     via a keyed selector so the panel only re-renders when THIS
+ *     cell's tag set changes (or when the selection moves).
+ *   - Write via `useSceneStore.getState().toggleCellTag(x, y, tag)`.
+ *
+ * When nothing is selected the chips render disabled — the click
+ * handler is a no-op and the chip is dimmed + `aria-disabled`. Same
+ * for the eyebrow Clear button.
  *
  * Command-registry contract: every clickable affordance ALSO exists
  * as a runtime-registered command so the command palette + global
- * keybinding handler can drive the same actions. Per-tool toggles are
+ * keybinding handler can drive the same actions. Per-tag toggles are
  * registered dynamically; "clear all" is a single static command.
  */
-
-const LS_APPLIED = "cardboard.scene.quickTools.applied";
 
 // Below this width the panel renders a "Resize panel" fallback instead
 // of the chip grid. Matches the LayersPanel responsive pattern — a
@@ -32,68 +44,26 @@ const LS_APPLIED = "cardboard.scene.quickTools.applied";
 // container queries aren't wired in this codebase's Tailwind setup.
 const TINY_WIDTH_PX = 110;
 
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
-function readJSON<T>(key: string, fallback: T): T {
-  const raw = readLS(key);
-  if (raw == null) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJSON(key: string, value: unknown): void {
-  try {
-    writeLS(key, JSON.stringify(value));
-  } catch {
-    /* JSON.stringify can throw on circular refs — defensive only */
-  }
-}
-
-/** Sanitize the persisted applied list: drop ids that no longer exist
- *  in the fixture (resilient to fixture edits across reloads). */
-function reconcileApplied(stored: readonly string[]): string[] {
-  const known = new Set<string>(
-    (MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) => t.id),
-  );
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const id of stored) {
-    if (known.has(id) && !seen.has(id)) {
-      seen.add(id);
-      out.push(id);
-    }
-  }
-  return out;
-}
-
 export function QuickToolsPanel(): React.JSX.Element {
-  const [applied, setApplied] = React.useState<string[]>(() =>
-    reconcileApplied(readJSON<string[]>(LS_APPLIED, [])),
+  // --- Cross-panel store subscriptions -----------------------------
+  // Keep each selector keyed/primitive-ish so this panel does not
+  // re-render on every paint elsewhere on the map.
+  const selected = useSelectionStore((s) => s.selected);
+  // Keyed cell-tag subscription. The selector returns the tags array
+  // ref (or undefined) — the store only allocates a NEW array when
+  // `toggleCellTag` actually mutates this cell's tags, so unrelated
+  // edits don't trigger a re-render here.
+  const cellTags = useSceneStore((s) =>
+    selected ? s.cells[cellKey(selected.x, selected.y)]?.tags : undefined,
   );
 
-  // Persist on every change.
-  React.useEffect(() => {
-    writeJSON(LS_APPLIED, applied);
-  }, [applied]);
+  const applied = React.useMemo<readonly string[]>(
+    () => cellTags ?? [],
+    [cellTags],
+  );
+  const appliedCount = applied.length;
+  const hasAny = appliedCount > 0;
+  const hasSelection = selected !== null;
 
   // --- Tiny-width fallback driven by the panel root's measured width.
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -114,15 +84,33 @@ export function QuickToolsPanel(): React.JSX.Element {
   // Both chip onClicks and command `run` delegate to these via
   // handler refs, matching the pattern in `state/README.md`.
 
-  const handleToggle = React.useCallback((toolId: string) => {
-    setApplied((cur) => {
-      if (cur.includes(toolId)) return cur.filter((id) => id !== toolId);
-      return [...cur, toolId];
-    });
-  }, []);
+  const handleToggle = React.useCallback(
+    (toolId: string) => {
+      const sel = useSelectionStore.getState().selected;
+      if (!sel) return; // no-op when no cell selected
+      useSceneStore.getState().toggleCellTag(sel.x, sel.y, toolId);
+    },
+    [],
+  );
 
   const handleClearAll = React.useCallback(() => {
-    setApplied([]);
+    const sel = useSelectionStore.getState().selected;
+    if (!sel) return;
+    // Snapshot the current tags then toggle each one OFF. We read
+    // through getState() rather than closing over `applied` so the
+    // callback identity is stable + commands stay accurate.
+    const key = cellKey(sel.x, sel.y);
+    const cur = useSceneStore.getState().cells[key]?.tags ?? [];
+    // Only toggle quick-tool tags — leave user-added tags from the
+    // CellInspector untouched. Otherwise this "clear all" would also
+    // wipe tags the panel never surfaced as chips.
+    const quickIds = new Set<string>(
+      (MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) => t.id),
+    );
+    const toggle = useSceneStore.getState().toggleCellTag;
+    for (const tag of cur) {
+      if (quickIds.has(tag)) toggle(sel.x, sel.y, tag);
+    }
   }, []);
 
   // --- Command-registry refs ---------------------------------------
@@ -139,7 +127,7 @@ export function QuickToolsPanel(): React.JSX.Element {
   // Static "clear all" command. Registered once on mount.
   React.useEffect(() => {
     return registerCommand({
-      id: "scene.quickTool.clear",
+      id: "scene.quickTools.clear",
       title: "Clear All Quick-Tools",
       category: "Quick-Tool",
       keywords: ["quick", "tool", "clear", "reset", "tags"],
@@ -154,7 +142,7 @@ export function QuickToolsPanel(): React.JSX.Element {
   React.useEffect(() => {
     const unregs = (MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) =>
       registerCommand({
-        id: `scene.quickTool.toggle.${t.id}`,
+        id: `scene.quickTools.tag.toggle.${t.id}`,
         title: `Toggle Quick-Tool: ${t.name}`,
         category: "Quick-Tool",
         keywords: ["quick", "tool", "toggle", "tag", t.name, t.id],
@@ -169,9 +157,6 @@ export function QuickToolsPanel(): React.JSX.Element {
     // empty (matches BrushPanel precedent). When this becomes a live
     // store selector, lift it into deps.
   }, []);
-
-  const appliedCount = applied.length;
-  const hasAny = appliedCount > 0;
 
   // Outer container is just the `data-panel` hook. DockShell wraps
   // this in `<PanelSurface/>` (raised card with p-2 inner padding),
@@ -197,13 +182,18 @@ export function QuickToolsPanel(): React.JSX.Element {
             Shows the panel name, an optional applied-count badge, and
             inline Clear button (replaces the trailing × chip that
             used to live in the chip wrap, which felt like an
-            ambiguous 11th chip).
+            ambiguous 11th chip). When no cell is selected the header
+            surfaces a brief hint so the disabled chips have context.
           */}
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-              Quick Tools{appliedCount > 0 ? ` (${appliedCount})` : ""}
+          <div className="flex items-center justify-between gap-1 min-w-0">
+            <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate">
+              {hasSelection ? (
+                <>Quick Tools{appliedCount > 0 ? ` (${appliedCount})` : ""}</>
+              ) : (
+                <>Quick Tools — select a cell</>
+              )}
             </div>
-            {hasAny ? (
+            {hasSelection && hasAny ? (
               <Tooltip
                 side="top"
                 stages={[
@@ -214,8 +204,8 @@ export function QuickToolsPanel(): React.JSX.Element {
                       <div>
                         <div className="font-semibold">Clear All</div>
                         <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                          Remove every applied quick-tool tag from the current
-                          selection in one step.
+                          Remove every applied quick-tool tag from the
+                          selected cell in one step.
                         </div>
                       </div>
                     ),
@@ -254,6 +244,11 @@ export function QuickToolsPanel(): React.JSX.Element {
             The active state is a calm amber tint (mirrors the
             CellInspector tag-chip aesthetic) rather than a full fill,
             so multiple active chips don't visually shout.
+
+            Disabled state (no cell selected): chips dim to muted fg +
+            border, lose hover affordance, and `aria-disabled` so AT
+            users hear the state. The click handler still no-ops
+            defensively via `handleToggle`.
           */}
           <div
             className="flex flex-wrap gap-1"
@@ -261,7 +256,8 @@ export function QuickToolsPanel(): React.JSX.Element {
             aria-label="Quick tools"
           >
             {(MOCK_QUICK_TOOLS as readonly QuickToolRow[]).map((t) => {
-              const active = applied.includes(t.id);
+              const active = hasSelection && applied.includes(t.id);
+              const disabled = !hasSelection;
               return (
                 <Tooltip
                   key={t.id}
@@ -276,6 +272,11 @@ export function QuickToolsPanel(): React.JSX.Element {
                           <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                             {t.description}
                           </div>
+                          {disabled ? (
+                            <div className="text-[10px] text-(--color-fg-muted) mt-1 italic">
+                              Select a cell to apply this tag.
+                            </div>
+                          ) : null}
                         </div>
                       ),
                     },
@@ -285,13 +286,17 @@ export function QuickToolsPanel(): React.JSX.Element {
                     type="button"
                     aria-label={t.name}
                     aria-pressed={active}
+                    aria-disabled={disabled || undefined}
+                    disabled={disabled}
                     onClick={() => handleToggle(t.id)}
                     className={[
                       "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide whitespace-nowrap",
                       "border transition-colors",
-                      active
-                        ? "bg-amber-500/15 border-amber-500 text-amber-300"
-                        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                      disabled
+                        ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-60 cursor-not-allowed"
+                        : active
+                          ? "bg-amber-500/15 border-amber-500 text-amber-300"
+                          : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                     ].join(" ")}
                   >
                     {t.name}
