@@ -46,6 +46,12 @@ export interface TooltipProps {
   /** Delay in ms before single-stage tooltip shows. Default 400.
    *  Ignored when `stages` is set. */
   delay?: number;
+  /** Optional Tailwind classes appended to the wrapper span. Use when
+   *  the wrapper's default `inline-flex` collapses a child that needs
+   *  to fill flex space (e.g. pass `"flex-1 min-w-0"` so the tooltip
+   *  trigger stretches inside a row). Avoids the per-callsite arbitrary
+   *  selector hacks several panels accumulated otherwise. */
+  wrapperClassName?: string;
   children: React.ReactElement;
 }
 
@@ -63,6 +69,7 @@ export function Tooltip({
   stages,
   side = "top",
   delay = 400,
+  wrapperClassName,
   children,
 }: TooltipProps) {
   const [visible, setVisible] = React.useState(false);
@@ -146,7 +153,7 @@ export function Tooltip({
         onMouseLeave={close}
         onFocus={open}
         onBlur={close}
-        className="relative inline-flex"
+        className={cn("relative inline-flex", wrapperClassName)}
       >
         {children}
       </span>
