@@ -2,7 +2,7 @@
 // imports MOCK_CELL as if it were the currently-selected cell and
 // keeps its edits in local state (no persistence; reset on remount).
 import React from "react";
-import { SlidersHorizontal, X, Plus } from "lucide-react";
+import { SlidersHorizontal, X, Plus, ChevronDown } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { Chip } from "../../../components/ui/Chip";
@@ -42,9 +42,29 @@ import { MOCK_CELL, MOCK_LAYERS, type CellRow } from "../scene-fixtures";
  */
 
 /** Width below which the panel collapses to a single-column stacked
- *  layout. Picked empirically — at 180px the side-by-side label/control
- *  grid is still readable; below that, controls need their own row. */
-const NARROW_WIDTH_PX = 180;
+ *  layout. Picked empirically — at 160px the side-by-side label/control
+ *  grid is still readable for short labels + compact controls; below
+ *  that, controls need their own row. Kept low so the default rail
+ *  width (content ~172px after scrollbar) stays side-by-side. */
+const NARROW_WIDTH_PX = 160;
+
+/** Below this width the panel hides the "CELL" eyebrow label so the
+ *  (x,y) coord + deselect button still fit without clipping. */
+const COMPACT_HEADER_WIDTH_PX = 120;
+
+/** Below this width the panel renders a minimal "resize me" fallback —
+ *  the full property sheet is unusable in that little space. */
+const TINY_WIDTH_PX = 120;
+
+/** Format a camelCase property key as spaced uppercase for display.
+ *  `blocksMovement` → `BLOCKS MOVEMENT`. The underlying `key` is
+ *  preserved — this only affects the rendered label. */
+function toLabel(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toUpperCase();
+}
 
 /** Human-readable descriptions used by progressive tooltips on the
  *  tag chips. Unknown tags fall back to a generic blurb. */
@@ -117,6 +137,8 @@ export function CellInspectorPanel(): React.JSX.Element {
     return () => ro.disconnect();
   }, []);
   const narrow = width > 0 && width < NARROW_WIDTH_PX;
+  const compactHeader = width > 0 && width < COMPACT_HEADER_WIDTH_PX;
+  const tiny = width > 0 && width < TINY_WIDTH_PX;
 
   // Focus the add-tag input when entering "adding tag" mode.
   React.useEffect(() => {
@@ -320,20 +342,36 @@ export function CellInspectorPanel(): React.JSX.Element {
     return r !== 0 ? r : a.key.localeCompare(b.key);
   });
 
+  // Tiny-width fallback — the full property sheet is unusable below
+  // ~120px so render a minimal "resize me" prompt instead.
+  if (tiny) {
+    return (
+      <div
+        ref={rootRef}
+        data-panel="cell-inspector"
+        className="h-full w-full flex items-center justify-center text-[10px] text-(--color-fg-muted) text-center px-2"
+      >
+        Resize panel to inspect cell
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
       data-panel="cell-inspector"
-      className="h-full w-full flex flex-col gap-1.5 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
+      className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
     >
       {/* Row 1 — Compact coord inline with deselect button.
           Keeps the header to a single line so TYPE/TAGS can stay above
           the fold at default ~180×270 panel size. */}
       <header className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
-            Cell
-          </span>
+        <div className="min-w-0 flex-1 flex items-baseline gap-1.5 truncate">
+          {!compactHeader && (
+            <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
+              Cell
+            </span>
+          )}
           <Tooltip
             stages={[
               {
@@ -355,7 +393,7 @@ export function CellInspectorPanel(): React.JSX.Element {
               },
             ]}
           >
-            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none">
+            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none min-w-0">
               ({cell.x}, {cell.y})
             </span>
           </Tooltip>
@@ -383,8 +421,8 @@ export function CellInspectorPanel(): React.JSX.Element {
             aria-label="Deselect cell"
             onClick={deselect}
             className={[
-              "shrink-0 inline-flex items-center justify-center",
-              "w-5 h-5 rounded border text-(--color-fg-secondary)",
+              "shrink-0 w-6 inline-flex items-center justify-center",
+              "h-5 rounded border text-(--color-fg-secondary)",
               "border-(--color-border-strong) bg-transparent",
               "hover:text-(--color-fg-primary) hover:border-amber-500/60",
               "transition-colors",
@@ -397,16 +435,57 @@ export function CellInspectorPanel(): React.JSX.Element {
 
       {/* Row 2 — Type. Single label:value row. */}
       <section className="flex flex-col">
-        <Row label="Type" stacked={narrow}>
-          <TextInput
-            value={cell.type}
-            onChange={(e) =>
-              setCell((prev) =>
-                prev ? { ...prev, type: e.target.value } : prev,
-              )
-            }
-            aria-label="Cell type"
-          />
+        <Row
+          label={
+            <Tooltip
+              stages={[
+                { delay: 1000, content: <span>Type</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div className="max-w-[400px]">
+                      <div className="font-semibold">Type</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                        The tile preset stamped on this cell (e.g.
+                        wall-brick, floor-stone).
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            >
+              <span className="cursor-help">Type</span>
+            </Tooltip>
+          }
+          stacked={narrow}
+        >
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Type</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div className="max-w-[400px]">
+                    <div className="font-semibold">Type</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                      The tile preset stamped on this cell (e.g.
+                      wall-brick, floor-stone).
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <TextInput
+              value={cell.type}
+              onChange={(e) =>
+                setCell((prev) =>
+                  prev ? { ...prev, type: e.target.value } : prev,
+                )
+              }
+              aria-label="Cell type"
+            />
+          </Tooltip>
         </Row>
       </section>
 
@@ -414,10 +493,28 @@ export function CellInspectorPanel(): React.JSX.Element {
           visible without scrolling at default panel size. Tags drive
           engine behavior (solid/door/trigger/spawn) so they earn the
           prime real-estate. */}
-      <section className="flex flex-col gap-1">
-        <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-          Tags
-        </div>
+      <section className="flex flex-col gap-0.5">
+        <Tooltip
+          stages={[
+            { delay: 1000, content: <span>Tags</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Tags</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Gameplay tags applied to this cell — drive engine
+                    behavior (solid, door, trigger, etc.).
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+            Tags
+          </div>
+        </Tooltip>
         <div className="flex flex-wrap gap-1 items-center">
           {cell.tags.map((tag) => (
             <Tooltip
@@ -440,7 +537,6 @@ export function CellInspectorPanel(): React.JSX.Element {
               <Chip
                 variant="accent"
                 pill
-                selected
                 onClick={() => toggleTag(tag)}
               >
                 {tag}
@@ -511,71 +607,151 @@ export function CellInspectorPanel(): React.JSX.Element {
         </div>
       </section>
 
-      {/* Row 4 — Height + Layer. Side-by-side at wide widths to save
-          vertical space; stacks each as its own row below the narrow
-          breakpoint. */}
-      <section
-        className={
-          narrow
-            ? "flex flex-col"
-            : "grid grid-cols-2 gap-2 items-start"
-        }
-      >
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+      {/* Row 4 — Height. Stacked as a full-row block — the panel rarely
+          renders wider than 280px so the side-by-side layout was mostly
+          noise. */}
+      <section className="flex flex-col gap-0.5 min-w-0">
+        <Tooltip
+          stages={[
+            { delay: 1000, content: <span>Height</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Height</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Cell height in scene units. Used by the raycaster
+                    for partial walls.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
             Height
           </div>
-          <NumberInput
-            value={cell.height}
-            onChange={(next) =>
-              setCell((prev) => (prev ? { ...prev, height: next } : prev))
-            }
-            precision={2}
-            step={0.1}
-            min={0}
-            max={8}
-            unit="m"
-            showSteppers
-          />
-        </div>
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-            Layer
+        </Tooltip>
+        <div className="flex items-center gap-1 min-w-0">
+          <div className="flex-1 min-w-0">
+            <NumberInput
+              value={cell.height}
+              onChange={(next) =>
+                setCell((prev) => (prev ? { ...prev, height: next } : prev))
+              }
+              precision={2}
+              step={0.1}
+              min={0}
+              max={8}
+              showSteppers
+            />
           </div>
-          <select
-            value={cell.layer}
-            onChange={(e) =>
-              setCell((prev) =>
-                prev ? { ...prev, layer: e.target.value } : prev,
-              )
-            }
-            className={[
-              "w-full appearance-none rounded-md border bg-(--color-bg-card)",
-              "border-(--color-border-strong) text-(--color-fg-primary)",
-              "px-2 h-6 text-xs leading-none",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-            ].join(" ")}
-            aria-label="Cell layer"
-          >
-            {MOCK_LAYERS.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-            {/* If the cell references a layer not in MOCK_LAYERS, keep
-                it as an option so we don't silently lose it. */}
-            {MOCK_LAYERS.every((l) => l.id !== cell.layer) && (
-              <option value={cell.layer}>{cell.layer}</option>
-            )}
-          </select>
+          <span className="text-[10px] font-mono uppercase tracking-wider text-(--color-fg-muted) shrink-0">
+            m
+          </span>
         </div>
       </section>
 
+      {/* Row 5 — Layer. Stacked full-row block; native chevron is hidden
+          by `appearance-none` so we render our own. */}
+      <section className="flex flex-col gap-0.5 min-w-0">
+        <Tooltip
+          stages={[
+            { delay: 1000, content: <span>Layer</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Layer</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    The render layer this cell belongs to (Floors /
+                    Walls / Doors / Sprites / Lights).
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+            Layer
+          </div>
+        </Tooltip>
+        <Tooltip
+          stages={[
+            { delay: 1000, content: <span>Active Layer</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Active Layer</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    The render layer this cell's tile belongs to.
+                    Changing this moves the cell between layers.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="relative">
+            <select
+              value={cell.layer}
+              onChange={(e) =>
+                setCell((prev) =>
+                  prev ? { ...prev, layer: e.target.value } : prev,
+                )
+              }
+              className={[
+                "w-full appearance-none rounded-md border bg-(--color-bg-card)",
+                "border-(--color-border-strong) text-(--color-fg-primary)",
+                "pl-2 pr-5 h-6 text-xs leading-none",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+              ].join(" ")}
+              aria-label="Cell layer"
+            >
+              {MOCK_LAYERS.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+              {/* If the cell references a layer not in MOCK_LAYERS, keep
+                  it as an option so we don't silently lose it. */}
+              {MOCK_LAYERS.every((l) => l.id !== cell.layer) && (
+                <option value={cell.layer}>{cell.layer}</option>
+              )}
+            </select>
+            <ChevronDown
+              size={10}
+              aria-hidden="true"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-(--color-fg-muted)"
+            />
+          </div>
+        </Tooltip>
+      </section>
+
       {/* Properties — bottom of the stack, scrolls when overflowing. */}
-      <section className="flex flex-col gap-1">
-        <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-          Properties
-        </div>
+      <section className="flex flex-col gap-0.5">
+        <Tooltip
+          stages={[
+            { delay: 1000, content: <span>Properties</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Properties</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Per-cell key/value overrides — fine-grained behavior
+                    tweaks beyond tags.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+            Properties
+          </div>
+        </Tooltip>
         <div className="flex flex-col">
           {sortedProperties.map(({ key, value }) => (
             <PropertyControl
@@ -651,6 +827,7 @@ function PropertyControl({
   inputRef,
 }: PropertyControlProps) {
   const desc = propertyDescription(propKey, value);
+  const displayLabel = toLabel(propKey);
   const labelNode = (
     <Tooltip
       stages={[
@@ -671,7 +848,7 @@ function PropertyControl({
       <span
         className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate cursor-help"
       >
-        {propKey}
+        {displayLabel}
       </span>
     </Tooltip>
   );
@@ -786,7 +963,7 @@ function PropertyControl({
             </div>
           </>
         ) : (
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-2">
             {labelNode}
             <div className="min-w-0" ref={numberRefShim}>
               {control}
@@ -808,7 +985,7 @@ function PropertyControl({
     );
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-px">
+    <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-2 py-px">
       {labelNode}
       <div className="min-w-0 flex items-center">{control}</div>
     </div>
