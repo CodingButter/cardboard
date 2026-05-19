@@ -37,9 +37,11 @@ apps/pack-builder/.env
 # Finder (MacOS) folder config
 .DS_Store
 
-# .mcp.json — NOT ignored anymore. Bearer tokens were extracted to
+# .mcp.json — NOT ignored. Bearer tokens were extracted to
 # ${VOICE_BEARER_TOKEN} env substitution so the file is commit-safe.
-# Set the env var in your shell rc or a .env file (see .mcp.env.example).
+# Set the env var via .env + direnv (.envrc lives in repo root and
+# sources .env so `claude` and other tools see VOICE_BEARER_TOKEN
+# when you `cd` into the project).
 
 # Claude Code per-machine state — selectively ignored so the project-
 # scoped pieces (memory, settings, commands, agents) stay committed and
@@ -64,4 +66,11 @@ packages/*/types/
 
 # Local screenshot scratchpad
 screenshots/
-=
+
+# Staged build artifacts for the docs Pages deploy. Both staging
+# scripts (build-game-for-docs.ts, build-editor-for-docs.ts) write
+# into these directories on every prebuild — they are NOT hand-edited
+# static assets, so they should never appear in commits.
+apps/docs/public/play/
+apps/docs/public/editor/
+apps/editor/public/play/

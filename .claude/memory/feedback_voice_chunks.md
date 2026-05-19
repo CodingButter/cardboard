@@ -14,12 +14,13 @@ When a voice response is long enough that a single synthesis would run past ~20 
 **How to apply:**
 - Rule of thumb: synthesize text under ~55 words / ~350 chars per call. ~20 seconds at conversational rate.
 - For longer content: split at natural sentence boundaries. Each chunk is a complete sentence (or two short sentences) that stands on its own — never split mid-sentence.
-- Pattern per turn:
+- Pattern per turn — strictly serial, never parallel:
   ```
   synthesize(chunk_1) → pipe(chunk_1)  // foreground, blocks
   synthesize(chunk_2) → pipe(chunk_2)
   ...
   ```
+- NEVER batch multiple `synthesize` calls in a single parallel tool-use block. URLs expire ~10 min and the playback pipe is foreground — issuing both syntheses up front means the second URL is already aging while the first audio plays, and there's no way to interleave them safely. Each `synthesize → pipe` is one atomic pair; the next pair only starts after the previous pipe returns.
 - All synth+pipe pairs run BEFORE other tool calls per `[[feedback-voice-mcp-playback]]`. With multiple chunks, the pairs still come first as a contiguous block.
 - Keep the substance distribution per `[[feedback-voice-carries-content]]` — every chunk should carry real findings, not filler. Don't pad to hit the 20s target; cut content if a chunk falls short of substance.
 - When the response is genuinely short (one sentence), one chunk is correct — don't artificially split.
