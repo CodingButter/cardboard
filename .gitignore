@@ -37,8 +37,9 @@ apps/pack-builder/.env
 # Finder (MacOS) folder config
 .DS_Store
 
-# Local MCP server config (contains bearer tokens)
-.mcp.json
+# .mcp.json — NOT ignored anymore. Bearer tokens were extracted to
+# ${VOICE_BEARER_TOKEN} env substitution so the file is commit-safe.
+# Set the env var in your shell rc or a .env file (see .mcp.env.example).
 
 # Claude Code per-machine state — selectively ignored so the project-
 # scoped pieces (memory, settings, commands, agents) stay committed and
