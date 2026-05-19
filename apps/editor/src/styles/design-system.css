@@ -611,26 +611,26 @@
  * element too. Specificity 0,2,0 beats abyss's 0,1,0. */
 .dockview-theme-cardboard,
 .dockview-theme-cardboard .dockview-theme-abyss {
-  /* Group + panel surfaces — both the dock content background and
-   * the tab strip match the page body colour. The visible "card"
-   * for each panel is rendered INSIDE the panel body itself using
-   * --color-bg-panel-surface, so dock-level chrome must stay flat
-   * against the page or it competes with that inner surface
-   * (double-surface look). */
-  --dv-group-view-background-color: var(--color-bg-panel);
-  --dv-tabs-and-actions-container-background-color: var(--color-bg-panel);
+  /* Dock chrome (group root, tab strip, every tab background) is
+   * fully transparent — the darker page bg shows through everywhere
+   * by default. The visible card per panel is rendered INSIDE the
+   * dock content container by `PanelSurface` (DockShell.tsx). Title
+   * bars and tabs therefore sit ABOVE/AROUND the surface card,
+   * showing the page bg behind them. */
+  --dv-group-view-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: transparent;
   --dv-tabs-and-actions-container-height: 22px;
   --dv-tabs-and-actions-container-font-size: 12px;
 
   /* Active-group tab states */
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-bg-panel);
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: #f4f4f5; /* zinc-100 */
   --dv-activegroup-hiddenpanel-tab-color: #a1a1aa; /* zinc-400 */
 
   /* Inactive-group tab states (when focus is in a different group). */
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-bg-panel);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-bg-panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-color: #d4d4d8; /* zinc-300 */
   --dv-inactivegroup-hiddenpanel-tab-color: #71717a; /* zinc-500 */
 
@@ -643,11 +643,15 @@
   --dv-separator-border: transparent;
   --dv-paneview-header-border-color: transparent;
 
-  /* Splitters / sashes — show only on hover. */
+  /* Splitters / sashes — show only on hover. dockview's default has
+   * a 500ms hover-delay before the amber drag bar fades in, which
+   * felt sluggish. Override to 60ms so the affordance reads as
+   * immediate feedback. */
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--color-accent);
   --dv-sash-border-radius: 0px;
   --dv-active-sash-transition-duration: 0.12s;
+  --dv-active-sash-transition-delay: 0.06s;
 
   /* Drag-over overlay (the colour washed across a panel as a drop
    * target preview). Amber to match design-system accent. */
@@ -682,10 +686,22 @@
   --dv-dropdown-border-radius: var(--radius-card);
 }
 
-/* The active visible tab gets an amber underline. dockview supports
- * this via the tab-group "line" variables; we keep them on by default
- * for the editor look so the active panel reads as the focus. */
-.dockview-theme-cardboard .dv-tab.dv-active-tab {
+/* Active tab amber underline.
+ *
+ * We want this on multi-tab groups (e.g. Output+Problems) so the
+ * user can tell at a glance which tab in the group is the visible
+ * one — regardless of whether the group itself has focus. We do
+ * NOT want it on single-panel groups (where dockview adds
+ * `.dv-full-width-single-tab` to the tabs container): there's only
+ * one "tab" — the panel header — and an underline reads as a
+ * decorative stripe under every panel ("fairy lights").
+ *
+ * Rule: apply the underline to any active tab whose ancestor tab
+ * strip lacks `.dv-full-width-single-tab`. The `:not(...)` qualifier
+ * filters out the single-tab case cleanly. */
+.dockview-theme-cardboard
+  .dv-tabs-and-actions-container:not(.dv-full-width-single-tab)
+  .dv-tab.dv-active-tab {
   box-shadow: inset 0 -2px 0 0 var(--color-accent);
 }
 
@@ -697,38 +713,101 @@
 }
 
 /* ───────────────────────────────────────────────────────────────────
- * Panel visual hierarchy (Workspace v1.5)
+ * Panel visual hierarchy (Workspace v1.6 — surface-on-group)
  *
- * Three distinct surfaces per Map.png:
- *   - Page body         → --color-bg-panel    (mid, oklch 0.27ish)
- *   - Panel content     → --color-bg-card     (darker, oklch 0.22)
- *   - Inset surfaces    → --color-bg-card-elev (brighter, oklch 0.32)
+ * Each dockview group is now THE raised surface card. The group
+ * element receives the surface background + border-strong + rounded
+ * corners + overflow:hidden, so the tab strip (rendered at the top
+ * of the group) and the content container below it sit INSIDE the
+ * same rounded card. The previous design wrapped only the panel
+ * body in a `<PanelSurface/>` div, which left the tab strip floating
+ * above the card visually disconnected. Moving the surface to the
+ * group element fixes that.
  *
- * Panel content is rendered into dockview's `.dv-content-container`
- * — the wrapper class that holds the React panel body element below
- * each group's tab strip. Painting it darker than the page body
- * creates the recessed inset look the design calls for. We also
- * override the group view background token so the gutter between
- * the panel content and its tab strip matches.
+ * The dv-content-container loses its own background + padding:
+ *   - background drops so the container inherits the group's surface
+ *     paint (no double-surface look).
+ *   - padding drops because `<PanelSurface/>` now provides an 8px
+ *     inset wrapper inside each surface-enabled panel (so panel
+ *     bodies still see padded breathing room). `surface: false`
+ *     panels render flush — the canvas painter (Map) fills the
+ *     entire rounded group.
+ *
+ * The 4px margin on `.dv-groupview` creates visible gaps between
+ * adjacent dock groups so each card reads as distinct. dockview's
+ * group parent (`.dv-view`) is `position: absolute`, sized by the
+ * gridview's resize logic; the margin lives inside that absolute
+ * box so groups stay correctly sized while showing a 4px gutter on
+ * every side. Sashes (splitters) still operate at the parent edge,
+ * giving the user a precise hit target between cards.
  * ─────────────────────────────────────────────────────────────────── */
+.dockview-theme-cardboard .dv-groupview,
+.dockview-theme-cardboard .dockview-theme-abyss .dv-groupview {
+  /* No surface treatment at the group level — the title bar sits as
+   * a thin transparent drag handle here, and the actual rounded
+   * surface card lives INSIDE the dv-content-container (rendered by
+   * the `PanelSurface` wrapper in DockShell.tsx). Putting border +
+   * radius on the group made dockview's gridview math overflow when
+   * combined with padding-based gaps. The current architecture:
+   *   - group: just a positional container, no chrome
+   *   - tab strip (above content): transparent → page bg
+   *   - content container: transparent → page bg
+   *   - PanelSurface (inside content): the visible bg + border +
+   *     rounded card, with an outer p-1 so adjacent cards have a
+   *     visible gap from their content-container edges. */
+  background: transparent;
+  border: 0;
+}
+
+/* No padding on `.dv-view` — earlier attempts (margin on group +
+ * padding on slot) both broke dockview's gridview math, popping
+ * themed scrollbars and clipping the bottom of last-in-column
+ * panels. The visible gap between panels comes from `PanelSurface`'s
+ * inner `p-1` margin around the rounded card. */
+
 .dockview-theme-cardboard .dv-content-container,
 .dockview-theme-cardboard .dockview-theme-abyss .dv-content-container {
-  /* Page-bg colour — the dock content container is just a positional
-   * wrapper. Panels that opt into the raised-card look via
-   * `surface: true` on their DockPanelDef get wrapped in a
-   * `<PanelSurface/>` (--color-bg-panel-surface + border-strong +
-   * rounded-md); panels that don't sit flush on this page-bg surface. */
-  background: var(--color-bg-panel);
-  /* Universal 8px breathing room around every panel body. The dock
-   * content container owns this padding so individual panels don't
-   * have to repeat their own outer `p-2` wrapper. PanelSurface (when
-   * present) fills the padded interior; panel bodies decide their
-   * own internal padding. */
-  padding: 0.5rem;
+  /* Transparent — inherit the group's surface paint above. */
+  background: transparent;
+  /* No padding here — surface-enabled panels get their inset padding
+   * from `<PanelSurface/>` (now a thin p-2 wrapper). surface:false
+   * panels render edge-to-edge inside the rounded group. */
+  padding: 0;
 }
-/* (Both `--dv-group-view-background-color` and panel-body content
- * background are already pinned to `--color-bg-card` in the main
- * variable block above — kept that single source of truth.) */
+
+/* Headerless panels (e.g. Map Canvas) hide their tab strip entirely.
+ * The DockShell stamps `data-headerless` onto the group element when
+ * its lone panel was added with `params.headerless: true`. */
+.dockview-theme-cardboard .dv-groupview[data-headerless] .dv-tabs-and-actions-container,
+.dockview-theme-cardboard .dockview-theme-abyss .dv-groupview[data-headerless] .dv-tabs-and-actions-container {
+  display: none;
+}
+
+/* Surfaceless panels opt out of the raised-card chrome entirely.
+ * DockShell stamps `data-surface="false"` on the group element for
+ * panels registered with `surface: false`. Strip the background,
+ * border, and rounded corners so the group sits flush against the
+ * page background. Used by panels whose content is its own visual
+ * (Map Canvas painter) or whose data style doesn't suit a card
+ * (Output / Problems / Selection Info readouts).
+ *
+ * Also strip the tab-strip + tab backgrounds — without this they
+ * paint `--color-bg-panel-surface` and create a visible lighter bar
+ * at the top of an otherwise transparent group. The tab text colour
+ * is unaffected; users still see the title in the same surface-fg
+ * tone, but the background is transparent so the page bg reads. */
+.dockview-theme-cardboard .dv-groupview[data-surface="false"],
+.dockview-theme-cardboard .dockview-theme-abyss .dv-groupview[data-surface="false"] {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.dockview-theme-cardboard .dv-groupview[data-surface="false"] .dv-tabs-and-actions-container,
+.dockview-theme-cardboard .dv-groupview[data-surface="false"] .dv-tab,
+.dockview-theme-cardboard .dockview-theme-abyss .dv-groupview[data-surface="false"] .dv-tabs-and-actions-container,
+.dockview-theme-cardboard .dockview-theme-abyss .dv-groupview[data-surface="false"] .dv-tab {
+  background: transparent;
+}
 
 /* ───────────────────────────────────────────────────────────────────
  * Floating-group tab layout fix — kept as a safety net for any saved

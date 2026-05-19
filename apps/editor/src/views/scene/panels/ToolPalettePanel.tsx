@@ -130,18 +130,15 @@ export function ToolPalettePanel(): React.JSX.Element {
   const tool = findTool(activeTool);
   const subTools = tool?.subTools;
 
-  // Outer container is just the `data-panel` hook. The dock content
-  // container provides the 8px outer padding (universal `p-2` on
-  // `.dv-content-container`), and DockShell wraps this body in
-  // `<PanelSurface/>` because the MapView registry sets
-  // `surface: true` on this panel's DockPanelDef. The inner `p-2 flex
-  // flex-col gap-2` is the panel's own internal padding — the breathing
-  // room inside the raised surface card around the tool grid + sub-tool
-  // strip.
+  // Outer container is just the `data-panel` hook. DockShell wraps
+  // this in `<PanelSurface/>` (raised card with p-2 inner padding)
+  // because the MapView registry has `surface: true` by default. So
+  // this wrapper only owns layout (flex column + gap between the
+  // tool grid and the sub-tool strip), NOT padding.
   return (
     <div
       data-panel="tool-palette"
-      className="h-full w-full p-2 flex flex-col gap-2"
+      className="h-full w-full flex flex-col gap-2"
     >
       <div className="grid grid-cols-3 grid-rows-2 gap-1">
         {MOCK_TOOLS.map((t) => {

@@ -88,13 +88,19 @@ export interface DockPanelDef {
    *  through dockview as `params.controls`. When omitted the
    *  header paints a muted chevron placeholder instead. */
   readonly controls?: React.ReactNode;
-  /** When true (the default), wrap the panel body in a raised surface
-   *  card (--color-bg-panel-surface + border-strong + rounded-md). The
-   *  inner panel body still uses h-full w-full. Set explicitly to
-   *  `false` for panels that should sit flush on the dock content
-   *  background (e.g. MapCanvasPanel, where the painter fills the
-   *  entire dock content area with no chrome). */
+  /** When true (the default), give the panel body an 8px inset
+   *  padding wrapper so its content doesn't touch the rounded edges
+   *  of the surrounding dock group (the group itself paints the
+   *  surface card; see `.dv-groupview` rules in design-system.css).
+   *  Set explicitly to `false` for panels that should fill the
+   *  entire dock group flush — e.g. MapCanvasPanel, where the
+   *  painter consumes the full rounded group bounds. */
   readonly surface?: boolean;
+  /** When true, the panel's title strip is hidden and the panel is
+   *  locked from drag-out / re-grouping. Used for "fixed" panels like
+   *  the Map Canvas that should always be present and unmoveable.
+   *  Defaults to false. */
+  readonly headerless?: boolean;
 }
 
 export interface DockShellProps {
@@ -308,25 +314,42 @@ function sanitizeLayout(layout: SerializedDockview): SerializedDockview {
 }
 
 /**
- * PanelSurface — raised-card wrapper for dock panels that opt into the
- * `surface: true` flag on their `DockPanelDef`. Renders a
- * --color-bg-panel-surface card with a strong border and rounded
- * corners, sized to fill the dock content container's padded interior
- * (the 8px padding lives on `.dv-content-container` itself, not here).
+ * PanelSurface — the visible raised card for dock panels that opt
+ * into the `surface: true` flag on their `DockPanelDef`.
  *
- * Crucially this wrapper adds NO padding — the panel body decides
- * what internal padding it wants. That keeps a panel free to render
- * a tight grid (ToolPalette) or an edge-to-edge canvas (a future
- * mini-map) without fighting an opinionated container.
+ * Architecture: dock chrome (group, tab strip, content container) is
+ * fully transparent. The page-bg shows through everywhere by default.
+ * `PanelSurface` renders inside `.dv-content-container` and is the
+ * ONLY element painting `--color-bg-panel-surface` + border-strong +
+ * rounded corners. The outer `p-1` creates a 4px margin on every side
+ * between the card and the content-container edge — adjacent surface
+ * panels therefore have an 8px visible gap (4px each side) without
+ * any margin/padding on dockview-managed elements that would break
+ * its gridview math.
+ *
+ * Inner `p-2` is the panel body's internal padding so content
+ * doesn't kiss the rounded corners of the card.
+ *
+ * `surface: false` panels (Map Canvas, Output / Problems / Selection
+ * Info) skip this wrapper entirely and fill the entire dock content
+ * area flush, with the dock chrome remaining transparent so the
+ * darker page bg reads through.
  */
 function PanelSurface({
   children,
 }: {
   children: React.ReactNode;
 }): React.JSX.Element {
+  // Outer wrapper uses `px-1 pb-1` (no top padding) so the rounded
+  // surface card sits flush against the bottom of dockview's title
+  // strip — the user wants the title visually attached to its
+  // surface, not floating with a vertical gap above it. Left, right,
+  // and bottom keep 4px so adjacent panels still have an 8px gap.
   return (
-    <div className="h-full w-full bg-(--color-bg-panel-surface) border border-(--color-border-strong) rounded-md">
-      {children}
+    <div className="h-full w-full px-1 pb-1">
+      <div className="h-full w-full bg-(--color-bg-panel-surface) border border-(--color-border-strong) rounded-md p-2">
+        {children}
+      </div>
     </div>
   );
 }
@@ -384,6 +407,68 @@ export function DockShell({
       const api = event.api;
       apiRef.current = api;
 
+      // ── Headerless / locked panel support ────────────────────────
+      //
+      // Panels can opt into a "fixed" presentation via
+      // `headerless: true` on their DockPanelDef. The dock group that
+      // owns such a panel has its tab strip hidden (CSS rule keyed on
+      // `[data-headerless]` set on `.dv-groupview`) and is locked
+      // against drop/drag operations so users can't accidentally
+      // remove or re-group it.
+      //
+      // Two flow paths land panels into the dock:
+      //   1. `api.fromJSON(...)` rebuilds panels from a saved/default
+      //      layout. The panel objects exist BEFORE our
+      //      `onDidAddPanel` subscription is wired below, so we walk
+      //      `api.panels` after fromJSON and apply.
+      //   2. `api.addPanel(...)` called at runtime (DocksModal drops,
+      //      external drag drops). `onDidAddPanel` fires after the
+      //      panel is in place; we apply there.
+      //
+      // The application is idempotent: setting a data-attribute and
+      // toggling `group.locked` twice is harmless.
+      const headerlessIds = new Set(
+        panels.filter((p) => p.headerless === true).map((p) => p.id),
+      );
+      const surfacelessIds = new Set(
+        panels.filter((p) => p.surface === false).map((p) => p.id),
+      );
+      const applyHeaderlessToPanel = (
+        panel: import("dockview").IDockviewPanel,
+      ) => {
+        if (!headerlessIds.has(panel.api.id)) return;
+        try {
+          panel.group.element.setAttribute("data-headerless", "");
+        } catch {
+          // Group element not yet attached — non-fatal; the next
+          // group/location change will retry via re-application
+          // below.
+        }
+        try {
+          panel.group.locked = "no-drop-target";
+        } catch {
+          // Lock setter rejected — non-fatal; user can still recover
+          // by editing the layout JSON manually.
+        }
+      };
+      // Same mechanism for `surface: false` — stamp a data-attribute
+      // on the group element so CSS can strip the panel-surface
+      // treatment (bg + border + radius) on that specific group. The
+      // `.dv-groupview` rule in design-system.css excludes groups
+      // marked with this attribute. PanelSurface (the inner p-2
+      // wrapper) is already skipped at component-build time for these
+      // panels.
+      const applySurfacelessToPanel = (
+        panel: import("dockview").IDockviewPanel,
+      ) => {
+        if (!surfacelessIds.has(panel.api.id)) return;
+        try {
+          panel.group.element.setAttribute("data-surface", "false");
+        } catch {
+          // ignore — same recovery semantics as headerless
+        }
+      };
+
       // Restore saved layout, or fall back to the default.
       //
       // Sanitize any pre-existing snapshot — older builds of this
@@ -418,6 +503,19 @@ export function DockShell({
       } catch {
         // ignore — first persist is best-effort
       }
+
+      // Apply headerless + surfaceless treatments to every panel
+      // restored by fromJSON above. Future panels (DocksModal /
+      // external drop) are caught by the `onDidAddPanel` subscription
+      // below.
+      for (const p of api.panels) {
+        applyHeaderlessToPanel(p);
+        applySurfacelessToPanel(p);
+      }
+      const addPanelSub = api.onDidAddPanel((p) => {
+        applyHeaderlessToPanel(p);
+        applySurfacelessToPanel(p);
+      });
 
       // Persist on every layout change. Cheap enough that debouncing
       // isn't necessary — the JSON is tiny and writes are synchronous.
@@ -756,6 +854,7 @@ export function DockShell({
       // Clean up on unmount.
       return () => {
         layoutSub.dispose();
+        addPanelSub.dispose();
         addGroupSub.dispose();
         removeGroupSub.dispose();
         willDragPanelSub.dispose();

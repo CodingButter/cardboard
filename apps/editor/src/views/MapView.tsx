@@ -127,7 +127,7 @@ const PANELS: readonly DockPanelDef[] = [
   { ...TOOL_PALETTE_MANIFEST, component: ToolPalettePanel },
   { ...BRUSH_MANIFEST, component: BrushPanel },
   { ...TILE_PRESET_MANIFEST, component: TilePresetPanel },
-  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false },
+  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false, headerless: true },
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
   { ...LAYERS_MANIFEST, component: LayersPanel },
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },

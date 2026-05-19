@@ -64,15 +64,17 @@
    * distinct alias so the tabs row can later diverge without
    * retuning panel call sites. */
   --color-bg-app: #08090b;
-  --color-bg-tabs: #18181b;
-  --color-bg-panel: #18181b;
+  /* Page background — darker than the panel surfaces so the surface
+   * tier reads as raised against the page. Use a clear step below
+   * `--color-bg-panel-surface` (oklch 0.23) so the visual hierarchy
+   * is obvious without going pitch-black like `--color-bg-app`. */
+  --color-bg-tabs: oklch(0.17 0 0);
+  --color-bg-panel: oklch(0.17 0 0);
   --color-bg-card: oklch(0.22 0 0);
   --color-bg-card-elev: #2f2f2f;
-  /* Panel-body surface — used by the per-panel inner card wrapper.
-   * Very slightly lighter than the page background (--color-bg-panel
-   * at zinc-900 / oklch ~0.21) so panels read as raised cards
-   * without competing visually. Paired with `--color-border-strong`
-   * as the hairline; the border is what reads, not the fill. */
+  /* Panel-body surface — used by every dock group with surface != false.
+   * Distinctly lighter than the new darker page bg so cards read as
+   * raised. Paired with `--color-border-strong` as the hairline. */
   --color-bg-panel-surface: oklch(0.23 0 0);
   --color-bg-active: oklch(0.74 0.18 65 / 0.1);
   --color-bg-hover: oklch(0.32 0 0);
