@@ -226,18 +226,80 @@ export const MOCK_LOG_LINES = [
 // ---------------------------------------------------------------------------
 // Quick tools
 
+export interface QuickToolRow {
+  id: string;
+  name: string;
+  /** Long-form tooltip body. Used by the quick-tools panel's
+   *  progressive reveal tooltip — appears after a longer hover than
+   *  the bare chip label. */
+  description: string;
+  /** Optional lucide icon name string. Wave 3 may map these to icons
+   *  on the chip face; for now the chip is text-only. */
+  icon?: string;
+}
+
 export const MOCK_QUICK_TOOLS = [
-  "solid",
-  "door",
-  "trigger",
-  "spawn",
-  "exit",
-  "secret",
-  "ambush-cover",
-  "decor",
-  "lit",
-  "loot",
-] as const satisfies readonly string[];
+  {
+    id: "solid",
+    name: "Solid",
+    description:
+      "Mark the selection as a solid blocker — collides with movement and blocks projectiles.",
+  },
+  {
+    id: "door",
+    name: "Door",
+    description:
+      "Tag the selection as a door — interactable opening that can swing, slide, or be locked.",
+  },
+  {
+    id: "trigger",
+    name: "Trigger",
+    description:
+      "Tag the selection as a trigger volume — fires script events when entered or exited.",
+  },
+  {
+    id: "spawn",
+    name: "Spawn",
+    description:
+      "Mark the selection as a spawn point — players or entities enter the scene here.",
+  },
+  {
+    id: "exit",
+    name: "Exit",
+    description:
+      "Mark the selection as an exit point — leads to the next scene or level.",
+  },
+  {
+    id: "secret",
+    name: "Secret",
+    description:
+      "Tag the selection as a secret — hidden area tracked by the level's completion stats.",
+  },
+  {
+    id: "ambush-cover",
+    name: "Ambush Cover",
+    description:
+      "Tag the selection as ambush cover — AI uses it for line-of-sight breaks and flanking.",
+  },
+  {
+    id: "decor",
+    name: "Decor",
+    description:
+      "Tag the selection as decor — non-interactive visual dressing that doesn't affect gameplay.",
+  },
+  {
+    id: "lit",
+    name: "Lit",
+    description:
+      "Mark the selection as a light source — emits illumination into the surrounding cells.",
+  },
+  {
+    id: "loot",
+    name: "Loot",
+    description:
+      "Tag the selection as a loot container — drops items when interacted with or destroyed.",
+  },
+] as const satisfies readonly QuickToolRow[];
 
 // ---------------------------------------------------------------------------
 // Selection info readout
