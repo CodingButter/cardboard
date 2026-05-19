@@ -162,65 +162,19 @@ export function QuickToolsPanel(): React.JSX.Element {
       className="h-full w-full flex flex-col gap-2 overflow-y-auto"
     >
       {/*
-        Header readout. Two halves justified-between:
-          • Eyebrow label + applied-count on the left.
-          • "Clear all" ghost button on the right, shown only when at
-            least one chip is applied (avoids a dead button at rest).
-        Wraps via flex-wrap so the button drops below the label on
-        very narrow panels rather than overflowing.
-      */}
-      <div className="flex flex-wrap items-center justify-between gap-1">
-        <div className="text-[10px] uppercase tracking-wide text-(--color-fg-muted)">
-          {appliedCount > 0
-            ? `${appliedCount} applied`
-            : "Quick tools"}
-        </div>
-        {hasAny ? (
-          <Tooltip
-            side="left"
-            stages={[
-              { delay: 2000, content: <span>Clear all</span> },
-              {
-                delay: 5000,
-                content: (
-                  <div>
-                    <div className="font-semibold">Clear All Quick-Tools</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
-                      Remove every applied quick-tool tag from the current
-                      selection in one step.
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
-            <button
-              type="button"
-              aria-label="Clear all quick-tools"
-              onClick={handleClearAll}
-              className={[
-                "h-5 px-1.5 rounded text-[10px] uppercase tracking-wide",
-                "flex items-center gap-1",
-                "bg-transparent border border-(--color-border)",
-                "text-(--color-fg-muted)",
-                "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                "transition-colors",
-              ].join(" ")}
-            >
-              <X size={10} aria-hidden="true" />
-              <span>Clear</span>
-            </button>
-          </Tooltip>
-        ) : null}
-      </div>
-
-      {/*
-        Chip wrap. flex-wrap with gap-1 lets chips reflow naturally:
-        single column at very narrow widths (~150px), several columns
-        as the panel grows. Each chip has a min-width so labels stay
-        readable; the chip face is `whitespace-nowrap` so multi-word
-        names ("Ambush Cover") don't break mid-label. No horizontal
+        Chip wrap + inline clear. flex-wrap with gap-1 lets chips reflow
+        naturally: single column at very narrow widths (~120px),
+        several columns as the panel grows. Each chip has a small
+        min-width so all 10 chips fit in ~2–3 rows inside the default
+        Scene-layout panel (~180×80px). `whitespace-nowrap` keeps
+        multi-word names ("Ambush Cover") on one line. No horizontal
         scrollbar — the row wraps instead.
+
+        The "Clear all" affordance is rendered as a trailing ghost
+        `×` chip inline with the toggle chips, but ONLY when at least
+        one chip is applied. This removes the persistent eyebrow +
+        button bar (~16–20px of header chrome) that was eating the
+        default panel's vertical budget.
       */}
       <div
         className="flex flex-wrap gap-1"
@@ -254,8 +208,8 @@ export function QuickToolsPanel(): React.JSX.Element {
                 aria-pressed={active}
                 onClick={() => handleToggle(t.id)}
                 className={[
-                  "min-w-[60px] h-6 px-2 rounded-full",
-                  "text-[10px] uppercase tracking-wide whitespace-nowrap",
+                  "min-w-[44px] h-5 px-1.5 rounded-full",
+                  "text-[9px] uppercase tracking-wide whitespace-nowrap",
                   "flex items-center justify-center",
                   "border transition-colors",
                   active
@@ -268,6 +222,45 @@ export function QuickToolsPanel(): React.JSX.Element {
             </Tooltip>
           );
         })}
+        {hasAny ? (
+          <Tooltip
+            side="top"
+            stages={[
+              {
+                delay: 2000,
+                content: <span>Clear all ({appliedCount})</span>,
+              },
+              {
+                delay: 5000,
+                content: (
+                  <div>
+                    <div className="font-semibold">Clear All Quick-Tools</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                      Remove every applied quick-tool tag from the current
+                      selection in one step.
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <button
+              type="button"
+              aria-label={`Clear all quick-tools (${appliedCount} applied)`}
+              onClick={handleClearAll}
+              className={[
+                "h-5 w-5 rounded-full",
+                "flex items-center justify-center",
+                "bg-transparent border border-(--color-border)",
+                "text-(--color-fg-muted)",
+                "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                "transition-colors",
+              ].join(" ")}
+            >
+              <X size={10} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        ) : null}
       </div>
     </div>
   );
