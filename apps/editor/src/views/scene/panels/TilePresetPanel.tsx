@@ -10,7 +10,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
-import { ScrollRow } from "../../../components/ui/ScrollRow";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
   MOCK_TILE_PRESETS,
@@ -22,10 +21,17 @@ import {
  * TilePresetPanel — categorised tile preset picker (walls / floors /
  * ceilings / decor).
  *
- * Visual target: the TILE PRESETS card from `Editor Design/Map.png`,
- * with a category tab strip across the top and a fluid thumbnail grid
- * below. Split off from the legacy `ToolsPanel`. Wave 2 wires this to
- * the pack's tile-preset registry.
+ * Visual target: the TILE PRESETS section from `Editor Design/Map.png`
+ * — a vertical scrolling list of rows where each row pairs a small
+ * 32×32 thumbnail with a tight name label. Density matters: this is a
+ * Wolfenstein-style raycaster and packs will ship dozens of textures,
+ * so the picker has to surface 6–8 tiles at a glance at the default
+ * panel size (~230×190px) and scroll the rest.
+ *
+ * The category strip uses `flex flex-wrap` (never a horizontal
+ * scroller) so chips stay glanceable at any panel width — category
+ * filtering is primary navigation, not a secondary control. Chips
+ * wrap to a second row when the panel is narrow.
  *
  * Persistence contract (scoped to this panel):
  *   - `cardboard.scene.tilePreset.activeId`        string
@@ -134,6 +140,22 @@ function isCategoryFilter(value: string | null): value is CategoryFilter {
   return CATEGORY_META.some((c) => c.id === value);
 }
 
+/** Per-category counts (incl. the "all" pseudo-category). */
+function useCategoryCounts(): Record<CategoryFilter, number> {
+  return React.useMemo(() => {
+    const all = MOCK_TILE_PRESETS as readonly TilePresetRow[];
+    const counts: Record<CategoryFilter, number> = {
+      all: all.length,
+      walls: 0,
+      floors: 0,
+      ceilings: 0,
+      decor: 0,
+    };
+    for (const p of all) counts[p.category] += 1;
+    return counts;
+  }, []);
+}
+
 // ---------------------------------------------------------------------------
 // Panel
 
@@ -214,6 +236,8 @@ export function TilePresetPanel(): React.JSX.Element {
     return () => unregs.forEach((u) => u());
   }, []);
 
+  const counts = useCategoryCounts();
+
   const visiblePresets = React.useMemo(() => {
     const all = MOCK_TILE_PRESETS as readonly TilePresetRow[];
     if (activeCategory === "all") return all;
@@ -222,21 +246,23 @@ export function TilePresetPanel(): React.JSX.Element {
 
   // Outer container is layout-only (no card chrome) — DockShell wraps
   // this in <PanelSurface/>. We own:
-  //   - vertical stack: category strip + scrollable grid region
-  //   - the grid region itself owns vertical scroll when content
-  //     exceeds the available height
+  //   - eyebrow label + wrapping category strip (primary nav, never
+  //     horizontally scrolled)
+  //   - the vertical preset list below, which owns its own vertical
+  //     scroll when content exceeds the available height
   return (
     <div
       data-panel="tile-preset"
-      className="h-full w-full flex flex-col gap-2 min-h-0"
+      className="h-full w-full flex flex-col gap-1 min-h-0"
     >
       <CategoryFilterRow
         activeCategory={activeCategory}
+        counts={counts}
         onCategoryClick={handleCategoryClick}
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <PresetGrid
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        <PresetList
           presets={visiblePresets}
           activeId={activeId}
           onPresetClick={handlePresetClick}
@@ -251,88 +277,209 @@ export function TilePresetPanel(): React.JSX.Element {
 
 interface CategoryFilterRowProps {
   activeCategory: CategoryFilter;
+  counts: Record<CategoryFilter, number>;
   onCategoryClick: (cat: CategoryFilter) => void;
 }
 
 /**
- * Horizontal category chip strip. Uses `ScrollRow` so narrow panel
- * widths surface the themed hover-area affordance instead of a native
- * horizontal scrollbar (per project convention).
+ * Wrapping category chip strip. Uses `flex flex-wrap` so chips spill
+ * onto a second row at narrow panel widths instead of horizontally
+ * scrolling — category filters are primary navigation and must be
+ * visible at a glance, per project convention.
+ *
+ * When even the wrapped 2-row layout would dominate the panel, the
+ * strip auto-collapses to icon-only chips (labels move to the
+ * stage-1 tooltip). This keeps the strip readable while preserving
+ * vertical real estate for the preset list below.
  */
 function CategoryFilterRow({
   activeCategory,
+  counts,
   onCategoryClick,
 }: CategoryFilterRowProps): React.JSX.Element {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const fullRowRef = React.useRef<HTMLDivElement | null>(null);
+  const [compact, setCompact] = React.useState(false);
+
+  // Measure the full-label layout's natural width against the
+  // container width. If two rows of full labels would still overflow
+  // (i.e. the natural width is > 2× container width), drop to
+  // icon-only. We compute against the hidden "measurer" copy so the
+  // visible row never thrashes layout.
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const measurer = fullRowRef.current;
+    if (!container || !measurer) return;
+    const update = () => {
+      const cw = container.clientWidth;
+      if (cw <= 0) return;
+      // Sum up natural chip widths from the off-screen measurer.
+      const chips = Array.from(measurer.children) as HTMLElement[];
+      const totalWidth = chips.reduce(
+        (s, c) => s + c.getBoundingClientRect().width,
+        0,
+      );
+      const gapAllowance = Math.max(0, chips.length - 1) * 4;
+      const needed = totalWidth + gapAllowance;
+      // Collapse to icon-only when full labels would force a wrap.
+      // Single-row icon chips preserve vertical real estate for the
+      // preset list (the primary content) while still telegraphing
+      // category at a glance via the icon + count.
+      setCompact(needed > cw);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="shrink-0 h-7">
-      <ScrollRow contentClassName="flex items-center gap-1">
+    <div ref={containerRef} className="relative">
+      {/* Hidden full-label measurer — used only to compute natural
+          widths. Position absolute so it never affects layout. */}
+      <div
+        ref={fullRowRef}
+        aria-hidden="true"
+        className="absolute -top-[9999px] -left-[9999px] flex flex-nowrap gap-1 pointer-events-none"
+      >
+        {CATEGORY_META.map((cat) => (
+          <ChipButton
+            key={`measure-${cat.id}`}
+            cat={cat}
+            count={counts[cat.id]}
+            active={false}
+            compact={false}
+            onClick={() => {}}
+            tabIndex={-1}
+            asMeasurer
+          />
+        ))}
+      </div>
+
+      {/* Visible row — flex-wrap so chips spill to a second row at
+          narrow panel widths instead of horizontally scrolling. */}
+      <div className="flex flex-wrap gap-1">
         {CATEGORY_META.map((cat) => {
-          const Icon = cat.icon;
           const active = cat.id === activeCategory;
+          const count = counts[cat.id];
           return (
-            <Tooltip
+            <ChipButton
               key={cat.id}
-              side="bottom"
-              stages={[
-                { delay: 2000, content: <span>{cat.name}</span> },
-                {
-                  delay: 5000,
-                  content: (
-                    <div>
-                      <div className="font-semibold">{cat.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
-                        {cat.description}
-                      </div>
-                    </div>
-                  ),
-                },
-              ]}
-            >
-              <button
-                type="button"
-                aria-label={`Filter ${cat.name}`}
-                aria-pressed={active}
-                onClick={() => onCategoryClick(cat.id)}
-                className={[
-                  "shrink-0 inline-flex items-center gap-1",
-                  "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                  "border transition-colors",
-                  active
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
-                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                ].join(" ")}
-              >
-                <Icon size={10} aria-hidden="true" />
-                <span>{cat.name}</span>
-              </button>
-            </Tooltip>
+              cat={cat}
+              count={count}
+              active={active}
+              compact={compact}
+              onClick={() => onCategoryClick(cat.id)}
+            />
           );
         })}
-      </ScrollRow>
+      </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Preset grid
+interface ChipButtonProps {
+  cat: CategoryMeta;
+  count: number;
+  active: boolean;
+  compact: boolean;
+  onClick: () => void;
+  tabIndex?: number;
+  asMeasurer?: boolean;
+}
 
-interface PresetGridProps {
+function ChipButton({
+  cat,
+  count,
+  active,
+  compact,
+  onClick,
+  tabIndex,
+  asMeasurer,
+}: ChipButtonProps): React.JSX.Element {
+  const Icon = cat.icon;
+  const button = (
+    <button
+      type="button"
+      aria-label={`Filter ${cat.name}`}
+      aria-pressed={active}
+      onClick={onClick}
+      tabIndex={tabIndex}
+      className={[
+        "inline-flex items-center gap-1",
+        "rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+        "border transition-colors whitespace-nowrap",
+        active
+          ? "bg-amber-500 border-amber-500 text-zinc-950"
+          : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+      ].join(" ")}
+    >
+      <Icon size={10} aria-hidden="true" />
+      {!compact && (
+        <>
+          <span>{cat.name}</span>
+          <span
+            className={[
+              "tabular-nums",
+              active ? "text-zinc-950/70" : "text-(--color-fg-muted)",
+            ].join(" ")}
+          >
+            ({count})
+          </span>
+        </>
+      )}
+      {compact && (
+        <span className="tabular-nums text-[9px]">{count}</span>
+      )}
+    </button>
+  );
+  if (asMeasurer) return button;
+  // Compact mode hides labels visually — surface them via the
+  // progressive tooltip's stage-1 reveal so hover still tells you
+  // exactly which category each chip is.
+  return (
+    <Tooltip
+      side="bottom"
+      stages={[
+        { delay: 2000, content: <span>{cat.name}</span> },
+        {
+          delay: 5000,
+          content: (
+            <div>
+              <div className="font-semibold">{cat.name}</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                {cat.description}
+              </div>
+            </div>
+          ),
+        },
+      ]}
+    >
+      {button}
+    </Tooltip>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preset list
+
+interface PresetListProps {
   presets: readonly TilePresetRow[];
   activeId: string;
   onPresetClick: (presetId: string) => void;
 }
 
 /**
- * Fluid auto-fit grid of preset tiles. Column count adapts to
- * available width: each tile clamps between 56px (narrow rail) and
- * 96px (wider span) so thumbnails read at any panel size. Tile body
- * is a vertical stack: thumbnail square + tight name label.
+ * Vertical list of preset rows. Each row is `[32×32 thumb] [name]`
+ * with row height ~36px so 5+ rows fit in the default panel content
+ * area (~190px) and the rest scroll. Matches the TILE PRESETS list
+ * pattern in `Editor Design/Map.png`.
  */
-function PresetGrid({
+function PresetList({
   presets,
   activeId,
   onPresetClick,
-}: PresetGridProps): React.JSX.Element {
+}: PresetListProps): React.JSX.Element {
   if (presets.length === 0) {
     return (
       <div className="text-[10px] text-(--color-fg-muted) px-1 py-2">
@@ -342,14 +489,9 @@ function PresetGrid({
   }
 
   return (
-    <div
-      className="grid gap-1.5 p-px"
-      style={{
-        gridTemplateColumns: "repeat(auto-fit, minmax(56px, 96px))",
-      }}
-    >
+    <div className="flex flex-col gap-0.5 p-px">
       {presets.map((preset) => (
-        <PresetTile
+        <PresetRow
           key={preset.id}
           preset={preset}
           active={preset.id === activeId}
@@ -361,25 +503,25 @@ function PresetGrid({
 }
 
 // ---------------------------------------------------------------------------
-// Preset tile
+// Preset row
 
-interface PresetTileProps {
+interface PresetRowProps {
   preset: TilePresetRow;
   active: boolean;
   onClick: () => void;
 }
 
-function PresetTile({
+function PresetRow({
   preset,
   active,
   onClick,
-}: PresetTileProps): React.JSX.Element {
+}: PresetRowProps): React.JSX.Element {
   const meta = findCategoryMeta(preset.category);
   const Icon = meta.icon;
 
   return (
     <Tooltip
-      side="top"
+      side="right"
       stages={[
         { delay: 2000, content: <span>{preset.name}</span> },
         {
@@ -401,34 +543,40 @@ function PresetTile({
         aria-pressed={active}
         onClick={onClick}
         className={[
-          "w-full flex flex-col items-stretch gap-1 p-1 rounded",
-          "border transition-colors text-left",
+          "w-full flex items-center gap-2 pr-2 py-px pl-0.5",
+          "rounded transition-colors text-left",
           active
-            ? "bg-amber-500/10 border-amber-500 text-(--color-fg-primary)"
-            : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+            ? "bg-amber-500/10 text-(--color-fg-primary)"
+            : "bg-transparent text-(--color-fg-secondary) hover:bg-zinc-800/40 hover:text-(--color-fg-primary)",
         ].join(" ")}
       >
-        {/* Placeholder thumbnail — coloured swatch keyed off the
-            category, with a small category icon glyph centred for
-            readability at small sizes. Replace with real thumbnails
-            when the pack registry lands. */}
+        {/* 24×24 thumbnail. Subtle zinc square with a centered category
+            icon. Active state gets a thin amber ring rather than a full
+            fill, so the row scans calmly even when active. Matches the
+            TILE PRESETS list density in `Editor Design/Map.png` — small
+            enough to show 5–6 rows in the default panel height. */}
         <div
           className={[
-            "aspect-square w-full rounded-sm",
+            "shrink-0 w-6 h-6 rounded-sm",
             "flex items-center justify-center",
-            meta.swatchClass,
-            active ? "ring-1 ring-amber-400/60" : "",
+            "bg-zinc-800",
+            active ? "ring-1 ring-amber-400" : "ring-1 ring-transparent",
           ].join(" ")}
         >
           <Icon
-            size={14}
+            size={12}
             aria-hidden="true"
-            className={active ? "text-zinc-100" : "text-(--color-fg-muted)"}
+            className={
+              active
+                ? "text-amber-300"
+                : "text-(--color-fg-muted)"
+            }
           />
         </div>
         <span
           className={[
-            "block text-[9px] leading-tight truncate",
+            "min-w-0 flex-1 truncate",
+            "text-[11px] leading-tight",
             "uppercase tracking-wide",
           ].join(" ")}
           title={preset.name}
