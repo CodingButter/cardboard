@@ -3,12 +3,21 @@ name: Deploy docs
 on:
   push:
     branches: [main]
+    # The docs site stages the editor + game via prebuild scripts
+    # (stage:editor / stage:game). So changes to any of these surfaces
+    # need to trigger a redeploy. This workflow is the SOLE Pages
+    # deploy now that deploy-editor.yml has been retired in favor of
+    # the unified docs+editor+game pipeline.
     paths:
       - 'docs/**'
       - 'apps/docs/**'
-      - 'packages/engine/src/ModAPI/**'
+      - 'apps/editor/**'
+      - 'apps/game/**'
+      - 'packages/**'
       - 'scripts/sync-plans.ts'
       - 'scripts/gen-api-docs.ts'
+      - 'scripts/build-game-for-docs.ts'
+      - 'scripts/build-editor-for-docs.ts'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
