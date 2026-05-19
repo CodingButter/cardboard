@@ -234,6 +234,46 @@ export function SceneSettingsPanel(): React.JSX.Element {
       data-panel="scene-settings"
       className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
     >
+      {/* Eyebrow header — panel name + Reset action. */}
+      <div className="flex items-center justify-between h-[18px]">
+        <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) select-none">
+          Scene Settings
+        </div>
+        <Tooltip
+          wrapperClassName="shrink-0"
+          stages={[
+            { delay: 1000, content: <span>Reset scene settings</span> },
+            {
+              delay: 3000,
+              content: (
+                <div className="max-w-[400px]">
+                  <div className="font-semibold">Reset Scene Settings</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Restore dimensions, fog, and ambient back to their
+                    seeded defaults. In-memory only.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label="Reset scene settings"
+            onClick={reset}
+            className={[
+              "shrink-0 inline-flex items-center justify-center",
+              "w-4 h-4 rounded border text-(--color-fg-secondary)",
+              "border-(--color-border-strong) bg-transparent",
+              "hover:text-(--color-fg-primary) hover:border-amber-500/60",
+              "transition-colors",
+            ].join(" ")}
+          >
+            <RotateCcw size={10} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </div>
+
       {/* Fog density — top of the panel so it's never below the fold. */}
       <SliderRow
         label="Fog"
@@ -241,8 +281,6 @@ export function SceneSettingsPanel(): React.JSX.Element {
         tooltipLong="Overall scene fog intensity. Higher values reduce visibility at distance."
         value={settings.fog}
         onChange={setFog}
-        onIncrease={() => bumpFog(1)}
-        onDecrease={() => bumpFog(-1)}
       />
 
       {/* Ambient light. */}
@@ -252,17 +290,16 @@ export function SceneSettingsPanel(): React.JSX.Element {
         tooltipLong="Base scene lighting applied to every cell. Higher values brighten shadowed areas."
         value={settings.ambient}
         onChange={setAmbient}
-        onIncrease={() => bumpAmbient(1)}
-        onDecrease={() => bumpAmbient(-1)}
       />
 
       {/* Dimensions — inline `[w] × [h]` pair on a single row. */}
       <div className="flex items-center gap-1.5 h-[22px]">
-        <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[52px] shrink-0 select-none">
+        <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[40px] shrink-0 select-none">
           Size
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <Tooltip
+            wrapperClassName="flex-1 min-w-0"
             stages={[
               { delay: 1000, content: <span>Width (tiles)</span> },
               {
@@ -293,11 +330,12 @@ export function SceneSettingsPanel(): React.JSX.Element {
           </Tooltip>
           <span
             aria-hidden="true"
-            className="text-[10px] text-(--color-fg-muted) tabular-nums select-none"
+            className="text-[10px] text-(--color-fg-muted) tabular-nums select-none shrink-0"
           >
             ×
           </span>
           <Tooltip
+            wrapperClassName="flex-1 min-w-0"
             stages={[
               { delay: 1000, content: <span>Height (tiles)</span> },
               {
@@ -327,38 +365,6 @@ export function SceneSettingsPanel(): React.JSX.Element {
             </div>
           </Tooltip>
         </div>
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Reset scene settings</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Reset Scene Settings</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Restore dimensions, fog, and ambient back to their
-                    seeded defaults. In-memory only.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label="Reset scene settings"
-            onClick={reset}
-            className={[
-              "shrink-0 inline-flex items-center justify-center",
-              "w-5 h-5 rounded border text-(--color-fg-secondary)",
-              "border-(--color-border-strong) bg-transparent",
-              "hover:text-(--color-fg-primary) hover:border-amber-500/60",
-              "transition-colors",
-            ].join(" ")}
-          >
-            <RotateCcw size={11} aria-hidden="true" />
-          </button>
-        </Tooltip>
       </div>
     </div>
   );
@@ -374,133 +380,56 @@ interface SliderRowProps {
   tooltipLong: string;
   value: number;
   onChange: (next: number) => void;
-  onIncrease: () => void;
-  onDecrease: () => void;
 }
 
-/** Slider row — `[label] [-] [slider flex-1] [+] [value]` on a single
+/** Slider row — `[label] [slider flex-1] [value]` on a single
  *  ~22px line. Label has a fixed-ish width so Fog/Ambient align; the
- *  slider absorbs all slack so the row stays usable at every width. */
+ *  slider absorbs all slack so the row stays usable at every width.
+ *  Step adjustments are reachable via arrow keys on the slider and via
+ *  the registered `scene.settings.<fog|ambient>.<increase|decrease>`
+ *  commands in the command palette. */
 function SliderRow({
   label,
   tooltipShort,
   tooltipLong,
   value,
   onChange,
-  onIncrease,
-  onDecrease,
 }: SliderRowProps) {
-  const atMin = value <= SLIDER_MIN;
-  const atMax = value >= SLIDER_MAX;
-
   return (
     <div className="flex items-center gap-1.5 h-[22px]">
-      <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[52px] shrink-0 select-none">
+      <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[40px] shrink-0 select-none">
         {label}
       </span>
 
-      <div className="flex flex-1 items-center gap-1 min-w-0">
-        <Tooltip
-          side="top"
-          stages={[
-            { delay: 1000, content: <span>{`Decrease ${label}`}</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">{`Decrease ${tooltipShort}`}</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Step {label.toLowerCase()} down by {SLIDER_STEP.toFixed(2)}
-                    {` (minimum ${SLIDER_MIN.toFixed(2)})`}.
-                  </div>
+      <Tooltip
+        side="top"
+        wrapperClassName="flex-1 min-w-0"
+        stages={[
+          { delay: 1000, content: <span>{tooltipShort}</span> },
+          {
+            delay: 3000,
+            content: (
+              <div className="max-w-[400px]">
+                <div className="font-semibold">{tooltipShort}</div>
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
+                  {tooltipLong}
                 </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label={`Decrease ${label.toLowerCase()}`}
-            disabled={atMin}
-            onClick={onDecrease}
-            className={[
-              "h-4 w-4 shrink-0 rounded-sm",
-              "flex items-center justify-center",
-              "border transition-colors",
-              atMin
-                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-            ].join(" ")}
-          >
-            <Minus size={9} aria-hidden="true" />
-          </button>
-        </Tooltip>
-
-        <Tooltip
-          side="top"
-          stages={[
-            { delay: 1000, content: <span>{tooltipShort}</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">{tooltipShort}</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
-                    {tooltipLong}
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <input
-            type="range"
-            min={SLIDER_MIN}
-            max={SLIDER_MAX}
-            step={SLIDER_STEP}
-            value={value}
-            onChange={(e) => onChange(Number.parseFloat(e.target.value))}
-            aria-label={`${label} (slider)`}
-            className="flex-1 min-w-0 h-4 accent-amber-500"
-          />
-        </Tooltip>
-
-        <Tooltip
-          side="top"
-          stages={[
-            { delay: 1000, content: <span>{`Increase ${label}`}</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">{`Increase ${tooltipShort}`}</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Step {label.toLowerCase()} up by {SLIDER_STEP.toFixed(2)}
-                    {` (maximum ${SLIDER_MAX.toFixed(2)})`}.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label={`Increase ${label.toLowerCase()}`}
-            disabled={atMax}
-            onClick={onIncrease}
-            className={[
-              "h-4 w-4 shrink-0 rounded-sm",
-              "flex items-center justify-center",
-              "border transition-colors",
-              atMax
-                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-            ].join(" ")}
-          >
-            <Plus size={9} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </div>
+              </div>
+            ),
+          },
+        ]}
+      >
+        <input
+          type="range"
+          min={SLIDER_MIN}
+          max={SLIDER_MAX}
+          step={SLIDER_STEP}
+          value={value}
+          onChange={(e) => onChange(Number.parseFloat(e.target.value))}
+          aria-label={`${label} (slider)`}
+          className="flex-1 min-w-0 h-4 accent-amber-500"
+        />
+      </Tooltip>
 
       <span className="text-[10px] font-mono tabular-nums text-(--color-fg-secondary) w-[28px] text-right select-none shrink-0">
         {value.toFixed(2)}
