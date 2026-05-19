@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
+import { Tooltip } from "../../../components/ui/Tooltip";
 import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
 
 /**
@@ -141,59 +142,59 @@ export function ToolPalettePanel(): React.JSX.Element {
       className="h-full w-full flex flex-col gap-2"
     >
       {/*
-        Fluid tile grid: `auto-fit` + `minmax(56px, 80px)` lets the
-        browser compute column count from available width. Because
-        auto-fit prefers the max-width track size (80px) and only
-        breaks to another column when one full 80px + gap fits, the
-        actual breakpoints (4px gap) work out to:
-          • <80px   — 1 col @ panel-width (shrinks min 56→80 per width)
-          •  80-164 — 1 col × 6 rows  (vertical)
-          • 164-248 — 2 cols × 3 rows
-          • 248-332 — 3 cols × 2 rows
-          • 332-416 — 4 cols × 2 rows
-          • 416-500 — 5 cols × 2 rows
-          • 500+    — 6 cols × 1 row  (horizontal)
-
-        ScrollRow note (design decision): we considered wrapping this
-        grid in <ScrollRow> as a fallback for sub-56px panel widths,
-        but ScrollRow forces `overflow-y: hidden` on its viewport
-        which conflicts with this grid's vertical reflow (in narrow
-        mode 6 tiles stack to ~480px tall and need vertical space).
-        Per the spec's escape hatch, we skip ScrollRow here and rely
-        on auto-fit reflow + the panel's own vertical overflow
-        behaviour. Sub-56px widths are degenerate (no real horizontal
-        scrollbar shown either — the parent dockview cell clips).
+        Fluid tile grid: icon-only tiles, ~32–40px square. `auto-fit`
+        + `minmax(32px, 40px)` lets the browser compute column count
+        from available width while clamping tile size to the compact
+        target. Hover-reveal tooltip (multi-stage) carries the name +
+        description so the tile body itself can be purely iconic.
       */}
       <div
         className="grid gap-1"
         style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(56px, 80px))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(32px, 40px))",
         }}
       >
         {MOCK_TOOLS.map((t) => {
           const Icon = TOOL_ICON_BY_NAME[t.icon];
           const active = t.id === activeTool;
           return (
-            <button
+            <Tooltip
               key={t.id}
-              type="button"
-              title={t.name}
-              aria-pressed={active}
-              onClick={() => handleToolClick(t.id)}
-              className={[
-                "aspect-square w-full rounded",
-                "flex flex-col items-center justify-center gap-0.5",
-                "border transition-colors",
-                active
-                  ? "bg-amber-500 border-amber-500 text-zinc-950"
-                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-              ].join(" ")}
+              side="right"
+              stages={[
+                { delay: 2000, content: <span>{t.name}</span> },
+                {
+                  delay: 5000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">{t.name}</div>
+                      {t.description && (
+                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                          {t.description}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
             >
-              {Icon ? <Icon size={14} aria-hidden="true" /> : null}
-              <span className="block w-full truncate px-1 text-center text-[8px] uppercase tracking-wider leading-tight">
-                {t.name}
-              </span>
-            </button>
+              <button
+                type="button"
+                aria-label={t.name}
+                aria-pressed={active}
+                onClick={() => handleToolClick(t.id)}
+                className={[
+                  "aspect-square w-full rounded",
+                  "flex items-center justify-center",
+                  "border transition-colors",
+                  active
+                    ? "bg-amber-500 border-amber-500 text-zinc-950"
+                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                ].join(" ")}
+              >
+                {Icon ? <Icon size={16} aria-hidden="true" /> : null}
+              </button>
+            </Tooltip>
           );
         })}
       </div>

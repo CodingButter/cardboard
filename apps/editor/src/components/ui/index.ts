@@ -94,7 +94,7 @@ export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
 
 export { Tooltip } from "./Tooltip";
-export type { TooltipProps } from "./Tooltip";
+export type { TooltipProps, TooltipStage } from "./Tooltip";
 
 export { TopBar } from "./TopBar";
 export type {

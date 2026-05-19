@@ -63,6 +63,9 @@ export interface ToolRow {
   name: string;
   /** Lucide icon name string — Wave 2 maps these to the icon component. */
   icon: string;
+  /** Long-form tooltip body. Used by the tool palette's progressive
+   *  reveal tooltip — appears after a longer hover than the bare name. */
+  description?: string;
   subTools?: ToolSubRow[];
 }
 
@@ -71,17 +74,46 @@ export const MOCK_TOOLS = [
     id: "select",
     name: "Select",
     icon: "MousePointer2",
+    description:
+      "Pick existing cells, entities, or selection regions. Hold Shift to add to selection.",
     subTools: [
       { id: "select-box", name: "Box" },
       { id: "select-polygon", name: "Polygon" },
       { id: "select-contiguous", name: "Contiguous" },
     ],
   },
-  { id: "paint", name: "Paint", icon: "Brush" },
-  { id: "eraser", name: "Eraser", icon: "Eraser" },
-  { id: "eye-dropper", name: "Eye Dropper", icon: "Pipette" },
-  { id: "fill", name: "Fill", icon: "PaintBucket" },
-  { id: "entity-place", name: "Entity Place", icon: "PlusSquare" },
+  {
+    id: "paint",
+    name: "Paint",
+    icon: "Brush",
+    description:
+      "Paint the active tile preset onto the canvas. Drag to paint multiple cells.",
+  },
+  {
+    id: "eraser",
+    name: "Eraser",
+    icon: "Eraser",
+    description: "Remove content from the active layer. Drag to erase a region.",
+  },
+  {
+    id: "eye-dropper",
+    name: "Dropper",
+    icon: "Pipette",
+    description: "Sample the cell under the cursor as the active brush.",
+  },
+  {
+    id: "fill",
+    name: "Fill",
+    icon: "PaintBucket",
+    description:
+      "Flood-fill the area under the cursor with the active tile preset.",
+  },
+  {
+    id: "entity-place",
+    name: "Entity",
+    icon: "PlusSquare",
+    description: "Place the selected entity prefab on the canvas.",
+  },
 ] as const satisfies readonly ToolRow[];
 
 // ---------------------------------------------------------------------------
