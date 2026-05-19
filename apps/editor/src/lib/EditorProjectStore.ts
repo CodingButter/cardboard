@@ -70,12 +70,20 @@ export interface ManifestRow {
   json: PackManifest;
 }
 
-export type AssetKind = "text" | "blob";
+/**
+ * How an asset is serialized in the IDB row — `"text"` rows hold a
+ * UTF-8 string in `body`, `"blob"` rows hold a `Blob`. This is the
+ * STORAGE shape, orthogonal to the SEMANTIC taxonomy
+ * (`SemanticAssetKind` in `apps/editor/src/state/dnd/payload.ts`)
+ * which describes what an asset MEANS to the editor (script, texture,
+ * tilePreset, …). See `docs/plans/CROSS_WINDOW_DND.md` §4.
+ */
+export type AssetStorageKind = "text" | "blob";
 
 export interface AssetRow {
   projectId: string;
   path: string;
-  kind: AssetKind;
+  kind: AssetStorageKind;
   body: string | Blob;
   updatedAt: number;
   sizeBytes: number;
@@ -83,7 +91,7 @@ export interface AssetRow {
 
 export interface AssetMeta {
   path: string;
-  kind: AssetKind;
+  kind: AssetStorageKind;
   sizeBytes: number;
   updatedAt: number;
 }

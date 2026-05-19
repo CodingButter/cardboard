@@ -8,6 +8,8 @@
 // gets deleted in one go and the panel imports get repointed at the
 // `editorProjectStore` selectors.
 
+import type { SemanticAssetKind } from "../../state/dnd/payload";
+
 // ---------------------------------------------------------------------------
 // Tile presets
 
@@ -521,7 +523,15 @@ export const MOCK_LIGHTS = [
 // ---------------------------------------------------------------------------
 // Asset references
 
-export type AssetKind = "texture" | "sound" | "music" | "prefab" | "script";
+/**
+ * @deprecated Re-export of the canonical `SemanticAssetKind` from
+ * `apps/editor/src/state/dnd/payload.ts`. Kept here for back-compat
+ * while panels still import `AssetKind` from `scene-fixtures`; new
+ * code should import `SemanticAssetKind` directly. The semantic set
+ * is now a superset of the original (adds `sprite`, `tilePreset`,
+ * `scene`) — see `docs/plans/CROSS_WINDOW_DND.md` §4.
+ */
+export type AssetKind = SemanticAssetKind;
 
 export interface AssetRefRow {
   id: string;

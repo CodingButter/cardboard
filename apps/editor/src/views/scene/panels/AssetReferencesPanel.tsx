@@ -168,13 +168,19 @@ function isFilterId(value: string | null): value is FilterId {
 
 // Per-kind icon lookup for asset rows. Mirrors the icon used by the
 // kind's filter chip so users build muscle memory across the two
-// surfaces.
+// surfaces. `AssetKind` is now the full `SemanticAssetKind` superset
+// (see `docs/plans/CROSS_WINDOW_DND.md` §4) — the additional kinds
+// fall back to generic icons until this panel grows real chips for
+// them.
 const KIND_ICON: Record<AssetKind, LucideIcon> = {
   texture: Image,
   sound: Volume2,
   music: Music,
   prefab: Box,
   script: FileCode,
+  sprite: Image,
+  tilePreset: LayersIcon,
+  scene: LayersIcon,
 };
 
 function findAsset(id: string): AssetRefRow | undefined {
@@ -210,6 +216,9 @@ function useFilterCounts(): Record<FilterId, number> {
       music: 0,
       prefab: 0,
       script: 0,
+      sprite: 0,
+      tilePreset: 0,
+      scene: 0,
     };
     for (const a of all) {
       counts[a.kind] += 1;
