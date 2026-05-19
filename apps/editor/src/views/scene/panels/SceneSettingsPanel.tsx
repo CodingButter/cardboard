@@ -1,16 +1,11 @@
-// TODO: wire to scene store. For now the panel seeds its state from
-// MOCK_SCENE_SETTINGS and keeps edits in-memory only (no persistence;
-// resets on remount).
 import React from "react";
 import { Settings, Minus, Plus, RotateCcw } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { NumberInput } from "../../../components/ui/NumberInput";
 import { registerCommand } from "../../../state/useCommandStore";
-import {
-  MOCK_SCENE_SETTINGS,
-  type SceneSettingsRow,
-} from "../scene-fixtures";
+import { useSceneStore } from "../../../state/useSceneStore";
+import { MOCK_SCENE_SETTINGS } from "../scene-fixtures";
 
 /**
  * SceneSettingsPanel — per-scene render knobs.
@@ -27,6 +22,14 @@ import {
  * no stacked label-above-control variants — at narrow widths the
  * sliders themselves are flex-1 so they shrink before anything else.
  *
+ * State source (Wave 3.3): fog + ambient are read from and written to
+ * `useSceneStore.settings` — the synced store handles persistence
+ * (`cardboard.sync.scene`) and cross-window propagation, so this panel
+ * owns no localStorage logic of its own. Scene dimensions remain local
+ * panel state for now — the canonical `dims` slice on `useSceneStore`
+ * is reserved for a later migration (MapCanvas/Minimap/Preview own it
+ * end-to-end), and there is no resize action on the store yet.
+ *
  * Commands registered (`Scene` category):
  *   - `scene.settings.editName`           — focus the dimensions input
  *                                            (name field removed; this
@@ -37,7 +40,9 @@ import {
  *   - `scene.settings.fog.decrease`       — step fog by -0.05 (clamped 0..1).
  *   - `scene.settings.ambient.increase`   — step ambient by +0.05 (clamped 0..1).
  *   - `scene.settings.ambient.decrease`   — step ambient by -0.05 (clamped 0..1).
- *   - `scene.settings.reset`              — reset all fields to MOCK_SCENE_SETTINGS.
+ *   - `scene.settings.reset`              — reset fog/ambient (store) AND
+ *                                            local dimensions back to the
+ *                                            seeded defaults.
  */
 
 /** Step + bounds for the 0..1 sliders. Matches the brief's spec. */
@@ -67,22 +72,27 @@ function clampDim(n: number): number {
   return Math.max(DIM_MIN, Math.min(DIM_MAX, Math.round(n)));
 }
 
-function seedSettings(): SceneSettingsRow {
+/** Seed for the local dimensions slice (NOT yet on the store). */
+function seedDimensions(): { w: number; h: number } {
   return {
-    name: MOCK_SCENE_SETTINGS.name,
-    dimensions: {
-      w: MOCK_SCENE_SETTINGS.dimensions.w,
-      h: MOCK_SCENE_SETTINGS.dimensions.h,
-    },
-    fog: MOCK_SCENE_SETTINGS.fog,
-    ambient: MOCK_SCENE_SETTINGS.ambient,
+    w: MOCK_SCENE_SETTINGS.dimensions.w,
+    h: MOCK_SCENE_SETTINGS.dimensions.h,
   };
 }
 
 export function SceneSettingsPanel(): React.JSX.Element {
-  // Local panel state — owns the mutable copy of MOCK_SCENE_SETTINGS.
-  const [settings, setSettings] = React.useState<SceneSettingsRow>(
-    seedSettings,
+  // Store-backed slice — fog + ambient live on `useSceneStore.settings`.
+  // Field-by-field selectors keep re-renders narrow (the panel only
+  // re-renders when its own fields change, not on cell paints).
+  const fog = useSceneStore((s) => s.settings.fog);
+  const ambient = useSceneStore((s) => s.settings.ambient);
+
+  // Local-only slice — scene dimensions. The store's `dims` is reserved
+  // for the MapCanvas/Minimap/Preview migration; until then this panel
+  // owns the dimensions UI on its own and resets re-seed from the
+  // fixture defaults.
+  const [dimensions, setDimensions] = React.useState<{ w: number; h: number }>(
+    seedDimensions,
   );
 
   // Ref for the dimensions width input — the focus target for both
@@ -93,78 +103,68 @@ export function SceneSettingsPanel(): React.JSX.Element {
   const widthWrapRef = React.useRef<HTMLDivElement>(null);
 
   // ────────────────────────────────────────────────────────────────
-  // Mutators (used by both the UI and the registered commands).
+  // Mutators — store writes go through `useSceneStore.getState()` so
+  // they don't capture stale closures and so the command bodies can
+  // call the same code path.
 
   const setWidthValue = React.useCallback((next: number) => {
-    setSettings((prev) => ({
-      ...prev,
-      dimensions: { ...prev.dimensions, w: clampDim(next) },
-    }));
+    setDimensions((prev) => ({ ...prev, w: clampDim(next) }));
   }, []);
 
   const setHeightValue = React.useCallback((next: number) => {
-    setSettings((prev) => ({
-      ...prev,
-      dimensions: { ...prev.dimensions, h: clampDim(next) },
-    }));
+    setDimensions((prev) => ({ ...prev, h: clampDim(next) }));
   }, []);
 
   const setFog = React.useCallback((next: number) => {
-    setSettings((prev) => ({ ...prev, fog: round2(clamp01(next)) }));
-  }, []);
-
-  const bumpFog = React.useCallback((direction: 1 | -1) => {
-    setSettings((prev) => ({
-      ...prev,
-      fog: round2(clamp01(prev.fog + direction * SLIDER_STEP)),
-    }));
+    useSceneStore.getState().setSettings({ fog: round2(clamp01(next)) });
   }, []);
 
   const setAmbient = React.useCallback((next: number) => {
-    setSettings((prev) => ({ ...prev, ambient: round2(clamp01(next)) }));
-  }, []);
-
-  const bumpAmbient = React.useCallback((direction: 1 | -1) => {
-    setSettings((prev) => ({
-      ...prev,
-      ambient: round2(clamp01(prev.ambient + direction * SLIDER_STEP)),
-    }));
+    useSceneStore.getState().setSettings({ ambient: round2(clamp01(next)) });
   }, []);
 
   const reset = React.useCallback(() => {
-    setSettings(seedSettings());
+    useSceneStore.getState().setSettings({
+      fog: MOCK_SCENE_SETTINGS.fog,
+      ambient: MOCK_SCENE_SETTINGS.ambient,
+    });
+    setDimensions(seedDimensions());
   }, []);
 
   // ────────────────────────────────────────────────────────────────
-  // Handler refs so the command registrations don't have to re-run
-  // on every state change.
-  const focusDimsRef = React.useRef<() => void>(() => {});
-  const bumpFogRef = React.useRef(bumpFog);
-  const bumpAmbientRef = React.useRef(bumpAmbient);
-  const resetRef = React.useRef(reset);
+  // Static command registrations — registered once on mount. Command
+  // bodies that mutate the store call `useSceneStore.getState()`
+  // directly, mirroring the pattern locked in by the four prior Wave
+  // 3.3 panel migrations.
 
   React.useEffect(() => {
-    focusDimsRef.current = () => {
-      // Width input lives inside the wrapper div; reach the first
-      // descendant input (NumberInput renders one and only one).
+    const focusDims = () => {
       const input = widthWrapRef.current?.querySelector("input");
       input?.focus();
     };
-  }, []);
-  React.useEffect(() => {
-    bumpFogRef.current = bumpFog;
-  }, [bumpFog]);
-  React.useEffect(() => {
-    bumpAmbientRef.current = bumpAmbient;
-  }, [bumpAmbient]);
-  React.useEffect(() => {
-    resetRef.current = reset;
-  }, [reset]);
 
-  // ────────────────────────────────────────────────────────────────
-  // Static command registrations — registered once on mount.
+    const bumpFogBy = (direction: 1 | -1) => {
+      const current = useSceneStore.getState().settings.fog;
+      useSceneStore.getState().setSettings({
+        fog: round2(clamp01(current + direction * SLIDER_STEP)),
+      });
+    };
 
-  React.useEffect(() => {
+    const bumpAmbientBy = (direction: 1 | -1) => {
+      const current = useSceneStore.getState().settings.ambient;
+      useSceneStore.getState().setSettings({
+        ambient: round2(clamp01(current + direction * SLIDER_STEP)),
+      });
+    };
+
+    const resetAll = () => {
+      useSceneStore.getState().setSettings({
+        fog: MOCK_SCENE_SETTINGS.fog,
+        ambient: MOCK_SCENE_SETTINGS.ambient,
+      });
+      setDimensions(seedDimensions());
+    };
+
     const unregs = [
       registerCommand({
         id: "scene.settings.editName",
@@ -173,14 +173,14 @@ export function SceneSettingsPanel(): React.JSX.Element {
         keywords: ["scene", "name", "rename", "edit"],
         // Name field lives outside this panel; the closest in-panel
         // focus target is the dimensions input.
-        run: () => focusDimsRef.current(),
+        run: () => focusDims(),
       }),
       registerCommand({
         id: "scene.settings.editDimensions",
         title: "Edit Scene Dimensions",
         category: "Scene",
         keywords: ["scene", "dimensions", "size", "width", "height", "edit"],
-        run: () => focusDimsRef.current(),
+        run: () => focusDims(),
       }),
       registerCommand({
         id: "scene.settings.fog.increase",
@@ -188,7 +188,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         category: "Scene",
         keywords: ["scene", "fog", "increase", "density"],
         icon: <Plus size={14} />,
-        run: () => bumpFogRef.current(1),
+        run: () => bumpFogBy(1),
       }),
       registerCommand({
         id: "scene.settings.fog.decrease",
@@ -196,7 +196,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         category: "Scene",
         keywords: ["scene", "fog", "decrease", "density"],
         icon: <Minus size={14} />,
-        run: () => bumpFogRef.current(-1),
+        run: () => bumpFogBy(-1),
       }),
       registerCommand({
         id: "scene.settings.ambient.increase",
@@ -204,7 +204,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         category: "Scene",
         keywords: ["scene", "ambient", "light", "increase", "brighten"],
         icon: <Plus size={14} />,
-        run: () => bumpAmbientRef.current(1),
+        run: () => bumpAmbientBy(1),
       }),
       registerCommand({
         id: "scene.settings.ambient.decrease",
@@ -212,7 +212,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         category: "Scene",
         keywords: ["scene", "ambient", "light", "decrease", "darken"],
         icon: <Minus size={14} />,
-        run: () => bumpAmbientRef.current(-1),
+        run: () => bumpAmbientBy(-1),
       }),
       registerCommand({
         id: "scene.settings.reset",
@@ -220,7 +220,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         category: "Scene",
         keywords: ["scene", "reset", "defaults", "revert"],
         icon: <RotateCcw size={14} />,
-        run: () => resetRef.current(),
+        run: () => resetAll(),
       }),
     ];
     return () => unregs.forEach((u) => u());
@@ -249,8 +249,9 @@ export function SceneSettingsPanel(): React.JSX.Element {
                 <div className="max-w-[400px]">
                   <div className="font-semibold">Reset Scene Settings</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Restore dimensions, fog, and ambient back to their
-                    seeded defaults. In-memory only.
+                    Restore fog, ambient, and dimensions back to their
+                    seeded defaults. Fog and ambient persist via the
+                    scene store; dimensions reset in-memory only.
                   </div>
                 </div>
               ),
@@ -279,7 +280,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         label="Fog"
         tooltipShort="Fog Density"
         tooltipLong="Overall scene fog intensity. Higher values reduce visibility at distance."
-        value={settings.fog}
+        value={fog}
         onChange={setFog}
       />
 
@@ -288,7 +289,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
         label="Ambient"
         tooltipShort="Ambient Light"
         tooltipLong="Base scene lighting applied to every cell. Higher values brighten shadowed areas."
-        value={settings.ambient}
+        value={ambient}
         onChange={setAmbient}
       />
 
@@ -318,7 +319,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
           >
             <div ref={widthWrapRef} className="min-w-0 flex-1">
               <NumberInput
-                value={settings.dimensions.w}
+                value={dimensions.w}
                 onChange={(next) => setWidthValue(next)}
                 min={DIM_MIN}
                 max={DIM_MAX}
@@ -354,7 +355,7 @@ export function SceneSettingsPanel(): React.JSX.Element {
           >
             <div className="min-w-0 flex-1">
               <NumberInput
-                value={settings.dimensions.h}
+                value={dimensions.h}
                 onChange={(next) => setHeightValue(next)}
                 min={DIM_MIN}
                 max={DIM_MAX}
