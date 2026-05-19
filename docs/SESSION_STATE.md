@@ -1,273 +1,221 @@
-# Session state — context-survival snapshot
+# Session State — 2026-05-19 handoff
 
-Pair this with `PLAN.md` and the phase-specific docs under
-`docs/plans/`. Fresh session? Read `docs/PLAN.md` first, this
-second, then the phase doc for whatever you're working on.
+A handoff snapshot for the next Claude instance picking up this work.
+**Read this file, then `MEMORY.md` (in your auto-memory), then
+`docs/plans/SCENE_WAVE_3_WIRING.md` — that's the full context.**
 
-Date of last update: **2026-05-19**.
+## Where main is right now
 
----
+Branch `main` at commit **`7ede196`** — pushed to origin, tree clean.
+The last 5 commits in chronological order:
 
-## 1. What just shipped
+```
+7ede196  editor: state — define wave-3 cross-panel stores (8 stores on sync utility)
+8e748a0  ci: retire deploy-editor.yml; docs.yml is the sole Pages deploy
+f542803  editor: state/sync — cross-window sync utility
+e357f72  docs: SCENE_WAVE_3_WIRING — plan doc for cross-panel data wiring
+9c818b9  editor: MapCanvasPanel — align grid lattice with cell boundaries (v1 — needs follow-up)
+```
 
-Chronological since 2026-05-15:
+## What just landed
 
--1. **(2026-05-18 → 19 sprint, pushed through `fd8b1e6`)** — Scene-page
-   panel surface system + responsive ToolPalette + PWA install. All
-   of `docs/EDITOR_DESIGN_INVENTORY.md` §1.2 "Architecture decisions
-   (2026-05-18)" landed.
+**Phase 3.2 of Scene Wave 3 — eight cross-panel stores** built on top of
+the cross-window sync utility from `apps/editor/src/state/sync.ts`:
 
-   - **Dock visual system**: page-bg darkened to `oklch(0.17)`,
-     panel-surface token at translucent `oklch(1 0 0 / 0.02)` (2%
-     white overlay) + `shadow-[var(--shadow-panel)]` + hairline
-     border. Dock chrome (group, tab strip, every tab bg) all
-     transparent — the page bg shows through everywhere and only
-     the per-panel `PanelSurface` card paints anything.
-     `PanelSurface` wraps each opted-in panel inside `dv-content-container`
-     with `px-1.5 pb-1` outer + `p-2` inner so adjacent surface
-     cards have a visible gap from the dock content edges. Active
-     tab amber underline scoped to multi-tab groups via
-     `:not(.dv-single-tab)`.
-   - **DockPanelDef flags**: `surface?: boolean` (default true,
-     stamped via `data-surface="false"` for opt-outs), `headerless?:
-     boolean` (stamped via `data-headerless`, plus `group.locked`).
-     Map Canvas opts out of both; Output/Problems/Selection Info
-     opt out of surface only. CSS targets the data attributes to
-     strip chrome.
-   - **PWA install**: `apps/editor/public/manifest.webmanifest` +
-     `sw.js` (HMR-aware fetch handler) + 3 icons + SW registration
-     in `index.tsx` runs in both dev and prod. `launch_handler:
-     navigate-new` so installed-PWA dock-icon clicks spawn new
-     chrome-less standalone windows. Verified: window.open popouts
-     from inside the installed PWA inherit standalone display mode.
-   - **Ctrl+drag float toggle** experiment dispatched, then removed
-     — too fragile across PWA-vs-tab contexts (Chrome routed
-     popups-to-tabs unpredictably). Native dockview drag-off
-     handles popouts cleanly in the installed PWA; no custom
-     gesture needed.
-   - **Scene panel stubs**: 18 dock panels (12 default-layout, 6
-     opt-in via DocksModal). All registered in `MapView.tsx`. Most
-     bodies are empty `data-panel="..."` stubs awaiting Wave 2.
-   - **Predefined layouts**: 4 presets — Default, Map Focus,
-     Inspect, Debug — rewritten against current panel ids. Default
-     layout is the maintainer's working snapshot (12-panel grid).
-   - **ScrollRow primitive** (`apps/editor/src/components/ui/ScrollRow.tsx`):
-     shared horizontal-scroll component matching `TabStrip` `scrollable={true}`
-     hover-area pattern. Hidden native horizontal scrollbar via
-     Tailwind arbitrary variants; edge fades + RAF auto-scroll;
-     keyboard-accessible. **For panels where reflow can't help.**
-   - **ToolPalette responsive**: tile grid uses
-     `grid-template-columns: repeat(auto-fit, minmax(56px, 80px))`,
-     reflows from 1×6 vertical at narrow widths to 6×1 horizontal
-     at wide. `aspect-square` tiles, `truncate` labels. State /
-     localStorage / MANIFEST unchanged. (Successor in-flight: progressive
-     tooltip + icon-only redo per next bullet.)
-   - **In flight (agent `a4c1e9535e03812f6`)** at time of writing:
-     extend `Tooltip` with `stages?: TooltipStage[]` for two-stage
-     progressive reveal (2s short label, 5s short label + full
-     description); add `description?: string` to MOCK_TOOLS; redo
-     ToolPalette as icon-only 32–40px tiles wrapped in the staged
-     tooltip. Eye Dropper → Dropper, Entity Place → Entity.
+- `useToolStore` (LS) — activeTool, activeSubTool, activeMode
+- `useBrushStore` (LS) — kind, size, sizeUp/sizeDown
+- `useTilePresetStore` (LS) — activeId, activeCategory
+- `useLayerStore` (LS) — activeId, visibility, order, customLayers
+- `useSelectionStore` (LS + broadcast) — selected (persist) + hover/cursor (throttled ephemeral)
+- `useSceneStore` (LS partialize) — dims, cells (sparse map), settings
+- `useHistoryStore` (LS partialize, cap 100) — entries, cursor
+- `useDiagnosticsStore` (in-memory + broadcast) — log lines cap 500
 
-   New + updated memories (in
-   `~/.claude/projects/-home-codingbutter-development-cardboard/memory/`):
-   - `feedback_playwright_screenshots_folder.md`
-   - `feedback_dispatch_without_approval_gate.md`
-   - `feedback_panel_responsive_design.md`
-   - `feedback_progressive_tooltips.md` ← project-wide tooltip standard
+Stores are exposed under `window.__cardboard.stores.*` in dev for
+Playwright cross-tab verification (see `apps/editor/index.tsx`).
 
+## Where Wave 3 is in the plan
 
--1. **(uncommitted, 2026-05-17)** — WORLD_STATE "world.json
-   full-scope" pass. `world.json` is now the authoritative
-   world-scope authoring surface — singletons + persistent
-   entities + scripts. The default-pack player is a persistent
-   world entity declared in `world.json.entities[]` (Position /
-   Facing / Aim / `Scripts.refs: ["scripts/setup/player-init.js"]`).
-   The engine spawns it ONCE at boot, flags it `_worldPersistent`,
-   and the `Game.loadScene` despawn pass skips persistent ids.
-   `scripts/setup/player-init.js` (entity-attach script) wires
-   Movement / PlayerInput / Weapon / Camera / MinimapMarker /
-   Inventory at attach time so they can read live `api.config` /
-   `api.pack.manifest`. `scripts/systems/scene-transition.js`
-   (world-scope script) subscribes to `scene:loaded` and
-   repositions the player at the new scene's
-   `controller.components.SpawnerList.points[0]`. Every
-   `Scene.spawn` back-compat surface ripped: `SceneSpawn`,
-   `DEFAULT_SPAWN`, `synthesiseControllerFromSpawn`,
-   `api.scene.spawn`, `SceneJSON.spawn`, the spawn-reset logic in
-   `Game.loadScene`. `manifest.scripts[]` retired; world.json
-   scripts list now drives everything. Pack-builder walks
-   `world.json.scripts[]` + `Scripts.refs[]` to discover compilable
-   pack scripts. World gains `setName(id, name)` /
-   `findByName(name)` / `liveEntities()`. Default-pack scenes
-   stripped of top-level `spawn` fields; manifest.json no longer
-   ships `scripts`. Engine's `pack.scripts()` replaced with
-   `pack.readScripts(paths)`. New `WorldJson` interface on
-   `Game`. Editor MutableScene gains `controller`; GridEditor
-   spawn handle reads from SpawnerList; smoke tests migrated.
-0. **(uncommitted earlier 2026-05-17)** — engine maximally-unopinionated
-   pass + PE2/PE3 re-implementation after the recovery wipe.
-   Engine built-ins slimmed to render/lifecycle infrastructure
-   (Position/Facing/Aim/Camera/Sprite/Animation/Light/Shader);
-   PlayerInput/Movement/Weapon/Inventory/MinimapMarker/Pickup
-   moved to `manifest.components[]` (instantiated as
-   `Component<unknown>` at boot, resolved through `api.components`
-   proxy under their string name). Prefab runtime deleted —
-   `registerDeclarativePrefabs`, `PrefabRegistry`,
-   `api.registerPrefab/spawn/spawnPrefab`, `DeclarativePrefab.initScript`
-   all gone. `Game.spawnInitialEntities` now walks
-   `scene.entities[]` (PREFABS_EDITOR_ONLY.md §4.2);
-   default-pack ships `scripts/systems/player-spawn.js` wired
-   into `manifest.scripts[]`. `player:moved` emission moved
-   pack-side (player-input.js owns the throttled emit).
-   `KeyBindings` type relocated to `Controllers/Bindings.ts`.
-1. **`0b3118f`** — EDITOR_REDESIGN R1 plan doc (full editor visual
-   overhaul).
-2. **`af30aa7`** — editor-redesign decisions resolved (Q1–Q4) +
-   UI Builder + engine/pack UI split.
-3. **`4d3c1e9`** — *Checkpoint commit* after sandbox reset incident.
-   Captures untracked work: R3 EditorShell, R4 view stubs, plan docs
-   for IMAGE_LAB / SOUND_LAB / UI_BUILDER / PREFABS_EDITOR_ONLY /
-   TUTORIALS / RESPONSIVE_DESIGN / CLOUD_SYNC / WORLD_STATE, plus
-   the data-first engine overhaul scaffolding (#294) and pack icon
-   pipeline (#295).
-4. **`3beee7e`** — fix: mount `EditorShell` in `App.tsx`
-   (the sandbox reset had reverted the mount).
-5. **`47103e1`** — *Recovery batch 1*: 35 files reconstructed from
-   agent transcripts via the replay engine.
-6. **`4504547`** — *Recovery batch 2*: 24 more files reconstructed
-   (only kept when bigger than the legacy version).
-7. **`2391f5b`** — recover: `FbxImporter` dedup + partial edits.
-8. **`740369d`** — recover: scene-view chain (`MapView`,
-   `ProjectView`, `EditorViewport`, `GridEditor`) partial edits.
-9. **`93fb93d`** — recover: `ModAPIImpl` + `AudioRegistry` partial
-   edits.
-10. **`<dedup>`** (landing now) — engine `ShaderVariants.ts`
-    duplications removed; `WebGLRenderer.embedHud` field restored.
+Phases per `docs/plans/SCENE_WAVE_3_WIRING.md`:
 
-### Major plan-doc landings this window
+- ✅ **3.1** — sync utility foundation (`f542803`)
+- ✅ **3.2** — define 8 stores (`7ede196`)
+- ⏳ **3.3** — migrate panels off MOCK_ fixtures (NEXT)
+- ⏳ **3.4** — wire MapCanvas painting + undo/redo
+- ⏳ **3.5** — popout validation
 
-`IMAGE_LAB.md`, `SOUND_LAB.md`, `WORLD_STATE.md`,
-`PREFABS_EDITOR_ONLY.md`, `UI_BUILDER.md`, `TUTORIALS.md`,
-`RESPONSIVE_DESIGN.md`, `CLOUD_SYNC.md`.
+## Immediate next steps
 
----
+### 1. Re-dispatch the MapCanvas grid v2 fix (P0 user-facing bug)
 
-## 2. The recovery incident
+User reported AFTER `9c818b9` landed that the visual grid lines appear
+to cut through the **center** of cells instead of sitting on the
+**boundaries** between them. A v2 fix agent was dispatched but killed
+by a Docker/VSCode crash before any code changes saved.
 
-**What happened.** A multi-hour session inside a sandbox worktree
-ran with a `git reset --hard HEAD` hook on shell exit. The hook
-kept wiping modifications to tracked files between agent dispatches
-while leaving untracked-new files intact. Result: most R-phase
-edits to existing files vanished as soon as the dispatching agent
-returned.
+Likely root cause to investigate:
+- Loop bounds off-by-one (drawing N lines instead of N+1 boundaries).
+- Index math using `colEdges[c]` for line position when it should
+  iterate `0..=dims.w` (inclusive).
+- DPR scaling drift between cell paint math and stroke math.
 
-**Diagnosis.** The worktree was a sandbox copy of `HEAD` with no
-intermediate commits; every reset rolled back to the snapshot the
-worktree had been spawned from. Untracked files survived because
-`reset --hard` only touches tracked paths.
+### 2. Wave 3.3 — migrate panels off MOCK_ fixtures
 
-**Fix.** Commit early (the `4d3c1e9` checkpoint) to convert
-untracked work into the new `HEAD`, then run an automated
-transcript-replay engine over the agent transcripts to reconstruct
-modifications to tracked files from the diffs the agents had
-authored.
+14 panels to migrate, one commit per panel for surgical reverts. Order
+per the plan doc:
 
-**Scope.** ~60 files restored across `47103e1`, `4504547`,
-`2391f5b`, `740369d`, `93fb93d` (+ the dedup commit). ~66
-smaller-recovered candidates were skipped because their replayed
-size was less than the legacy version (would have been a
-regression). A few R4 prop chains — notably `GridEditor`'s
-`layer`/`tool` as props — didn't survive because the latest
-agent's edits referenced state that no longer matched the
-checkpointed shell.
+1. ToolPalette → `useToolStore`
+2. Brush → `useBrushStore`
+3. TilePresets → `useTilePresetStore`
+4. Layers → `useLayerStore`
+5. SceneSettings → `useSceneStore.settings`
+6. CellInspector → `useSelectionStore` + `useSceneStore.cells`
+7. SelectionInfo → `useSelectionStore` (read-only)
+8. QuickTools → `useSelectionStore.tags` (applied to current selection)
+9. Output / Problems → `useDiagnosticsStore`
+10. History → `useHistoryStore`
+11. Notes — unaffected (self-contained)
+12. Minimap → `useLayerStore.visibility` + `useSceneStore.cells`
+13. Preview → `useSceneStore` (renders scene)
+14. MapCanvas → all of the above (paints into `useSceneStore`)
 
-**Confirmed-recovered.** EditorShell mount; R4 view bodies for
-Map / Entities / Animation / Image Lab / Sound Lab views;
-`AnimationEditor` chain; `FbxImporter`; engine `ShaderVariants` /
-`ShaderInjection` / `PostPassChain` / `WebGLRenderer` rewires;
-`ModAPIImpl` audio wiring; `IdbAssetPack` + declarative prefab
-registrar.
+The `scene-fixtures.ts` file stays in place during this phase — stores
+seed from it on first run, and panel code stops importing it directly.
 
-**Known-partial.** GridEditor prop wiring (re-do likely needed);
-some IL2 / SL2 secondary surfaces; anything depending on the R4
-state shape post-checkpoint.
+### 3. Wave 3.4 — wire MapCanvas painting
 
----
+After all panels migrated, wire the canvas-side paint loop:
+- Mouse down with `tool === "paint"` + active tile preset → write to
+  `useSceneStore.cells` on active layer.
+- Drag continues painting (rate-limit by cell-grid crossings).
+- Eraser / dropper / fill tools.
+- Each op pushes onto `useHistoryStore`.
+- Ctrl+Z / Ctrl+Shift+Z walk cursor and replay inverse mutations.
 
-## 3. Open tasks
+### 4. Wave 3.5 — popout validation
 
-### In progress
+For each migrated panel: pop out, verify state syncs both directions,
+verify reload persistence. Capture pain points back into
+`docs/PAGE_BUILD_PROCESS.md`.
 
-- **#225** — Image Lab IL2 runtime polish
-- **#236** — Sound Lab SL2 runtime stub
-- **#260** — Pack icon pipeline (#295 follow-on)
-- **#288** — R4 editor view migrations (Map / Entities etc.)
-- **#293** — Data-first engine overhaul follow-up (#294)
+## Pending tasks queue (post Wave 3)
 
-### Queued — engine
+- **#26 (re-opened in spirit)** — MapCanvas grid v2 fix.
+- **#28** — Chip strip narrow-width dominance affects both TilePreset
+  and EntityList panels. At very narrow widths the chip strip eats
+  vertical space and hides the list below. Defer until after Wave 3.
+- **Prefabs page polish** — paused for Wave 3 pivot. Resume after Wave 3
+  lands.
+- **Other pages** — Components / Assets / Scripts / Animation / Image
+  Lab / Sound Lab / UI Builder / Project. Apply the playbook
+  (`docs/PAGE_BUILD_PROCESS.md`).
 
-- **#192** — Pack export modes (BUILD FULL vs EXTEND)
-- **#247** — Engine surface for data-first scene refactor
-- **#248** — Pack icon pipeline finishing touches
-- **#294** — WORLD_STATE data-first overhaul next phase
-- **#295** — Pack icon pipeline next phase
+## Architectural context the next agent must know
 
-### Queued — editor
+### The cross-window sync constraint (Wave 3 foundation)
 
-- **#223** — UI Builder view stub (R4i)
-- **#224** — Editor R5 polish pass
-- **#278** — R4 GridEditor prop re-wire (recovery follow-on)
-- **#285** — R4 view re-verification post-recovery
-- **#289** — Editor shell HMR survival
-- **#292** — R4 view migration QA
+dockview supports popping panels into their own browser windows. That
+means a popped-out panel runs in a SEPARATE JS context — vanilla
+Zustand stores diverge across windows. Wave 3 was designed from day
+one to handle this:
 
-### Queued — plan-only
+- `createSyncedStore` from `apps/editor/src/state/sync.ts` wraps every
+  store with `persist` (localStorage) + a `storage` event listener
+  that re-hydrates from other windows' writes.
+- For ephemeral state (cursor coords, hover highlights), the sync
+  utility exposes a `BroadcastChannel` per store. Use `throttle()`
+  from sync.ts for hot paths.
 
-- **#229** — IMAGE_LAB IL3
-- **#230** — IMAGE_LAB IL4
-- **#231** — IMAGE_LAB IL5
-- **#232** — IMAGE_LAB IL6
-- **#233** — IMAGE_LAB IL7
-- **#237** — SOUND_LAB SL3
-- **#238** — SOUND_LAB SL4
-- **#239** — SOUND_LAB SL5
-- **#240** — SOUND_LAB SL6
-- **#241** — SOUND_LAB SL7
+Read `feedback_popout_state_sync.md` in MEMORY before doing any Wave 3
+work. The wiring layer MUST work when panels are popped out.
 
----
+### Shared panels across all pages
 
-## 4. File-touched map
+Every page should register the canonical shared panels (Output,
+Problems, Notes, History, AssetReferences) so they're available via
+the Docks modal on any page. Phase 3b of the page-build playbook
+covers this. Scene already has them all; future pages need this baked
+in.
 
-| File | Role now |
-|------|----------|
-| `apps/editor/src/EditorShell.tsx` | R3 shell — top-level layout, view switcher |
-| `apps/editor/src/App.tsx` | Mounts `EditorShell` (re-fixed in `3beee7e`) |
-| `apps/editor/src/views/MapView.tsx` | R4a — map view container (delegates to GridEditor) |
-| `apps/editor/src/views/GridEditor.tsx` | R4 grid editor — recovered, prop chain partial |
-| `apps/editor/src/views/EntitiesEditor.tsx` | R4b — entities workflow tab |
-| `apps/editor/src/views/AnimationEditor.tsx` | R4c — AE1 + AE2 host |
-| `apps/editor/src/views/FbxImporter.tsx` | R4c — Three.js FBX modal (dedup'd) |
-| `apps/editor/src/views/ImageLabView.tsx` | R4d — IL2 runtime |
-| `apps/editor/src/views/SoundLabView.tsx` | R4e — SL2 runtime stub |
-| `apps/editor/src/views/ProjectView.tsx` | R4f — project root view |
-| `apps/editor/src/views/EditorViewport.tsx` | iframe runner host (I1) |
-| `packages/engine/src/Renderers/ShaderVariants.ts` | Variant table — dedup'd post-recovery |
-| `packages/engine/src/Renderers/WebGLRenderer.ts` | `embedHud` field restored |
-| `packages/engine/src/Renderers/ShaderInjection.ts` | Hook injection — recovered |
-| `packages/engine/src/Renderers/PostPassChain.ts` | Post-pass driver — recovered |
-| `packages/engine/src/ModAPI/ModAPIImpl.ts` | Audio wiring — partial recovery |
-| `packages/engine/src/ModAPI/AudioRegistry.ts` | Au1 — partial recovery |
-| `packages/engine/src/AssetPack/IdbAssetPack.ts` | Editor IDB pack — recovered |
-| `packages/engine/src/AssetPack/registerDeclarativePrefabs.ts` | Hybrid prefab registrar — recovered |
-| `docs/plans/{IMAGE_LAB,SOUND_LAB,WORLD_STATE,...}.md` | New plan docs (this window) |
+### Engine + pack context
 
----
+Cardboard is a **Wolfenstein-style raycaster** (see
+`packages/engine/`). Prefabs are billboard sprites, NOT 3D meshes.
+EntityPreviewPanel currently renders cubes which is wrong but
+explicitly deferred to Wave 3 — the placeholder will get torn out when
+real sprite assets land.
 
-## 5. Decisions still pending
+## How to verify state on pickup
 
-- None acute. Flag: some recovered R4 GridEditor work may still
-  need a redo pass once the user verifies which prop chains broke
-  in practice. Track as #278 / #285.
-- The replay engine is a one-shot — don't re-run it without a fresh
-  reset incident; the transcripts have been consumed.
+```bash
+# 1. Pull
+git pull origin main
+
+# 2. Verify HEAD
+git log --oneline -3
+# expected: 7ede196 ... wave-3 cross-panel stores
+
+# 3. Verify clean
+git status
+# expected: nothing to commit, working tree clean
+
+# 4. Verify typecheck
+cd apps/editor && bun run typecheck
+# expected: $ tsc --noEmit  (no errors)
+
+# 5. Start dev server (if not running)
+cd /home/codingbutter/development/cardboard/apps/editor
+nohup bun dev > /tmp/cardboard-dev.log 2>&1 &
+
+# 6. Verify stores in the running editor (browser DevTools console)
+# > window.__cardboard.stores.tool.getState()
+# Should print the tool store state with activeTool, activeSubTool, activeMode.
+```
+
+## Memory rules to read first
+
+These rules in `~/.claude/projects/-home-codingbutter-development-cardboard/memory/`:
+
+- `feedback_popout_state_sync.md` — Wave 3 must work in popped-out windows
+- `feedback_voice_first_response.md` — every response opens with TTS
+- `feedback_voice_carries_content.md` — voice carries substance
+- `feedback_text_for_remote_sessions.md` — text always accompanies voice
+- `feedback_tts_questions.md` — AskUserQuestion paired with TTS
+- `feedback_wave_merge_gate.md` — never dispatch new wave until previous merged
+- `feedback_no_worktrees.md` — main checkout only (VHDX corruption risk)
+- `feedback_audit_then_fix_loop.md` — per-panel polish goes through 2-agent loop
+- `feedback_page_layouts_and_shared_docks.md` — every page needs predefined layouts + shared panels
+- `feedback_command_registry_required.md` — every action registers via registerCommand
+- `feedback_progressive_tooltips.md` — 1s short label, 3s long description
+- `feedback_no_horizontal_scroll_for_categories.md` — category strips wrap, never scroll
+- `project_raycaster_billboard_prefabs.md` — engine context
+
+If the memory files aren't present on this machine, check
+`.claude-memory/` in the repo root — there's a portable copy
+(per the memory-migration work that's now in progress / about to land).
+
+## What NOT to do
+
+- Don't use `isolation: "worktree"` on Agent dispatches. VHDX corrupts.
+- Don't put native `title=` attributes — use the `Tooltip` primitive.
+  It has portal rendering, stage delays, and a `wrapperClassName`
+  prop for flex-fill cases.
+- Don't bypass `registerCommand` for new actions.
+- Don't write to MOCK_ fixtures from Wave 3 panels — use the store
+  hooks instead.
+
+## The dev server
+
+Should be running on port 3001. If it's down, restart with:
+
+```bash
+cd /home/codingbutter/development/cardboard/apps/editor
+nohup bun dev > /tmp/cardboard-dev.log 2>&1 &
+```
+
+## The deploy
+
+GH Pages now deploys ONLY via `.github/workflows/docs.yml`. The
+`deploy-editor.yml` workflow was retired (`8e748a0`). Path filters
+trigger on `docs/`, `apps/docs/`, `apps/editor/`, `apps/game/`,
+`packages/`, and the staging scripts.

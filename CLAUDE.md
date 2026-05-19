@@ -1,3 +1,25 @@
+## Portable memory — read these BEFORE doing anything else
+
+A git-tracked mirror of Claude's auto-memory lives at `.claude-memory/`.
+It travels with the repo so any machine that clones gets the same
+behavioral rules, project conventions, and engine context.
+
+On session start (fresh machine OR new Claude instance):
+
+1. Read `.claude-memory/MEMORY.md` — the index of rule files.
+2. Follow each `[name](file.md)` link relevant to the current task.
+3. Optionally mirror to auto-memory:
+   `cp .claude-memory/*.md ~/.claude/projects/<slug>/memory/`
+
+Rules of note that govern this project right now (skim
+`.claude-memory/MEMORY.md` for the full list):
+
+- No git worktrees on this project (VHDX corruption risk).
+- Voice + text both carry content — voice plays on desktop, phone reads text.
+- Every interactive editor action registers via `registerCommand`.
+- Progressive `<Tooltip stages={...}>` everywhere; no native `title=`.
+- Wave 3 wiring must work in popped-out windows (cross-window sync).
+
 ## Project plans — read these when the user references "the plan"
 
 All plan documentation lives in `docs/`. Forward-looking
