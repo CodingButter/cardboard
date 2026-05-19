@@ -358,7 +358,7 @@ export function LayersPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="layers"
-      className="h-full w-full flex flex-col gap-1 overflow-y-auto"
+      className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden"
     >
       {layers.map((l, idx) => {
         const isVisible = visibility[l.id] ?? true;
@@ -397,8 +397,8 @@ export function LayersPanel(): React.JSX.Element {
               <div>
                 <div className="font-semibold">Add Layer</div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                  Creates a new custom layer in the scene. Use for
-                  overlays like triggers or damage zones.
+                  Adds a new custom layer to the scene. (Coming soon —
+                  currently a stub.)
                 </div>
               </div>
             ),
@@ -460,7 +460,7 @@ function LayerRowView({
   return (
     <div
       className={[
-        "flex items-center gap-1.5 min-h-[24px] h-6 px-1.5 rounded",
+        "flex items-center gap-1.5 min-h-[24px] h-6 px-1.5 rounded min-w-0",
         "border transition-colors",
         isActive
           ? "bg-amber-500/10 border-amber-500"
@@ -469,7 +469,7 @@ function LayerRowView({
     >
       {/* Eye toggle — always present. */}
       <Tooltip
-        side="right"
+        side="top"
         stages={[
           {
             delay: 1000,
@@ -513,7 +513,7 @@ function LayerRowView({
           active layer (with a subtle ring). Clicking it activates
           the layer too, since users tend to grab the swatch. */}
       <Tooltip
-        side="right"
+        side="top"
         stages={[
           { delay: 1000, content: <span>Activate {layer.name}</span> },
           {
@@ -538,7 +538,7 @@ function LayerRowView({
             "w-2.5 h-2.5 rounded-sm border shrink-0",
             "transition-shadow",
             isActive
-              ? "border-amber-500 shadow-[0_0_0_1px_var(--color-accent)]"
+              ? "border-amber-500"
               : "border-(--color-border-strong) hover:border-amber-500/60",
           ].join(" ")}
           style={{ backgroundColor: layer.color }}
@@ -546,47 +546,55 @@ function LayerRowView({
       </Tooltip>
 
       {/* Name — click also activates. Truncates with ellipsis on
-          narrow panels; the full name is in the hover tooltip. */}
-      <Tooltip
-        side="right"
-        stages={[
-          { delay: 1000, content: <span>{layer.name}</span> },
-          {
-            delay: 3000,
-            content: (
-              <div>
-                <div className="font-semibold">{layer.name}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                  {layer.description}
+          narrow panels; the full name is in the hover tooltip.
+          The outer flex-1 wrapper ensures the column actually grows to
+          fill the row at wide widths — the Tooltip's wrapper span is
+          `inline-flex` so without a sized parent the button collapses
+          to intrinsic content width and leaves dead space to the right.
+          The `[&>span]:flex-1` reaches through to the Tooltip's wrapper
+          span itself so it inherits the column's full width. */}
+      <div className="flex-1 min-w-0 flex [&>span]:flex-1 [&>span]:min-w-0">
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 1000, content: <span>{layer.name}</span> },
+            {
+              delay: 3000,
+              content: (
+                <div>
+                  <div className="font-semibold">{layer.name}</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                    {layer.description}
+                  </div>
                 </div>
-              </div>
-            ),
-          },
-        ]}
-      >
-        <button
-          type="button"
-          aria-label={`Activate layer: ${layer.name}`}
-          aria-pressed={isActive}
-          onClick={() => onActivate(layer.id)}
-          className={[
-            "flex-1 min-w-0 text-left text-[10px] leading-none truncate",
-            "transition-colors",
-            isActive
-              ? "text-(--color-fg-primary) font-medium"
-              : "text-(--color-fg-secondary) hover:text-(--color-fg-primary)",
-          ].join(" ")}
+              ),
+            },
+          ]}
         >
-          {layer.name}
-        </button>
-      </Tooltip>
+          <button
+            type="button"
+            aria-label={`Activate layer: ${layer.name}`}
+            aria-pressed={isActive}
+            onClick={() => onActivate(layer.id)}
+            className={[
+              "w-full min-w-0 text-left text-[10px] leading-none truncate",
+              "transition-colors",
+              isActive
+                ? "text-(--color-fg-primary) font-medium"
+                : "text-(--color-fg-secondary) hover:text-(--color-fg-primary)",
+            ].join(" ")}
+          >
+            {layer.name}
+          </button>
+        </Tooltip>
+      </div>
 
       {/* Reorder buttons — hidden in compact mode (still command-palette
           reachable). Vertical stack of two micro-icons. */}
       {!compact ? (
         <div className="flex flex-col shrink-0">
           <Tooltip
-            side="left"
+            side="top"
             stages={[
               { delay: 1000, content: <span>Move Up</span> },
               {
@@ -608,18 +616,18 @@ function LayerRowView({
               disabled={!canMoveUp}
               onClick={() => onMoveUp(layer.id)}
               className={[
-                "flex items-center justify-center w-4 h-3 rounded-sm",
+                "flex items-center justify-center w-5 h-3.5 rounded-sm",
                 "transition-colors",
                 canMoveUp
                   ? "text-(--color-fg-secondary) hover:text-(--color-fg-primary) hover:bg-(--color-bg-hover)"
                   : "text-(--color-fg-muted) opacity-40 cursor-not-allowed",
               ].join(" ")}
             >
-              <ChevronUp size={10} aria-hidden="true" />
+              <ChevronUp size={11} aria-hidden="true" />
             </button>
           </Tooltip>
           <Tooltip
-            side="left"
+            side="top"
             stages={[
               { delay: 1000, content: <span>Move Down</span> },
               {
@@ -643,14 +651,14 @@ function LayerRowView({
               disabled={!canMoveDown}
               onClick={() => onMoveDown(layer.id)}
               className={[
-                "flex items-center justify-center w-4 h-3 rounded-sm",
+                "flex items-center justify-center w-5 h-3.5 rounded-sm",
                 "transition-colors",
                 canMoveDown
                   ? "text-(--color-fg-secondary) hover:text-(--color-fg-primary) hover:bg-(--color-bg-hover)"
                   : "text-(--color-fg-muted) opacity-40 cursor-not-allowed",
               ].join(" ")}
             >
-              <ChevronDown size={10} aria-hidden="true" />
+              <ChevronDown size={11} aria-hidden="true" />
             </button>
           </Tooltip>
         </div>
