@@ -1,5 +1,12 @@
 import React from "react";
-import { ChevronDown, ChevronUp, Eye, EyeOff, Layers } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
+  Layers,
+  Plus,
+} from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
@@ -219,17 +226,42 @@ export function LayersPanel(): React.JSX.Element {
     [],
   );
 
+  // Add-layer is a stub for now — wave 2 of the scene-layer store
+  // will replace this with a real layer-creation flow (id minting,
+  // default color, optional name prompt). Until then we just log so
+  // the affordance is wired end-to-end and the command palette can
+  // exercise the same code path the button does.
+  const addLayer = React.useCallback(() => {
+    // eslint-disable-next-line no-console
+    console.log("[LayersPanel] scene.layer.add invoked (stub)");
+  }, []);
+
   // Stable handler refs so the per-layer command registrations don't
   // need to re-run on every render — only when the layer list (order)
   // itself changes. Mirrors the README's canonical handler-ref pattern.
   const toggleRef = React.useRef(toggleVisibility);
   const activateRef = React.useRef(activateLayer);
   const moveRef = React.useRef(moveLayer);
+  const addRef = React.useRef(addLayer);
   React.useEffect(() => {
     toggleRef.current = toggleVisibility;
     activateRef.current = activateLayer;
     moveRef.current = moveLayer;
-  }, [toggleVisibility, activateLayer, moveLayer]);
+    addRef.current = addLayer;
+  }, [toggleVisibility, activateLayer, moveLayer, addLayer]);
+
+  // Static command — registered once. The handler reads through the
+  // ref so future state-aware iterations of `addLayer` flow through
+  // without re-registering the command.
+  React.useEffect(() => {
+    return registerCommand({
+      id: "scene.layer.add",
+      title: "Add Layer",
+      category: "Layer",
+      keywords: ["layer", "add", "new", "create"],
+      run: () => addRef.current(),
+    });
+  }, []);
 
   // ---- Resolved layer list (ordered) ------------------------------------
 
@@ -350,6 +382,46 @@ export function LayersPanel(): React.JSX.Element {
           />
         );
       })}
+
+      {/* Add Layer — Map.png shows a full-width ghost button below the
+          list. The command (`scene.layer.add`) is registered above so
+          the palette and any future keybindings can drive the same
+          action. Stub `run` logs to the console for now. */}
+      <Tooltip
+        side="top"
+        stages={[
+          { delay: 2000, content: <span>Add Layer</span> },
+          {
+            delay: 5000,
+            content: (
+              <div>
+                <div className="font-semibold">Add Layer</div>
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  Creates a new custom layer in the scene. Use for
+                  overlays like triggers or damage zones.
+                </div>
+              </div>
+            ),
+          },
+        ]}
+      >
+        <button
+          type="button"
+          aria-label="Add Layer"
+          onClick={addLayer}
+          className={[
+            "flex items-center justify-center gap-1 w-full min-h-[22px] h-[22px]",
+            "px-1.5 mt-0.5 rounded",
+            "border border-dashed border-(--color-border-strong)",
+            "text-[10px] text-(--color-fg-muted)",
+            "hover:text-(--color-fg-primary) hover:border-amber-500/60 hover:bg-amber-500/5",
+            "transition-colors",
+          ].join(" ")}
+        >
+          <Plus size={11} aria-hidden="true" />
+          <span>Add Layer</span>
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -388,7 +460,7 @@ function LayerRowView({
   return (
     <div
       className={[
-        "flex items-center gap-1.5 min-h-[28px] px-1.5 rounded",
+        "flex items-center gap-1.5 min-h-[24px] h-6 px-1.5 rounded",
         "border transition-colors",
         isActive
           ? "bg-amber-500/10 border-amber-500"
@@ -426,14 +498,14 @@ function LayerRowView({
           aria-pressed={isVisible}
           onClick={() => onToggleVisibility(layer.id)}
           className={[
-            "flex items-center justify-center w-5 h-5 rounded",
+            "flex items-center justify-center w-4 h-4 rounded",
             "transition-colors",
             isVisible
               ? "text-(--color-fg-secondary) hover:text-(--color-fg-primary)"
               : "text-(--color-fg-muted) hover:text-(--color-fg-secondary)",
           ].join(" ")}
         >
-          <EyeIcon size={12} aria-hidden="true" />
+          <EyeIcon size={11} aria-hidden="true" />
         </button>
       </Tooltip>
 
@@ -463,7 +535,7 @@ function LayerRowView({
           aria-pressed={isActive}
           onClick={() => onActivate(layer.id)}
           className={[
-            "w-3 h-3 rounded-sm border shrink-0",
+            "w-2.5 h-2.5 rounded-sm border shrink-0",
             "transition-shadow",
             isActive
               ? "border-amber-500 shadow-[0_0_0_1px_var(--color-accent)]"
@@ -498,7 +570,7 @@ function LayerRowView({
           aria-pressed={isActive}
           onClick={() => onActivate(layer.id)}
           className={[
-            "flex-1 min-w-0 text-left text-[11px] truncate",
+            "flex-1 min-w-0 text-left text-[10px] leading-none truncate",
             "transition-colors",
             isActive
               ? "text-(--color-fg-primary) font-medium"
