@@ -390,13 +390,13 @@ export function LayersPanel(): React.JSX.Element {
       <Tooltip
         side="top"
         stages={[
-          { delay: 2000, content: <span>Add Layer</span> },
+          { delay: 1000, content: <span>Add Layer</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">Add Layer</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   Creates a new custom layer in the scene. Use for
                   overlays like triggers or damage zones.
                 </div>
@@ -472,19 +472,19 @@ function LayerRowView({
         side="right"
         stages={[
           {
-            delay: 2000,
+            delay: 1000,
             content: (
               <span>{isVisible ? "Hide" : "Show"} {layer.name}</span>
             ),
           },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">
                   {isVisible ? "Hide" : "Show"} {layer.name}
                 </div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   Toggles whether the {layer.name} layer is rendered.
                 </div>
               </div>
@@ -515,13 +515,13 @@ function LayerRowView({
       <Tooltip
         side="right"
         stages={[
-          { delay: 2000, content: <span>Activate {layer.name}</span> },
+          { delay: 1000, content: <span>Activate {layer.name}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">Activate {layer.name}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {layer.description}
                 </div>
               </div>
@@ -550,13 +550,13 @@ function LayerRowView({
       <Tooltip
         side="right"
         stages={[
-          { delay: 2000, content: <span>{layer.name}</span> },
+          { delay: 1000, content: <span>{layer.name}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">{layer.name}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {layer.description}
                 </div>
               </div>
@@ -588,13 +588,13 @@ function LayerRowView({
           <Tooltip
             side="left"
             stages={[
-              { delay: 2000, content: <span>Move Up</span> },
+              { delay: 1000, content: <span>Move Up</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Move {layer.name} Up</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Reorders this layer one slot higher in the stack.
                     </div>
                   </div>
@@ -621,15 +621,15 @@ function LayerRowView({
           <Tooltip
             side="left"
             stages={[
-              { delay: 2000, content: <span>Move Down</span> },
+              { delay: 1000, content: <span>Move Down</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">
                       Move {layer.name} Down
                     </div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Reorders this layer one slot lower in the stack.
                     </div>
                   </div>

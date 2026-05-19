@@ -225,14 +225,14 @@ export function BrushPanel(): React.JSX.Element {
               key={b.id}
               side="right"
               stages={[
-                { delay: 2000, content: <span>{b.name}</span> },
+                { delay: 1000, content: <span>{b.name}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
                     <div>
                       <div className="font-semibold">{b.name}</div>
                       {b.description && (
-                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                           {b.description}
                         </div>
                       )}
@@ -278,13 +278,13 @@ export function BrushPanel(): React.JSX.Element {
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>Decrease size</span> },
+            { delay: 1000, content: <span>Decrease size</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
                 <div>
                   <div className="font-semibold">Decrease Brush Size</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                     Steps the brush size down by 1 (minimum {MIN_SIZE}).
                   </div>
                 </div>
@@ -323,7 +323,7 @@ export function BrushPanel(): React.JSX.Element {
             side="top"
             stages={[
               {
-                delay: 2000,
+                delay: 1000,
                 content: (
                   <span>
                     Brush size: <span className="tabular-nums">{size}</span>
@@ -331,11 +331,11 @@ export function BrushPanel(): React.JSX.Element {
                 ),
               },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Brush Size</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Drag to set the brush radius ({MIN_SIZE}–{MAX_SIZE}).
                       Determines how many cells are affected during
                       paint and erase ops.
@@ -393,13 +393,13 @@ export function BrushPanel(): React.JSX.Element {
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>Increase size</span> },
+            { delay: 1000, content: <span>Increase size</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
                 <div>
                   <div className="font-semibold">Increase Brush Size</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                     Steps the brush size up by 1 (maximum {MAX_SIZE}).
                   </div>
                 </div>

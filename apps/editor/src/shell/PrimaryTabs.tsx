@@ -79,18 +79,89 @@ export const PRIMARY_TABS: ReadonlyArray<{
   icon: React.ReactNode;
   /** Whether this tab requires an open project to be useful. */
   requiresProject: boolean;
+  /** 1-sentence description shown as the stage-2 progressive tooltip
+   *  body (after ~5s hover). The tab's `label` doubles as the stage-1
+   *  label. Keep these short — they're surfaced inline, not in a docs
+   *  drawer. */
+  description: string;
 }> = [
-  { id: "home", label: "Home", icon: <Home size={16} />, requiresProject: false },
-  { id: "scene", label: "Scene", icon: <Grid3x3 size={16} />, requiresProject: true },
-  { id: "prefabs", label: "Prefabs", icon: <Boxes size={16} />, requiresProject: true },
-  { id: "components", label: "Components", icon: <Blocks size={16} />, requiresProject: true },
-  { id: "assets", label: "Assets", icon: <ImageIcon size={16} />, requiresProject: true },
-  { id: "scripts", label: "Scripts", icon: <Code2 size={16} />, requiresProject: true },
-  { id: "animation", label: "Animation", icon: <Film size={16} />, requiresProject: true },
-  { id: "imageLab", label: "Image Lab", icon: <Palette size={16} />, requiresProject: true },
-  { id: "soundLab", label: "Sound Lab", icon: <AudioLines size={16} />, requiresProject: true },
-  { id: "uiBuilder", label: "UI Builder", icon: <LayoutPanelTop size={16} />, requiresProject: true },
-  { id: "project", label: "Project", icon: <Package size={16} />, requiresProject: true },
+  {
+    id: "home",
+    label: "Home",
+    icon: <Home size={16} />,
+    requiresProject: false,
+    description: "Recent projects, import / create new.",
+  },
+  {
+    id: "scene",
+    label: "Scene",
+    icon: <Grid3x3 size={16} />,
+    requiresProject: true,
+    description: "Top-down 2D editor for cell layout, tiles, lighting.",
+  },
+  {
+    id: "prefabs",
+    label: "Prefabs",
+    icon: <Boxes size={16} />,
+    requiresProject: true,
+    description: "Entity prefab library — enemies, items, triggers, decor.",
+  },
+  {
+    id: "components",
+    label: "Components",
+    icon: <Blocks size={16} />,
+    requiresProject: true,
+    description: "Reusable scene-graph components.",
+  },
+  {
+    id: "assets",
+    label: "Assets",
+    icon: <ImageIcon size={16} />,
+    requiresProject: true,
+    description: "Project asset browser — textures, sounds, music, scripts.",
+  },
+  {
+    id: "scripts",
+    label: "Scripts",
+    icon: <Code2 size={16} />,
+    requiresProject: true,
+    description: "Game scripting editor — TypeScript / Lua / JS.",
+  },
+  {
+    id: "animation",
+    label: "Animation",
+    icon: <Film size={16} />,
+    requiresProject: true,
+    description: "Sprite + entity animation timeline.",
+  },
+  {
+    id: "imageLab",
+    label: "Image Lab",
+    icon: <Palette size={16} />,
+    requiresProject: true,
+    description: "Built-in pixel painter / image utility.",
+  },
+  {
+    id: "soundLab",
+    label: "Sound Lab",
+    icon: <AudioLines size={16} />,
+    requiresProject: true,
+    description: "Built-in audio editor / chiptune utility.",
+  },
+  {
+    id: "uiBuilder",
+    label: "UI Builder",
+    icon: <LayoutPanelTop size={16} />,
+    requiresProject: true,
+    description: "Game HUD + menu layout editor.",
+  },
+  {
+    id: "project",
+    label: "Project",
+    icon: <Package size={16} />,
+    requiresProject: true,
+    description: "Project-level settings — manifest, pack chain, build targets.",
+  },
 ];
 
 const WORKFLOW_MODE_KEY = "editor.workflowMode";
@@ -160,6 +231,10 @@ export function PrimaryTabs({
         //   [home, scene, prefabs, components] | [assets, scripts,
         //   animation, imageLab, soundLab, uiBuilder] | [project]
         dividerAfter: t.id === "components" || t.id === "uiBuilder",
+        // Progressive tooltip wiring — TabStrip wraps each button in a
+        // <Tooltip stages={...}/> when these are present.
+        tooltipLabel: t.label,
+        tooltipDescription: t.description,
       })),
     [hasProject],
   );

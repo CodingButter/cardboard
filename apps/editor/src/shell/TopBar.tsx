@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Button } from "../components/ui";
+import { Tooltip } from "../components/ui/Tooltip";
 import { UserAvatar } from "./UserAvatar";
 import { PaletteSearchInput } from "../components/palette/PaletteSearchInput";
 import { registerCommand } from "../state/useCommandStore";
@@ -176,81 +177,101 @@ export function TopBar({
             rather than minting a new variant because the stroked
             treatment only applies in the top bar. */}
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={onTogglePlaytest}
-            disabled={playtestDisabled}
-            leadingIcon={
-              playtestActive ? (
-                <Square size={12} />
-              ) : (
-                <Play size={12} />
-              )
-            }
-            className={cn(
-              "h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50",
-              playtestActive &&
-                "border-red-500/60 text-red-300 hover:bg-red-500/10",
-            )}
-            title={
-              playtestDisabled
-                ? "Open a project to run Playtest."
-                : playtestActive
-                  ? "Exit playtest (Esc)"
-                  : "Run the pack in an embedded playtest viewport"
-            }
+          <ShellActionTooltip
+            label={playtestActive ? "Stop" : "Playtest"}
+            description="Run the current scene in the live game preview."
           >
-            {playtestActive ? "Stop" : "Playtest"}
-          </Button>
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={onExport}
-            disabled={!exportAvailable}
-            leadingIcon={<Upload size={12} />}
-            className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
-            title={
-              exportAvailable ? "Export pack to .apg" : NOT_AVAILABLE_HINT
-            }
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={onTogglePlaytest}
+              disabled={playtestDisabled}
+              leadingIcon={
+                playtestActive ? (
+                  <Square size={12} />
+                ) : (
+                  <Play size={12} />
+                )
+              }
+              className={cn(
+                "h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50",
+                playtestActive &&
+                  "border-red-500/60 text-red-300 hover:bg-red-500/10",
+              )}
+              title={
+                playtestDisabled
+                  ? "Open a project to run Playtest."
+                  : playtestActive
+                    ? "Exit playtest (Esc)"
+                    : "Run the pack in an embedded playtest viewport"
+              }
+            >
+              {playtestActive ? "Stop" : "Playtest"}
+            </Button>
+          </ShellActionTooltip>
+          <ShellActionTooltip
+            label="Export"
+            description="Package the project into a downloadable .apg pack."
           >
-            Export
-          </Button>
-          <Button
-            variant={saveState === "saved" ? "primary" : "secondary"}
-            size="md"
-            onClick={onSave}
-            disabled={!saveAvailable}
-            leadingIcon={
-              saveState === "saved" ? (
-                <Check size={12} />
-              ) : (
-                <SaveIcon size={12} />
-              )
-            }
-            className={cn(
-              "h-7 px-3",
-              saveState === "dirty" &&
-                "bg-transparent border-amber-500/40 text-amber-200 hover:bg-amber-500/10",
-            )}
-            title={
-              saveAvailable
-                ? "Save the current edit (Ctrl/Cmd+S)"
-                : NOT_AVAILABLE_HINT
-            }
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={onExport}
+              disabled={!exportAvailable}
+              leadingIcon={<Upload size={12} />}
+              className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
+              title={
+                exportAvailable ? "Export pack to .apg" : NOT_AVAILABLE_HINT
+              }
+            >
+              Export
+            </Button>
+          </ShellActionTooltip>
+          <ShellActionTooltip
+            label="Save"
+            description="Save all unsaved changes to this project."
           >
-            Save
-          </Button>
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={onOpenSettings}
-            leadingIcon={<SettingsIcon size={12} />}
-            className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
-            title="Editor settings"
+            <Button
+              variant={saveState === "saved" ? "primary" : "secondary"}
+              size="md"
+              onClick={onSave}
+              disabled={!saveAvailable}
+              leadingIcon={
+                saveState === "saved" ? (
+                  <Check size={12} />
+                ) : (
+                  <SaveIcon size={12} />
+                )
+              }
+              className={cn(
+                "h-7 px-3",
+                saveState === "dirty" &&
+                  "bg-transparent border-amber-500/40 text-amber-200 hover:bg-amber-500/10",
+              )}
+              title={
+                saveAvailable
+                  ? "Save the current edit (Ctrl/Cmd+S)"
+                  : NOT_AVAILABLE_HINT
+              }
+            >
+              Save
+            </Button>
+          </ShellActionTooltip>
+          <ShellActionTooltip
+            label="Settings"
+            description="Open editor settings (theme, keybindings, autosave)."
           >
-            Settings
-          </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={onOpenSettings}
+              leadingIcon={<SettingsIcon size={12} />}
+              className="h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50"
+              title="Editor settings"
+            >
+              Settings
+            </Button>
+          </ShellActionTooltip>
         </div>
 
         {/* Hairline divider between the settings/actions cluster and
@@ -260,9 +281,53 @@ export function TopBar({
           className="h-6 w-px bg-zinc-700/60"
         />
 
-        <UserAvatar onOpenUserMenu={onOpenUserMenu} initials={userInitials} />
+        <ShellActionTooltip
+          label={`Account — ${userInitials}`}
+          description="Account menu — switch user, log out, etc."
+        >
+          <UserAvatar onOpenUserMenu={onOpenUserMenu} initials={userInitials} />
+        </ShellActionTooltip>
       </div>
     </header>
+  );
+}
+
+/**
+ * ShellActionTooltip — progressive-reveal Tooltip wrapper. Stage 1
+ * (after ~2s hover) shows the short `label`; stage 2 (after ~5s)
+ * adds the `description` body. Same shape used across panel surfaces
+ * (see ToolPalettePanel for the canonical example), centralised here
+ * so the TopBar's action cluster stays uniform.
+ */
+function ShellActionTooltip({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description: string;
+  children: React.ReactElement;
+}) {
+  return (
+    <Tooltip
+      side="bottom"
+      stages={[
+        { delay: 1000, content: <span>{label}</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">{label}</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                {description}
+              </div>
+            </div>
+          ),
+        },
+      ]}
+    >
+      {children}
+    </Tooltip>
   );
 }
 

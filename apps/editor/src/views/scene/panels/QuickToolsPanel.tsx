@@ -188,13 +188,13 @@ export function QuickToolsPanel(): React.JSX.Element {
               key={t.id}
               side="top"
               stages={[
-                { delay: 2000, content: <span>{t.name}</span> },
+                { delay: 1000, content: <span>{t.name}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
                     <div>
                       <div className="font-semibold">{t.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                         {t.description}
                       </div>
                     </div>
@@ -227,15 +227,15 @@ export function QuickToolsPanel(): React.JSX.Element {
             side="top"
             stages={[
               {
-                delay: 2000,
+                delay: 1000,
                 content: <span>Clear all ({appliedCount})</span>,
               },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Clear All Quick-Tools</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Remove every applied quick-tool tag from the current
                       selection in one step.
                     </div>

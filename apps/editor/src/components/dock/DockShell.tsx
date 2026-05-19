@@ -101,6 +101,10 @@ export interface DockPanelDef {
    *  the Map Canvas that should always be present and unmoveable.
    *  Defaults to false. */
   readonly headerless?: boolean;
+  /** Optional 1-sentence description routed to the panel's header
+   *  Tooltip (stage-2 body). When set, the dock panel's title bar
+   *  surfaces a progressive Tooltip on hover. */
+  readonly description?: string;
 }
 
 export interface DockShellProps {
@@ -878,7 +882,11 @@ export function DockShell({
     () => {
       const map: Record<string, DockPanelHeaderOrnaments> = {};
       for (const p of panels) {
-        map[p.id] = { icon: p.icon, controls: p.controls };
+        map[p.id] = {
+          icon: p.icon,
+          controls: p.controls,
+          description: p.description,
+        };
       }
       return map;
     },

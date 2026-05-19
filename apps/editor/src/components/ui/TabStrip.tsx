@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "../../lib/cn";
+import { Tooltip } from "./Tooltip";
 
 /**
  * TabStrip — §4.10.
@@ -36,6 +37,17 @@ export interface TabDescriptor<T extends string> {
    * Used by PrimaryTabs to chunk Content / Authoring / Project Meta.
    */
   dividerAfter?: boolean;
+  /**
+   * Short tab name used as the stage-1 Tooltip label (after ~2s hover).
+   * When omitted, no tooltip is rendered around the tab button.
+   */
+  tooltipLabel?: string;
+  /**
+   * Longer 1-2 sentence description surfaced as the stage-2 Tooltip
+   * body (after ~5s hover). Only rendered when `tooltipLabel` is also
+   * set.
+   */
+  tooltipDescription?: string;
 }
 
 export interface TabStripProps<T extends string> {
@@ -86,41 +98,77 @@ export function TabStrip<T extends string>({
 
   const buttons = tabs.map((tab) => {
     const active = tab.id === value;
+    const buttonNode = (
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        aria-disabled={tab.disabled}
+        disabled={tab.disabled}
+        onClick={() => !tab.disabled && onChange(tab.id)}
+        className={cn(
+          "relative inline-flex items-center gap-2 px-4 -mb-px shrink-0",
+          "transition-colors duration-150",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-inset",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
+          variant === "primary"
+            ? primaryTabClasses(active)
+            : secondaryTabClasses(active),
+        )}
+      >
+        {variant === "primary" && tab.icon && (
+          <span className="inline-flex items-center justify-center w-4 h-4">
+            {tab.icon}
+          </span>
+        )}
+        <span
+          className={
+            variant === "primary"
+              ? "text-sm font-medium"
+              : "text-sm font-medium"
+          }
+        >
+          {tab.label}
+        </span>
+        {tab.badge && <span className="ml-1">{tab.badge}</span>}
+      </button>
+    );
+    // When the descriptor opts into the progressive Tooltip pattern,
+    // wrap the button in <Tooltip stages={...}/>. Stage 1 surfaces the
+    // short label after ~2s hover; stage 2 swaps in label + description
+    // after ~5s. No tooltipLabel → render the bare button (back-compat
+    // for callers that don't want hover hints).
+    const wrapped = tab.tooltipLabel ? (
+      <Tooltip
+        side={variant === "primary" ? "bottom" : "top"}
+        stages={[
+          {
+            delay: 1000,
+            content: <span>{tab.tooltipLabel}</span>,
+          },
+          {
+            delay: 3000,
+            content: (
+              <div>
+                <div className="font-semibold">{tab.tooltipLabel}</div>
+                {tab.tooltipDescription && (
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                    {tab.tooltipDescription}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      >
+        {buttonNode}
+      </Tooltip>
+    ) : (
+      buttonNode
+    );
     return (
       <React.Fragment key={tab.id}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={active}
-          aria-disabled={tab.disabled}
-          disabled={tab.disabled}
-          onClick={() => !tab.disabled && onChange(tab.id)}
-          className={cn(
-            "relative inline-flex items-center gap-2 px-4 -mb-px shrink-0",
-            "transition-colors duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-inset",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            variant === "primary"
-              ? primaryTabClasses(active)
-              : secondaryTabClasses(active),
-          )}
-        >
-          {variant === "primary" && tab.icon && (
-            <span className="inline-flex items-center justify-center w-4 h-4">
-              {tab.icon}
-            </span>
-          )}
-          <span
-            className={
-              variant === "primary"
-                ? "text-sm font-medium"
-                : "text-sm font-medium"
-            }
-          >
-            {tab.label}
-          </span>
-          {tab.badge && <span className="ml-1">{tab.badge}</span>}
-        </button>
+        {wrapped}
         {tab.dividerAfter && (
           <div
             aria-hidden="true"

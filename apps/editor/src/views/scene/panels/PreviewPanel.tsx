@@ -632,13 +632,13 @@ function PreviewIconButton({
     <Tooltip
       side="bottom"
       stages={[
-        { delay: 2000, content: <span>{tooltipLabel}</span> },
+        { delay: 1000, content: <span>{tooltipLabel}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{tooltipLabel}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {tooltipDescription}
               </div>
             </div>

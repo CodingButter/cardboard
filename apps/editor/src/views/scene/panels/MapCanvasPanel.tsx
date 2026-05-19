@@ -722,13 +722,13 @@ export function MapCanvasPanel(): React.JSX.Element {
               key={l.id}
               side="top"
               stages={[
-                { delay: 2000, content: <span>{l.name}</span> },
+                { delay: 1000, content: <span>{l.name}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
                     <div>
                       <div className="font-semibold">{l.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                         {description}
                       </div>
                       <div className="text-[10px] text-(--color-fg-muted) mt-1">
@@ -793,13 +793,13 @@ export function MapCanvasPanel(): React.JSX.Element {
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>Add Layer</span> },
+            { delay: 1000, content: <span>Add Layer</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
                 <div>
                   <div className="font-semibold">Add Layer</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                     Create a new scene layer. Wave 3 will prompt for a
                     name + color; today this is a stub.
                   </div>

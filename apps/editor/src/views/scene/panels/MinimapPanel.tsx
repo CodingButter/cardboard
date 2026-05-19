@@ -458,13 +458,13 @@ export function MinimapPanel(): React.JSX.Element {
           <Tooltip
             side="bottom"
             stages={[
-              { delay: 2000, content: <span>Toggle Grid</span> },
+              { delay: 1000, content: <span>Toggle Grid</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Toggle Grid</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Show or hide the cell lattice on the minimap.
                     </div>
                   </div>
@@ -492,13 +492,13 @@ export function MinimapPanel(): React.JSX.Element {
           <Tooltip
             side="bottom"
             stages={[
-              { delay: 2000, content: <span>Toggle Viewport</span> },
+              { delay: 1000, content: <span>Toggle Viewport</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Toggle Viewport</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Show or hide the rectangle that tracks the main
                       canvas viewport.
                     </div>
@@ -527,13 +527,13 @@ export function MinimapPanel(): React.JSX.Element {
           <Tooltip
             side="bottom"
             stages={[
-              { delay: 2000, content: <span>Center</span> },
+              { delay: 1000, content: <span>Center</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Center Minimap</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Reset the viewport rectangle to the scene center.
                     </div>
                   </div>
@@ -558,13 +558,13 @@ export function MinimapPanel(): React.JSX.Element {
           <Tooltip
             side="bottom"
             stages={[
-              { delay: 2000, content: <span>Zoom In</span> },
+              { delay: 1000, content: <span>Zoom In</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Zoom In</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Increase the minimap zoom (max {ZOOM_MAX.toFixed(1)}×).
                     </div>
                   </div>
@@ -591,13 +591,13 @@ export function MinimapPanel(): React.JSX.Element {
           <Tooltip
             side="bottom"
             stages={[
-              { delay: 2000, content: <span>Zoom Out</span> },
+              { delay: 1000, content: <span>Zoom Out</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
                   <div>
                     <div className="font-semibold">Zoom Out</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                       Decrease the minimap zoom (min {ZOOM_MIN.toFixed(1)}×).
                     </div>
                   </div>

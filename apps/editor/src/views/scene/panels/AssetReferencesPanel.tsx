@@ -393,13 +393,13 @@ function HeaderRow({
                 key={f.id}
                 side="bottom"
                 stages={[
-                  { delay: 2000, content: <span>{f.name}</span> },
+                  { delay: 1000, content: <span>{f.name}</span> },
                   {
-                    delay: 5000,
+                    delay: 3000,
                     content: (
                       <div>
                         <div className="font-semibold">{f.name}</div>
-                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                           {f.description}
                         </div>
                       </div>
@@ -445,13 +445,13 @@ function HeaderRow({
       <Tooltip
         side="bottom"
         stages={[
-          { delay: 2000, content: <span>Refresh</span> },
+          { delay: 1000, content: <span>Refresh</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">Refresh Asset References</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   Rescan the project&apos;s asset registry and update ref
                   counts.
                 </div>
@@ -548,9 +548,9 @@ function AssetRow({
     <Tooltip
       side="right"
       stages={[
-        { delay: 2000, content: <span>{asset.name}</span> },
+        { delay: 1000, content: <span>{asset.name}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{asset.name}</div>

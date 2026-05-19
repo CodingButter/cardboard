@@ -441,13 +441,13 @@ function ChipButton({
     <Tooltip
       side="bottom"
       stages={[
-        { delay: 2000, content: <span>{cat.name}</span> },
+        { delay: 1000, content: <span>{cat.name}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{cat.name}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {cat.description}
               </div>
             </div>
@@ -523,13 +523,13 @@ function PresetRow({
     <Tooltip
       side="right"
       stages={[
-        { delay: 2000, content: <span>{preset.name}</span> },
+        { delay: 1000, content: <span>{preset.name}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{preset.name}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {preset.description}
               </div>
             </div>

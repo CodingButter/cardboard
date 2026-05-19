@@ -337,13 +337,13 @@ export function CellInspectorPanel(): React.JSX.Element {
           <Tooltip
             stages={[
               {
-                delay: 2000,
+                delay: 1000,
                 content: <span>{`x: ${cell.x}, y: ${cell.y}`}</span>,
               },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
-                  <div className="max-w-[220px]">
+                  <div className="max-w-[400px]">
                     <div className="font-semibold">
                       {`(${cell.x}, ${cell.y})`}
                     </div>
@@ -363,11 +363,11 @@ export function CellInspectorPanel(): React.JSX.Element {
 
         <Tooltip
           stages={[
-            { delay: 2000, content: <span>Deselect cell</span> },
+            { delay: 1000, content: <span>Deselect cell</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
-                <div className="max-w-[220px]">
+                <div className="max-w-[400px]">
                   <div className="font-semibold">Deselect</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
                     Clear the current cell selection. Equivalent to
@@ -423,11 +423,11 @@ export function CellInspectorPanel(): React.JSX.Element {
             <Tooltip
               key={tag}
               stages={[
-                { delay: 2000, content: <span>{tag}</span> },
+                { delay: 1000, content: <span>{tag}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
-                    <div className="max-w-[220px]">
+                    <div className="max-w-[400px]">
                       <div className="font-semibold">{tag}</div>
                       <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                         {tagDescription(tag)}
@@ -477,11 +477,11 @@ export function CellInspectorPanel(): React.JSX.Element {
           ) : (
             <Tooltip
               stages={[
-                { delay: 2000, content: <span>Add tag</span> },
+                { delay: 1000, content: <span>Add tag</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
-                    <div className="max-w-[220px]">
+                    <div className="max-w-[400px]">
                       <div className="font-semibold">Add tag</div>
                       <div className="text-[10px] text-(--color-fg-muted) mt-1">
                         Append a new tag to this cell. Press Enter to
@@ -654,11 +654,11 @@ function PropertyControl({
   const labelNode = (
     <Tooltip
       stages={[
-        { delay: 2000, content: <span>{propKey}</span> },
+        { delay: 1000, content: <span>{propKey}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
-            <div className="max-w-[220px]">
+            <div className="max-w-[400px]">
               <div className="font-semibold">{propKey}</div>
               <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                 {desc}
@@ -683,13 +683,13 @@ function PropertyControl({
       <Tooltip
         stages={[
           {
-            delay: 2000,
+            delay: 1000,
             content: <span>{`Toggle ${propKey}`}</span>,
           },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
-              <div className="max-w-[220px]">
+              <div className="max-w-[400px]">
                 <div className="font-semibold">{propKey}</div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                   {desc}
@@ -711,11 +711,11 @@ function PropertyControl({
     control = (
       <Tooltip
         stages={[
-          { delay: 2000, content: <span>{propKey}</span> },
+          { delay: 1000, content: <span>{propKey}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
-              <div className="max-w-[220px]">
+              <div className="max-w-[400px]">
                 <div className="font-semibold">{propKey}</div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                   {desc}
@@ -740,9 +740,9 @@ function PropertyControl({
     control = (
       <Tooltip
         stages={[
-          { delay: 2000, content: <span>{propKey}</span> },
+          { delay: 1000, content: <span>{propKey}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div className="max-w-[260px]">
                 <div className="font-semibold">{propKey}</div>

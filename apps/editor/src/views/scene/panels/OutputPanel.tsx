@@ -389,13 +389,13 @@ function FilterChipRow({ active, onClick }: FilterChipRowProps): React.JSX.Eleme
               key={f.id}
               side="bottom"
               stages={[
-                { delay: 2000, content: <span>{`Filter: ${f.name}`}</span> },
+                { delay: 1000, content: <span>{`Filter: ${f.name}`}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
                     <div>
                       <div className="font-semibold">{`Filter: ${f.name}`}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                         {f.description}
                       </div>
                     </div>
@@ -460,13 +460,13 @@ function ToolbarIconButton({
     <Tooltip
       side="bottom"
       stages={[
-        { delay: 2000, content: <span>{tooltipLabel}</span> },
+        { delay: 1000, content: <span>{tooltipLabel}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{tooltipLabel}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {tooltipDescription}
               </div>
             </div>
@@ -526,13 +526,13 @@ function OutputKebab({ onClear, onCopy }: OutputKebabProps): React.JSX.Element {
       <Tooltip
         side="bottom"
         stages={[
-          { delay: 2000, content: <span>More</span> },
+          { delay: 1000, content: <span>More</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">More actions</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   Reveal Clear and Copy actions — folded behind a kebab at narrow panel widths.
                 </div>
               </div>

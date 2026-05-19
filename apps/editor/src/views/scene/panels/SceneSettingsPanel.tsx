@@ -264,11 +264,11 @@ export function SceneSettingsPanel(): React.JSX.Element {
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <Tooltip
             stages={[
-              { delay: 2000, content: <span>Width (tiles)</span> },
+              { delay: 1000, content: <span>Width (tiles)</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
-                  <div className="max-w-[220px]">
+                  <div className="max-w-[400px]">
                     <div className="font-semibold">Scene Width</div>
                     <div className="text-[10px] text-(--color-fg-muted) mt-1">
                       Width of the scene grid in tiles. Clamped to
@@ -299,11 +299,11 @@ export function SceneSettingsPanel(): React.JSX.Element {
           </span>
           <Tooltip
             stages={[
-              { delay: 2000, content: <span>Height (tiles)</span> },
+              { delay: 1000, content: <span>Height (tiles)</span> },
               {
-                delay: 5000,
+                delay: 3000,
                 content: (
-                  <div className="max-w-[220px]">
+                  <div className="max-w-[400px]">
                     <div className="font-semibold">Scene Height</div>
                     <div className="text-[10px] text-(--color-fg-muted) mt-1">
                       Height of the scene grid in tiles. Clamped to
@@ -329,11 +329,11 @@ export function SceneSettingsPanel(): React.JSX.Element {
         </div>
         <Tooltip
           stages={[
-            { delay: 2000, content: <span>Reset scene settings</span> },
+            { delay: 1000, content: <span>Reset scene settings</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
-                <div className="max-w-[220px]">
+                <div className="max-w-[400px]">
                   <div className="font-semibold">Reset Scene Settings</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
                     Restore dimensions, fog, and ambient back to their
@@ -403,11 +403,11 @@ function SliderRow({
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>{`Decrease ${label}`}</span> },
+            { delay: 1000, content: <span>{`Decrease ${label}`}</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
-                <div className="max-w-[220px]">
+                <div className="max-w-[400px]">
                   <div className="font-semibold">{`Decrease ${tooltipShort}`}</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
                     Step {label.toLowerCase()} down by {SLIDER_STEP.toFixed(2)}
@@ -439,11 +439,11 @@ function SliderRow({
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>{tooltipShort}</span> },
+            { delay: 1000, content: <span>{tooltipShort}</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
-                <div className="max-w-[240px]">
+                <div className="max-w-[400px]">
                   <div className="font-semibold">{tooltipShort}</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                     {tooltipLong}
@@ -468,11 +468,11 @@ function SliderRow({
         <Tooltip
           side="top"
           stages={[
-            { delay: 2000, content: <span>{`Increase ${label}`}</span> },
+            { delay: 1000, content: <span>{`Increase ${label}`}</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
-                <div className="max-w-[220px]">
+                <div className="max-w-[400px]">
                   <div className="font-semibold">{`Increase ${tooltipShort}`}</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
                     Step {label.toLowerCase()} up by {SLIDER_STEP.toFixed(2)}

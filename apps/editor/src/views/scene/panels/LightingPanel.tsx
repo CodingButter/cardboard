@@ -507,13 +507,13 @@ function ToolbarIconButton({
     <Tooltip
       side="bottom"
       stages={[
-        { delay: 2000, content: <span>{tooltipLabel}</span> },
+        { delay: 1000, content: <span>{tooltipLabel}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{tooltipLabel}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {tooltipDescription}
               </div>
             </div>
@@ -579,13 +579,13 @@ function LightingKebab({
       <Tooltip
         side="bottom"
         stages={[
-          { delay: 2000, content: <span>More</span> },
+          { delay: 1000, content: <span>More</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">More actions</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   Reveal Enable All, Disable All, and Delete actions — folded
                   behind a kebab at narrow panel widths.
                 </div>
@@ -718,13 +718,13 @@ function LightRowView({
       <Tooltip
         side="right"
         stages={[
-          { delay: 2000, content: <span>{light.name}</span> },
+          { delay: 1000, content: <span>{light.name}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">{light.name}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {kindLabel} — intensity {intensityLabel}.
                   <br />
                   {light.description}
@@ -759,15 +759,15 @@ function LightRowView({
           side="right"
           stages={[
             {
-              delay: 2000,
+              delay: 1000,
               content: <span>{light.color}</span>,
             },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
                 <div>
                   <div className="font-semibold">{light.name} color</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                     {light.color} — {light.description}
                   </div>
                 </div>
@@ -797,13 +797,13 @@ function LightRowView({
       <Tooltip
         side="right"
         stages={[
-          { delay: 2000, content: <span>{light.name}</span> },
+          { delay: 1000, content: <span>{light.name}</span> },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">{light.name}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {light.description}
                 </div>
               </div>
@@ -835,13 +835,13 @@ function LightRowView({
         <Tooltip
           side="left"
           stages={[
-            { delay: 2000, content: <span>Intensity {intensityLabel}</span> },
+            { delay: 1000, content: <span>Intensity {intensityLabel}</span> },
             {
-              delay: 5000,
+              delay: 3000,
               content: (
                 <div>
                   <div className="font-semibold">Intensity {intensityLabel}</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                     {light.name}'s brightness multiplier (0–10).
                   </div>
                 </div>
@@ -870,19 +870,19 @@ function LightRowView({
         side="left"
         stages={[
           {
-            delay: 2000,
+            delay: 1000,
             content: (
               <span>{enabled ? "Disable" : "Enable"} {light.name}</span>
             ),
           },
           {
-            delay: 5000,
+            delay: 3000,
             content: (
               <div>
                 <div className="font-semibold">
                   {enabled ? "Disable" : "Enable"} {light.name}
                 </div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {light.description}
                 </div>
               </div>

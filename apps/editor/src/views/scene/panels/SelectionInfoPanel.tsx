@@ -287,11 +287,11 @@ function SelectionSection({
     <Tooltip
       side="top"
       stages={[
-        { delay: 2000, content: <span>{section.longLabel}</span> },
+        { delay: 1000, content: <span>{section.longLabel}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
-            <div className="max-w-[240px]">
+            <div className="max-w-[400px]">
               <div className="font-semibold">{section.longLabel}</div>
               <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
                 {section.description}

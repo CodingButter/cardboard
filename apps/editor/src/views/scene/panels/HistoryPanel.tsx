@@ -368,13 +368,13 @@ function ToolbarButton({
     <Tooltip
       side="bottom"
       stages={[
-        { delay: 2000, content: <span>{label}</span> },
+        { delay: 1000, content: <span>{label}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{label}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {description}
               </div>
             </div>
@@ -446,14 +446,14 @@ function HistoryEntryView({
     <Tooltip
       side="right"
       stages={[
-        { delay: 2000, content: <span>{entry.label}</span> },
+        { delay: 1000, content: <span>{entry.label}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{entry.label}</div>
               {entry.description ? (
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                   {entry.description}
                 </div>
               ) : null}

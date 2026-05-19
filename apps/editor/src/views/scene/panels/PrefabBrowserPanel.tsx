@@ -323,13 +323,13 @@ function CategoryFilterRow({
               key={cat.id}
               side="bottom"
               stages={[
-                { delay: 2000, content: <span>{cat.name}</span> },
+                { delay: 1000, content: <span>{cat.name}</span> },
                 {
-                  delay: 5000,
+                  delay: 3000,
                   content: (
                     <div>
                       <div className="font-semibold">{cat.name}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[200px] whitespace-normal">
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                         {cat.description}
                       </div>
                     </div>
@@ -436,13 +436,13 @@ function PrefabTile({
     <Tooltip
       side="top"
       stages={[
-        { delay: 2000, content: <span>{prefab.name}</span> },
+        { delay: 1000, content: <span>{prefab.name}</span> },
         {
-          delay: 5000,
+          delay: 3000,
           content: (
             <div>
               <div className="font-semibold">{prefab.name}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
                 {prefab.description}
               </div>
               <div className="text-[9px] text-(--color-fg-muted) mt-1 uppercase tracking-wide">

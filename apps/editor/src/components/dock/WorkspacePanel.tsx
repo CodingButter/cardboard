@@ -17,6 +17,7 @@ import { useWorkspaceStore } from "../../state/useWorkspaceStore";
 import { registerCommand } from "../../state/useCommandStore";
 import { getPredefinedLayouts } from "../../state/predefinedLayouts";
 import { Modal } from "../ui/Modal";
+import { Tooltip } from "../ui/Tooltip";
 import { LayoutsModal } from "./LayoutsModal";
 import { DocksModal } from "./DocksModal";
 import type { DockPanelDef } from "./DockShell";
@@ -68,6 +69,9 @@ export interface WorkspaceRailProps {
 interface RailIconButtonProps {
   icon: React.ReactNode;
   label: string;
+  /** 1-sentence description surfaced as the stage-2 progressive Tooltip
+   *  body. The `label` doubles as the stage-1 label. */
+  description?: string;
   onClick: () => void;
   active?: boolean;
 }
@@ -85,10 +89,11 @@ interface RailIconButtonProps {
 function RailIconButton({
   icon,
   label,
+  description,
   onClick,
   active,
 }: RailIconButtonProps): React.JSX.Element {
-  return (
+  const buttonNode = (
     <button
       type="button"
       onClick={onClick}
@@ -111,6 +116,32 @@ function RailIconButton({
         {icon}
       </span>
     </button>
+  );
+  // Progressive-reveal Tooltip: stage 1 after ~2s shows the short
+  // label; stage 2 after ~5s swaps in label + description. Position on
+  // the right since the rail hugs the left edge of the page.
+  return (
+    <Tooltip
+      side="right"
+      stages={[
+        { delay: 1000, content: <span>{label}</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">{label}</div>
+              {description && (
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                  {description}
+                </div>
+              )}
+            </div>
+          ),
+        },
+      ]}
+    >
+      {buttonNode}
+    </Tooltip>
   );
 }
 
@@ -482,18 +513,21 @@ export function WorkspaceRail({
       <RailIconButton
         icon={<LayoutDashboard />}
         label="Layouts"
+        description="Save / apply named dock layouts."
         onClick={() => setLayoutsOpen(true)}
         active={layoutsOpen}
       />
       <RailIconButton
         icon={<Boxes />}
         label="Docks"
+        description="Add hidden panels to this page's layout."
         onClick={() => setDocksOpen(true)}
         active={docksOpen}
       />
       <RailIconButton
         icon={<RotateCcw />}
         label="Reset Layout"
+        description="Reset this page's dock layout to its default."
         onClick={onResetLayout}
       />
 
@@ -550,12 +584,14 @@ export function WorkspaceRail({
       <RailIconButton
         icon={<Settings />}
         label="Page settings"
+        description="Per-page settings (snap, ruler, etc.)."
         onClick={() => setSettingsOpen(true)}
         active={settingsOpen}
       />
       <RailIconButton
         icon={<CircleHelp />}
         label="Page help"
+        description="Quick help + keyboard shortcuts for this page."
         onClick={() => setHelpOpen(true)}
         active={helpOpen}
       />

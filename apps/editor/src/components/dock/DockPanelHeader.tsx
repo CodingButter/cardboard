@@ -1,6 +1,7 @@
 import React from "react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { cn } from "../../lib/cn";
+import { Tooltip } from "../ui/Tooltip";
 
 /**
  * Ornaments — non-serialisable React-node decorations the header
@@ -15,6 +16,10 @@ import { cn } from "../../lib/cn";
 export interface DockPanelHeaderOrnaments {
   icon?: React.ReactNode;
   controls?: React.ReactNode;
+  /** Optional 1-sentence description shown as the stage-2 progressive
+   *  Tooltip body when hovering the panel's title bar. The panel's
+   *  `api.title` doubles as the stage-1 short label. */
+  description?: string;
 }
 
 export const DockPanelHeaderOrnamentsContext = React.createContext<
@@ -71,6 +76,39 @@ export function DockPanelHeader(
   // strip — the title alone identifies the panel. The MANIFEST.icon
   // field is still consumed by DocksModal (panel-discovery card grid).
   const controls = own.controls ?? null;
+  const description = own.description;
+
+  // Title text wrapped in a progressive Tooltip when a description is
+  // available — stage 1 (~2s) shows the panel title; stage 2 (~5s)
+  // adds the description body. We wrap ONLY the title span (not the
+  // entire header bar) so dockview's native drag handlers on the bar
+  // remain untouched.
+  const titleNode = (
+    <span className="dock-panel-header__title flex-1 truncate">{title}</span>
+  );
+  const wrappedTitle = description ? (
+    <Tooltip
+      side="bottom"
+      stages={[
+        { delay: 1000, content: <span>{title}</span> },
+        {
+          delay: 3000,
+          content: (
+            <div>
+              <div className="font-semibold">{title}</div>
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                {description}
+              </div>
+            </div>
+          ),
+        },
+      ]}
+    >
+      {titleNode}
+    </Tooltip>
+  ) : (
+    titleNode
+  );
 
   return (
     <div
@@ -92,7 +130,7 @@ export function DockPanelHeader(
       data-dock-panel-header
       data-panel-id={api.id}
     >
-      <span className="dock-panel-header__title flex-1 truncate">{title}</span>
+      {wrappedTitle}
       {controls ? (
         <span className="dock-panel-header__controls flex items-center gap-1">
           {controls}
