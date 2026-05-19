@@ -13,6 +13,9 @@ on:
       - 'apps/docs/**'
       - 'apps/editor/**'
       - 'apps/game/**'
+      - 'apps/pack-builder/**'
+      - 'apps/game/public/packs/**'
+      - 'packs/**'
       - 'packages/**'
       - 'scripts/sync-plans.ts'
       - 'scripts/gen-api-docs.ts'
@@ -36,7 +39,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:

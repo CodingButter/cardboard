@@ -24,7 +24,7 @@
 import { $ } from "bun";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const GAME_DIR = join(ROOT, "apps/game");
@@ -130,14 +130,39 @@ async function step4_copyDistToTargets(): Promise<void> {
 }
 
 async function step5_copyPack(): Promise<void> {
-  const apg = join(PACKS_SRC, "default.apg");
-  if (!existsSync(apg)) {
-    throw new Error(`Expected ${apg} to exist after build-packs.`);
+  // The pack-builder writes `${manifest.name}.apg` (e.g. `Cardboard.apg`),
+  // but consumer URLs in the docs landing iframe + smoke scripts load
+  // `/packs/default.apg`. Discover whatever `*.apg` files exist in the
+  // source dir, copy them all preserving names, and ALSO write a
+  // canonical `default.apg` alias so URL consumers keep working.
+  if (!existsSync(PACKS_SRC)) {
+    throw new Error(
+      `No *.apg packs in ${PACKS_SRC} — run \`bun run build:packs\` first.`,
+    );
   }
+  const apgs = readdirSync(PACKS_SRC).filter((f) => f.endsWith(".apg")).sort();
+  if (apgs.length === 0) {
+    throw new Error(
+      `No *.apg packs in ${PACKS_SRC} — run \`bun run build:packs\` first.`,
+    );
+  }
+  // Pick the canonical pack for the `default.apg` alias. If a file is
+  // already named `default.apg`, use that; otherwise prefer the first
+  // lexicographic entry (which after sort() is deterministic).
+  const canonical = apgs.includes("default.apg") ? "default.apg" : apgs[0]!;
   for (const t of PLAY_TARGETS) {
-    log(`step 5 (${t.label}): copy default.apg → ${t.packs}`);
+    log(
+      `step 5 (${t.label}): copy ${apgs.length} pack(s) → ${t.packs} (alias default.apg = ${canonical})`,
+    );
     await mkdir(t.packs, { recursive: true });
-    await copyFile(apg, join(t.packs, basename(apg)));
+    for (const name of apgs) {
+      await copyFile(join(PACKS_SRC, name), join(t.packs, name));
+    }
+    // Write the canonical alias (skip the copy if it already lives at
+    // `default.apg` because of the loop above).
+    if (canonical !== "default.apg") {
+      await copyFile(join(PACKS_SRC, canonical), join(t.packs, "default.apg"));
+    }
   }
 }
 
