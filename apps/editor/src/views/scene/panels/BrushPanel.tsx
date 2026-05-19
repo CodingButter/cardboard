@@ -194,29 +194,27 @@ export function BrushPanel(): React.JSX.Element {
 
   // Outer container is just the `data-panel` hook. DockShell wraps
   // this in `<PanelSurface/>` (raised card with p-2 inner padding),
-  // so this wrapper only owns layout (flex column + gap between the
-  // brush-kind grid and the size stepper), NOT padding or surface
-  // styling.
+  // so this wrapper only owns layout (flex column + tight gap between
+  // the brush-kind grid and the inline size row), NOT padding or
+  // surface styling.
   return (
     <div
       data-panel="brush"
-      className="h-full w-full flex flex-col gap-2 overflow-y-auto"
+      className="h-full w-full flex flex-col gap-1 overflow-y-auto"
     >
       {/*
         Brush-kind tile grid. Same auto-fit/minmax pattern as the
-        ToolPalette tile grid, with slightly larger tiles (40–56px)
-        because brushes are higher-information than tools: the icon
-        carries the entire signal. `auto-fit` lets the browser pick
-        column count to match available panel width — single column
-        at ~150px, several columns at 400px+. No native horizontal
-        scroll is possible since the grid wraps.
+        ToolPalette tile grid. Tiles tightened to 32–44px (down from
+        40–56px) so the brush row stays compact and the size controls
+        below the grid are visible above the fold at the default
+        Scene-layout panel size (~230×190).
       */}
       <div
         className="grid gap-1"
         role="radiogroup"
         aria-label="Brush kind"
         style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(40px, 56px))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(32px, 44px))",
         }}
       >
         {(MOCK_BRUSHES as readonly BrushRow[]).map((b) => {
@@ -258,7 +256,7 @@ export function BrushPanel(): React.JSX.Element {
                     : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 ].join(" ")}
               >
-                <Icon size={18} aria-hidden="true" />
+                <Icon size={16} aria-hidden="true" />
               </button>
             </Tooltip>
           );
@@ -266,133 +264,166 @@ export function BrushPanel(): React.JSX.Element {
       </div>
 
       {/*
-        Size stepper row. Layout strategy: [−] [size readout] [+] as
-        flex children. The numeric input in the middle is `flex-1` so
-        it absorbs slack at wide widths but the minus/plus buttons
-        keep their square shape. min-w-0 on the input prevents it
-        from forcing the row to overflow when the panel narrows past
-        ~150px.
+        Single-row size control: [−] [slider flex-1] [value readout] [+].
+        The SIZE label is folded into the slider tooltip (stage 1 shows
+        "Brush size: N", stage 2 shows the full description) so we save
+        a row of vertical space while keeping the discoverable affordance.
+        The value readout is a non-editable tabular-nums chip — the
+        slider IS the primary input; the +/- buttons are the secondary
+        keyboard-free fine-tune affordance. This collapses what used to
+        be 3 stacked rows (label / stepper / slider) into 1 row, which
+        is the only way to keep the slider above the fold at 230×190.
       */}
-      <div className="flex flex-col gap-1 pt-1">
-        <div className="text-[10px] uppercase tracking-wide text-(--color-fg-muted)">
-          Size
-        </div>
-        <div className="flex items-stretch gap-1">
-          <Tooltip
-            side="top"
-            stages={[
-              { delay: 2000, content: <span>Decrease size</span> },
-              {
-                delay: 5000,
-                content: (
-                  <div>
-                    <div className="font-semibold">Decrease Brush Size</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
-                      Steps the brush size down by 1 (minimum {MIN_SIZE}).
-                    </div>
+      <div className="flex items-stretch gap-1 pt-0.5">
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 2000, content: <span>Decrease size</span> },
+            {
+              delay: 5000,
+              content: (
+                <div>
+                  <div className="font-semibold">Decrease Brush Size</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                    Steps the brush size down by 1 (minimum {MIN_SIZE}).
                   </div>
-                ),
-              },
-            ]}
-          >
-            <button
-              type="button"
-              aria-label="Decrease brush size"
-              disabled={sizeAtMin}
-              onClick={handleSizeDown}
-              className={[
-                "h-7 w-7 shrink-0 rounded",
-                "flex items-center justify-center",
-                "border transition-colors",
-                sizeAtMin
-                  ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-              ].join(" ")}
-            >
-              <Minus size={14} aria-hidden="true" />
-            </button>
-          </Tooltip>
-
-          <input
-            type="number"
-            min={MIN_SIZE}
-            max={MAX_SIZE}
-            step={1}
-            value={size}
-            aria-label="Brush size"
-            onChange={(e) => {
-              const parsed = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(parsed)) handleSizeSet(parsed);
-            }}
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label="Decrease brush size"
+            disabled={sizeAtMin}
+            onClick={handleSizeDown}
             className={[
-              "flex-1 min-w-0 h-7 px-2 rounded",
-              "text-center text-xs tabular-nums",
-              "bg-transparent border border-(--color-border-strong)",
-              "text-(--color-fg-primary)",
-              "focus:outline-none focus:border-amber-500/80",
-              // Hide the native number-input spinners — we render our
-              // own +/- buttons; the spinners would compete visually
-              // and add unpredictable width.
-              "[appearance:textfield]",
-              "[&::-webkit-inner-spin-button]:appearance-none",
-              "[&::-webkit-outer-spin-button]:appearance-none",
+              "h-7 w-7 shrink-0 rounded",
+              "flex items-center justify-center",
+              "border transition-colors",
+              sizeAtMin
+                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
+                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
             ].join(" ")}
-          />
+          >
+            <Minus size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
 
+        {/*
+          The Tooltip component wraps its child in an `inline-flex`
+          span we don't control, so to make the slider absorb slack we
+          wrap the Tooltip itself in `flex-1 min-w-0` and let the
+          slider go `w-full` inside. min-w-0 is required so the
+          flex-1 segment can actually shrink below its intrinsic
+          content width when the panel narrows past ~150px.
+        */}
+        <div className="flex-1 min-w-0 flex items-center [&>span]:w-full">
           <Tooltip
             side="top"
             stages={[
-              { delay: 2000, content: <span>Increase size</span> },
+              {
+                delay: 2000,
+                content: (
+                  <span>
+                    Brush size: <span className="tabular-nums">{size}</span>
+                  </span>
+                ),
+              },
               {
                 delay: 5000,
                 content: (
                   <div>
-                    <div className="font-semibold">Increase Brush Size</div>
+                    <div className="font-semibold">Brush Size</div>
                     <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
-                      Steps the brush size up by 1 (maximum {MAX_SIZE}).
+                      Drag to set the brush radius ({MIN_SIZE}–{MAX_SIZE}).
+                      Determines how many cells are affected during
+                      paint and erase ops.
                     </div>
                   </div>
                 ),
               },
             ]}
           >
-            <button
-              type="button"
-              aria-label="Increase brush size"
-              disabled={sizeAtMax}
-              onClick={handleSizeUp}
-              className={[
-                "h-7 w-7 shrink-0 rounded",
-                "flex items-center justify-center",
-                "border transition-colors",
-                sizeAtMax
-                  ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                  : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-              ].join(" ")}
-            >
-              <Plus size={14} aria-hidden="true" />
-            </button>
+            <input
+              type="range"
+              min={MIN_SIZE}
+              max={MAX_SIZE}
+              step={1}
+              value={size}
+              aria-label="Brush size"
+              onChange={(e) =>
+                handleSizeSet(Number.parseInt(e.target.value, 10))
+              }
+              className="w-full accent-amber-500"
+            />
           </Tooltip>
         </div>
 
         {/*
-          Slider mirrors the input — gives a "feel" the input doesn't,
-          especially at wide panel widths. Themed via the design-system
-          tokens; the native `<input type="range">` is acceptable here
-          because the user never gets a horizontal scrollbar, and the
-          accent token paints the thumb consistently with the rest of
-          the editor chrome.
+          Numeric readout. Editable on click — turns into a hidden
+          spinner number input — so power users can still type a
+          value, but at default size the chip just reads the slider
+          value. Width is min-content + a small floor so 1–2 digits
+          look balanced.
         */}
         <input
-          type="range"
+          type="number"
           min={MIN_SIZE}
           max={MAX_SIZE}
           step={1}
           value={size}
-          aria-label="Brush size (slider)"
-          onChange={(e) => handleSizeSet(Number.parseInt(e.target.value, 10))}
-          className="w-full accent-amber-500"
+          aria-label="Brush size value"
+          onChange={(e) => {
+            const parsed = Number.parseInt(e.target.value, 10);
+            if (Number.isFinite(parsed)) handleSizeSet(parsed);
+          }}
+          className={[
+            "w-9 shrink-0 h-7 px-1 rounded",
+            "text-center text-xs tabular-nums",
+            "bg-transparent border border-(--color-border-strong)",
+            "text-(--color-fg-primary)",
+            "focus:outline-none focus:border-amber-500/80",
+            "[appearance:textfield]",
+            "[&::-webkit-inner-spin-button]:appearance-none",
+            "[&::-webkit-outer-spin-button]:appearance-none",
+          ].join(" ")}
         />
+
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 2000, content: <span>Increase size</span> },
+            {
+              delay: 5000,
+              content: (
+                <div>
+                  <div className="font-semibold">Increase Brush Size</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[220px] whitespace-normal">
+                    Steps the brush size up by 1 (maximum {MAX_SIZE}).
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label="Increase brush size"
+            disabled={sizeAtMax}
+            onClick={handleSizeUp}
+            className={[
+              "h-7 w-7 shrink-0 rounded",
+              "flex items-center justify-center",
+              "border transition-colors",
+              sizeAtMax
+                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
+                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+            ].join(" ")}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
