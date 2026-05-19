@@ -112,6 +112,13 @@ function clampZoom(z: number): number {
 // Sample painted cells. Hardcoded for Wave 2 so the canvas has visible
 // content before the real scene tile store lands. Wave 3 replaces with
 // `EditorProjectStore` cell reads.
+//
+// The cells in this fixture are intentionally shaped to read as a
+// small dungeon when drawn with the textured renderer below — a few
+// rooms connected by corridors, with doors at the breaks. The colors
+// on each cell act as a hue *tint* on top of the procedural brick /
+// stone-floor base palette so the renderer reads as "atmospheric
+// dungeon" rather than "saturated tile grid".
 
 interface PaintedCell {
   x: number;
@@ -121,42 +128,131 @@ interface PaintedCell {
    *  omitted — leaving it set per-cell lets us suggest tile variety
    *  (different brick tones, etc.) without inventing a tile fixture. */
   color?: string;
+  /** Optional tile-type name surfaced under the selection chip.
+   *  Mirrors the `Brick Wall 7` label in Map.png. */
+  name?: string;
 }
 
-const SAMPLE_CELLS: readonly PaintedCell[] = [
-  // A small room outline — walls on the perimeter, floors inside.
-  { x: 10, y: 12, layerId: "walls", color: "#38bdf8" },
-  { x: 11, y: 12, layerId: "walls", color: "#38bdf8" },
-  { x: 12, y: 12, layerId: "walls", color: "#38bdf8" },
-  { x: 13, y: 12, layerId: "walls", color: "#38bdf8" },
-  { x: 14, y: 12, layerId: "walls", color: "#38bdf8" },
-  { x: 10, y: 13, layerId: "walls", color: "#38bdf8" },
-  { x: 10, y: 14, layerId: "walls", color: "#38bdf8" },
-  { x: 14, y: 13, layerId: "walls", color: "#38bdf8" },
-  { x: 14, y: 14, layerId: "walls", color: "#38bdf8" },
-  { x: 10, y: 15, layerId: "walls", color: "#38bdf8" },
-  { x: 12, y: 15, layerId: "walls", color: "#38bdf8" },
-  { x: 13, y: 15, layerId: "walls", color: "#38bdf8" },
-  { x: 14, y: 15, layerId: "walls", color: "#38bdf8" },
-  // Door at (11,15) — the gap in the south wall.
-  { x: 11, y: 15, layerId: "doors", color: "#10b981" },
-  // Floor inside the room.
-  { x: 11, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 12, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 13, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 11, y: 14, layerId: "floors", color: "#f59e0b" },
-  { x: 12, y: 14, layerId: "floors", color: "#f59e0b" },
-  { x: 13, y: 14, layerId: "floors", color: "#f59e0b" },
-  // A sprite in the room (barrel) + another out in the open.
-  { x: 12, y: 13, layerId: "sprites", color: "#a78bfa" },
-  { x: 30, y: 24, layerId: "sprites", color: "#a78bfa" },
-  // A short corridor of floors heading east from the room.
-  { x: 15, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 16, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 17, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 18, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 19, y: 13, layerId: "floors", color: "#f59e0b" },
-  { x: 20, y: 13, layerId: "floors", color: "#f59e0b" },
+// Small helper — paint a filled axis-aligned rect of one layer/tone.
+function rect(
+  cells: PaintedCell[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  layerId: string,
+  color: string,
+  name: string,
+): void {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      cells.push({ x, y, layerId, color, name });
+    }
+  }
+}
+
+// Outline of a rectangle (walls around a room — interior left empty).
+function wallRect(
+  cells: PaintedCell[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: string,
+  name: string,
+): void {
+  for (let x = x0; x <= x1; x++) {
+    cells.push({ x, y: y0, layerId: "walls", color, name });
+    cells.push({ x, y: y1, layerId: "walls", color, name });
+  }
+  for (let y = y0 + 1; y < y1; y++) {
+    cells.push({ x: x0, y, layerId: "walls", color, name });
+    cells.push({ x: x1, y, layerId: "walls", color, name });
+  }
+}
+
+const SAMPLE_CELLS: readonly PaintedCell[] = (() => {
+  const c: PaintedCell[] = [];
+
+  // ---- Room A — top-left "great hall" ----------------------------
+  rect(c, 9, 8, 19, 16, "floors", "#7a6a55", "Stone Floor 2");
+  wallRect(c, 8, 7, 20, 17, "#6b4a30", "Brick Wall 7");
+  // Door east of room A → corridor.
+  c.push({ x: 20, y: 12, layerId: "doors", color: "#caa46a", name: "Oak Door" });
+
+  // ---- Corridor east → Room B ------------------------------------
+  rect(c, 21, 11, 28, 13, "floors", "#6e5e4a", "Stone Floor 3");
+  // Corridor walls — north + south.
+  for (let x = 21; x <= 28; x++) {
+    c.push({ x, y: 10, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+    c.push({ x, y: 14, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+  }
+
+  // ---- Room B — middle "library" --------------------------------
+  rect(c, 29, 9, 38, 17, "floors", "#7a6a55", "Stone Floor 2");
+  wallRect(c, 28, 8, 39, 18, "#6b4a30", "Brick Wall 7");
+  // Re-open the corridor entrance.
+  c.push({ x: 28, y: 12, layerId: "doors", color: "#caa46a", name: "Oak Door" });
+  // Sprites inside room B — three barrels along the south wall.
+  c.push({ x: 31, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
+  c.push({ x: 33, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
+  c.push({ x: 35, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
+  // A light source at the centre of the room.
+  c.push({ x: 33, y: 12, layerId: "lights", color: "#f4c668", name: "Torch" });
+
+  // ---- South corridor from Room A ↓ to Room C --------------------
+  rect(c, 13, 18, 15, 26, "floors", "#6e5e4a", "Stone Floor 3");
+  for (let y = 18; y <= 26; y++) {
+    c.push({ x: 12, y, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+    c.push({ x: 16, y, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+  }
+  // Door at the room A south boundary.
+  c.push({ x: 14, y: 17, layerId: "doors", color: "#caa46a", name: "Oak Door" });
+
+  // ---- Room C — bottom-left "chamber" ---------------------------
+  rect(c, 9, 27, 19, 35, "floors", "#7a6a55", "Stone Floor 1");
+  wallRect(c, 8, 26, 20, 36, "#6b4a30", "Brick Wall 7");
+  c.push({ x: 14, y: 26, layerId: "doors", color: "#caa46a", name: "Oak Door" });
+  // A lone light + a sprite.
+  c.push({ x: 14, y: 31, layerId: "lights", color: "#f4c668", name: "Torch" });
+  c.push({ x: 11, y: 34, layerId: "sprites", color: "#b08050", name: "Barrel" });
+
+  // ---- East tower — Room D ---------------------------------------
+  rect(c, 41, 21, 50, 30, "floors", "#7a6a55", "Stone Floor 2");
+  wallRect(c, 40, 20, 51, 31, "#6b4a30", "Brick Wall 7");
+  // Connecting corridor west from room D to corridor under room B.
+  rect(c, 34, 25, 39, 26, "floors", "#6e5e4a", "Stone Floor 3");
+  for (let x = 34; x <= 39; x++) {
+    c.push({ x, y: 24, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+    c.push({ x, y: 27, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
+  }
+  c.push({ x: 40, y: 25, layerId: "doors", color: "#caa46a", name: "Oak Door" });
+  // Two sprites + a light in room D.
+  c.push({ x: 45, y: 25, layerId: "sprites", color: "#b08050", name: "Crate" });
+  c.push({ x: 48, y: 28, layerId: "sprites", color: "#b08050", name: "Crate" });
+  c.push({ x: 45, y: 26, layerId: "lights", color: "#f4c668", name: "Brazier" });
+
+  return c;
+})();
+
+// ---------------------------------------------------------------------------
+// Entity markers — entry / spawn / exit overlay glyphs. Hardcoded
+// fixtures for Wave 2; Wave 3 reads from the real entity store.
+
+interface EntityMarker {
+  x: number;
+  y: number;
+  glyph: string;
+  /** Background colour for the marker disc. */
+  color: string;
+  name: string;
+}
+
+const ENTITY_MARKERS: readonly EntityMarker[] = [
+  { x: 14, y: 12, glyph: "E", color: "#10b981", name: "Entry" },
+  { x: 33, y: 13, glyph: "S", color: "#3b82f6", name: "Spawn" },
+  { x: 14, y: 31, glyph: "S", color: "#3b82f6", name: "Spawn" },
+  { x: 45, y: 25, glyph: "X", color: "#ef4444", name: "Exit" },
 ];
 
 // Layer descriptions for the chip tooltips — mirrored from LayersPanel.
@@ -167,6 +263,59 @@ const LAYER_DESCRIPTIONS: Record<string, string> = {
   sprites: "Sprite entities — items, decor, NPCs placed in the world.",
   lights: "Light sources — emissive points that bake into the scene.",
 };
+
+// ---------------------------------------------------------------------------
+// Color helpers — tiny RGB packers used by the textured-cell renderer.
+// Kept inline (no external dep) and stable so the renderer stays
+// <16ms even when sweeping every cell.
+
+function parseHex(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  if (h.length === 3) {
+    return {
+      r: parseInt(h[0]! + h[0]!, 16),
+      g: parseInt(h[1]! + h[1]!, 16),
+      b: parseInt(h[2]! + h[2]!, 16),
+    };
+  }
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+/** Convert 0..255 channels to a `#rrggbb` string. Clamped + integerised
+ *  so the return value is always re-parseable by `parseHex` — critical
+ *  because `mix(mix(...), ...)` is the workhorse of the tile renderer
+ *  and broken chaining produces accidental neon colors. */
+function rgbHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const toHex = (v: number) => clamp(v).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/** Mix two colors at `t`. t=0 → a, t=1 → b. Returns a `#rrggbb` string
+ *  so the result can feed back into `mix` again — `parseHex` only
+ *  understands hex, not `rgba(...)` notation. */
+function mix(a: string, b: string, t: number): string {
+  const ca = parseHex(a);
+  const cb = parseHex(b);
+  return rgbHex(
+    ca.r + (cb.r - ca.r) * t,
+    ca.g + (cb.g - ca.g) * t,
+    ca.b + (cb.b - ca.b) * t,
+  );
+}
+
+/** Cheap deterministic 0..1 pseudo-random for tile variation, so
+ *  bricks at the same coord look the same on every paint. */
+function hash01(x: number, y: number, seed = 0): number {
+  let h = (x * 374761393 + y * 668265263 + seed * 2147483647) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return (h % 1000) / 1000;
+}
 
 // ---------------------------------------------------------------------------
 // Initial-state builders.
@@ -316,22 +465,22 @@ export function MapCanvasPanel(): React.JSX.Element {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    // Background — dark editor tone.
+    // Background — dark editor tone with a warm brown undertone so
+    // the playfield reads as "torchlit dungeon" rather than pure noir.
     ctx.fillStyle = "#0a0a0c";
     ctx.fillRect(0, 0, layout.canvasW, layout.canvasH);
 
     const { cell, offX, offY, gridW, gridH } = layout;
     if (cell <= 0) return;
 
-    // Scene playfield — slightly lighter so the grid sits on a visible
-    // floor, like the comp.
-    ctx.fillStyle = "#15151a";
+    // Scene playfield — warmer base than the old `#15151a` so the
+    // textured tiles sit on a brown-toned floor matching Map.png.
+    ctx.fillStyle = "#1a1814";
     ctx.fillRect(offX, offY, gridW, gridH);
 
     // Painted sample cells — drawn before the grid so the lattice
-    // reads on top. Filter by layer visibility. We respect MOCK_LAYERS
-    // order so higher-index layers (sprites, lights) draw on top of
-    // lower-index ones (floors, walls).
+    // reads on top. We respect MOCK_LAYERS order so higher-index
+    // layers (sprites, lights) draw on top of lower-index ones.
     const layerIndex = new Map<string, number>(
       MOCK_LAYERS.map((l, i) => [l.id, i]),
     );
@@ -339,24 +488,128 @@ export function MapCanvasPanel(): React.JSX.Element {
       (a, b) =>
         (layerIndex.get(a.layerId) ?? 0) - (layerIndex.get(b.layerId) ?? 0),
     );
-    ctx.globalAlpha = 0.8;
+
+    // Detail thresholds — below these zooms we collapse procedural
+    // patterns back to a flat fill so the render stays cheap on small
+    // cells. (At zoom-out, 4096 cells × dozens of strokes = jank.)
+    // Keep these aggressive so even ~6px cells get a hint of brick
+    // texture — that's what makes Map.png read as a dungeon.
+    const showDetail = cell >= 5;
+    const showFineDetail = cell >= 12;
+
     for (const c of cellsByOrder) {
       if (!visibility[c.layerId]) continue;
-      const color = c.color ?? layerColorById[c.layerId] ?? "#888";
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        Math.round(offX + c.x * cell),
-        Math.round(offY + c.y * cell),
-        Math.ceil(cell),
-        Math.ceil(cell),
-      );
-    }
-    ctx.globalAlpha = 1;
+      const x = Math.round(offX + c.x * cell);
+      const y = Math.round(offY + c.y * cell);
+      const w = Math.ceil(cell);
+      const h = Math.ceil(cell);
+      const tint = c.color ?? layerColorById[c.layerId] ?? "#888";
 
-    // Grid lattice — skip individual cell lines when each cell is
-    // sub-pixel.
+      if (c.layerId === "walls") {
+        // Brick pattern — warm brown base + per-cell tint mix +
+        // staggered mortar lines so consecutive walls read as bricks
+        // rather than a solid bar. Per-cell jitter on the base keeps
+        // long wall runs from reading as one flat slab; kept small
+        // so neighboring cells read as the same wall, not a quilt.
+        const jitter = hash01(c.x, c.y, 7) * 0.06 - 0.03;
+        const base = mix("#5a3a22", tint, 0.3 + jitter);
+        const dark = mix(base, "#1a0e08", 0.6);
+        ctx.fillStyle = base;
+        ctx.fillRect(x, y, w, h);
+        if (showDetail) {
+          // Horizontal mortar line at cell midpoint.
+          ctx.fillStyle = dark;
+          ctx.fillRect(x, y + Math.round(cell * 0.5), w, 1);
+          // Single vertical mortar — staggered every other row so
+          // adjacent walls read as offset brick courses.
+          const stagger = c.y % 2 === 0 ? Math.round(cell * 0.5) : 0;
+          ctx.fillRect(x + stagger, y, 1, Math.round(cell * 0.5));
+          ctx.fillRect(
+            x + Math.round(cell * 0.5) - stagger,
+            y + Math.round(cell * 0.5),
+            1,
+            Math.round(cell * 0.5),
+          );
+        }
+      } else if (c.layerId === "floors") {
+        // Stone-tile floor — warm gray base, per-cell jitter, and a
+        // faint diagonal division. We deliberately keep this LOW
+        // contrast so the floor reads as atmospheric backdrop rather
+        // than competing with the brick walls.
+        const jitter = hash01(c.x, c.y, 11) * 0.08 - 0.04;
+        const base = mix("#3a3530", tint, 0.28 + jitter);
+        ctx.fillStyle = base;
+        ctx.fillRect(x, y, w, h);
+        if (showFineDetail) {
+          // A faint single division at the cell midpoint — gives the
+          // floor a tiled look without becoming a checkerboard. Only
+          // when each cell is wide enough that 1px reads as a seam.
+          const mid = mix(base, "#231f1c", 0.45);
+          ctx.fillStyle = mid;
+          ctx.fillRect(x + Math.round(w / 2), y, 1, h);
+          ctx.fillRect(x, y + Math.round(h / 2), w, 1);
+        }
+      } else if (c.layerId === "doors") {
+        // Door — wood plank with a `D` glyph centered.
+        const base = mix("#8b5a2b", tint, 0.4);
+        ctx.fillStyle = base;
+        ctx.fillRect(x, y, w, h);
+        if (showDetail) {
+          // Two vertical plank divisions.
+          const dark = mix(base, "#000", 0.4);
+          ctx.fillStyle = dark;
+          ctx.fillRect(x + Math.round(w / 3), y, 1, h);
+          ctx.fillRect(x + Math.round((w * 2) / 3), y, 1, h);
+          if (showFineDetail) {
+            // Iron hinges as small dark dots.
+            ctx.fillStyle = "#1a1410";
+            ctx.fillRect(x + 1, y + 2, 2, 1);
+            ctx.fillRect(x + 1, y + h - 3, 2, 1);
+          }
+        }
+      } else if (c.layerId === "sprites") {
+        // Sprite — smaller diamond in the cell center, doesn't fill.
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const r = Math.max(2, cell * 0.32);
+        ctx.fillStyle = tint;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r);
+        ctx.lineTo(cx + r, cy);
+        ctx.lineTo(cx, cy + r);
+        ctx.lineTo(cx - r, cy);
+        ctx.closePath();
+        ctx.fill();
+        if (showDetail) {
+          ctx.strokeStyle = mix(tint, "#000", 0.5);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      } else if (c.layerId === "lights") {
+        // Light — soft radial glow, not a hard square.
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const r = Math.max(2, cell * 0.9);
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        grad.addColorStop(0, mix(tint, "#fff", 0.4));
+        grad.addColorStop(0.4, tint);
+        grad.addColorStop(1, "rgba(244,198,104,0)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(x - cell, y - cell, w + cell * 2, h + cell * 2);
+      } else {
+        // Fallback — flat fill for any future layer id.
+        ctx.fillStyle = tint;
+        ctx.globalAlpha = 0.8;
+        ctx.fillRect(x, y, w, h);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Grid lattice — warm gray-brown so the lines feel like floor
+    // grout in a stone dungeon, not pure white-alpha. Skip when each
+    // cell is sub-pixel.
     if (cell >= 2) {
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.strokeStyle = "rgba(180,160,140,0.08)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = 0; x <= dims.w; x++) {
@@ -372,8 +625,60 @@ export function MapCanvasPanel(): React.JSX.Element {
       ctx.stroke();
     }
 
-    // Playfield border.
-    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    // Entity markers — entry/spawn/exit glyphs over their cells.
+    // Drawn AFTER the grid so they sit on top like map pins.
+    if (cell >= 6) {
+      for (const m of ENTITY_MARKERS) {
+        if (m.x < 0 || m.x >= dims.w || m.y < 0 || m.y >= dims.h) continue;
+        const cx = offX + m.x * cell + cell / 2;
+        const cy = offY + m.y * cell + cell / 2;
+        const r = Math.max(4, cell * 0.42);
+        // Drop-shadow halo for legibility.
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.beginPath();
+        ctx.arc(cx + 1, cy + 1, r, 0, Math.PI * 2);
+        ctx.fill();
+        // Colored disc.
+        ctx.fillStyle = m.color;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+        // Bright outline so the disc reads against the brick.
+        ctx.strokeStyle = mix(m.color, "#fff", 0.4);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Glyph.
+        if (cell >= 7) {
+          ctx.fillStyle = "#0b0a08";
+          ctx.font = `bold ${Math.max(8, Math.round(r * 1.3))}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(m.glyph, cx, cy + 0.5);
+          // Reset text alignment for any subsequent draw calls so we
+          // don't leak state into the selection chip below.
+          ctx.textAlign = "start";
+          ctx.textBaseline = "alphabetic";
+        }
+      }
+    }
+
+    // Atmospheric vignette — soft radial darkening from the playfield
+    // center outward. Drawn over the cells but under the selection
+    // overlay so the selected cell still pops.
+    {
+      const cx = offX + gridW / 2;
+      const cy = offY + gridH / 2;
+      const rInner = Math.min(gridW, gridH) * 0.35;
+      const rOuter = Math.hypot(gridW, gridH) * 0.62;
+      const vignette = ctx.createRadialGradient(cx, cy, rInner, cx, cy, rOuter);
+      vignette.addColorStop(0, "rgba(0,0,0,0)");
+      vignette.addColorStop(1, "rgba(0,0,0,0.45)");
+      ctx.fillStyle = vignette;
+      ctx.fillRect(offX, offY, gridW, gridH);
+    }
+
+    // Playfield border — slightly warmer than the old white-alpha.
+    ctx.strokeStyle = "rgba(180,160,140,0.22)";
     ctx.lineWidth = 1;
     ctx.strokeRect(
       Math.round(offX) + 0.5,
@@ -402,7 +707,9 @@ export function MapCanvasPanel(): React.JSX.Element {
       );
     }
 
-    // Selected cell — solid amber outline + faint fill.
+    // Selected cell — solid amber outline + faint fill + a small
+    // floating label below the selection mirroring Map.png's
+    // `Brick Wall 7` chip.
     if (
       selectedCell &&
       selectedCell.x >= 0 &&
@@ -410,21 +717,74 @@ export function MapCanvasPanel(): React.JSX.Element {
       selectedCell.y >= 0 &&
       selectedCell.y < dims.h
     ) {
+      const sx = Math.round(offX + selectedCell.x * cell);
+      const sy = Math.round(offY + selectedCell.y * cell);
       ctx.fillStyle = "rgba(245, 158, 11, 0.18)";
-      ctx.fillRect(
-        Math.round(offX + selectedCell.x * cell),
-        Math.round(offY + selectedCell.y * cell),
-        Math.ceil(cell),
-        Math.ceil(cell),
-      );
+      ctx.fillRect(sx, sy, Math.ceil(cell), Math.ceil(cell));
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 2;
       ctx.strokeRect(
-        Math.round(offX + selectedCell.x * cell) + 0.5,
-        Math.round(offY + selectedCell.y * cell) + 0.5,
+        sx + 0.5,
+        sy + 0.5,
         Math.ceil(cell) - 1,
         Math.ceil(cell) - 1,
       );
+
+      // Lookup the topmost painted cell's tile-type name at this
+      // coord (highest layer wins). If nothing's painted, surface
+      // the active layer's name + an `Empty` qualifier.
+      if (cell >= 8) {
+        const stack = SAMPLE_CELLS.filter(
+          (c) => c.x === selectedCell.x && c.y === selectedCell.y,
+        );
+        let label = "Empty";
+        if (stack.length > 0) {
+          stack.sort(
+            (a, b) =>
+              (layerIndex.get(b.layerId) ?? 0) -
+              (layerIndex.get(a.layerId) ?? 0),
+          );
+          label = stack[0]!.name ?? stack[0]!.layerId;
+        }
+        // Measure + draw the chip background below the selection.
+        ctx.font =
+          "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+        const padX = 6;
+        const padY = 3;
+        const textW = ctx.measureText(label).width;
+        const chipW = Math.ceil(textW + padX * 2);
+        const chipH = 18;
+        // Center the chip on the selection; clamp to playfield.
+        let chipX = sx + Math.ceil(cell) / 2 - chipW / 2;
+        let chipY = sy + Math.ceil(cell) + 4;
+        chipX = Math.max(offX + 2, Math.min(offX + gridW - chipW - 2, chipX));
+        // If the chip would clip the bottom edge, flip it above the
+        // selection.
+        if (chipY + chipH > offY + gridH - 2) {
+          chipY = sy - chipH - 4;
+        }
+        // Drop-shadow.
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.beginPath();
+        ctx.roundRect(chipX + 1, chipY + 1, chipW, chipH, 4);
+        ctx.fill();
+        // Chip body.
+        ctx.fillStyle = "rgba(20,18,14,0.95)";
+        ctx.beginPath();
+        ctx.roundRect(chipX, chipY, chipW, chipH, 4);
+        ctx.fill();
+        ctx.strokeStyle = "#f59e0b";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Label text.
+        ctx.fillStyle = "#f4c668";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, chipX + padX, chipY + chipH / 2 + 0.5);
+        // Reset text alignment for any subsequent draw calls.
+        ctx.textAlign = "start";
+        ctx.textBaseline = "alphabetic";
+      }
     }
   }, [
     layout,
