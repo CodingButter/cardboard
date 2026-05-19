@@ -346,7 +346,7 @@ function PanelSurface({
   // surface, not floating with a vertical gap above it. Left, right,
   // and bottom keep 4px so adjacent panels still have an 8px gap.
   return (
-    <div className="h-full w-full px-1 pb-1">
+    <div className="h-full w-full px-1.5 pb-1">
       <div className="h-full w-full bg-(--color-bg-panel-surface) border border-(--color-border-strong) rounded-md p-2 shadow-[var(--shadow-panel)]">
         {children}
       </div>

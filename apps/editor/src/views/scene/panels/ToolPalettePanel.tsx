@@ -140,7 +140,36 @@ export function ToolPalettePanel(): React.JSX.Element {
       data-panel="tool-palette"
       className="h-full w-full flex flex-col gap-2"
     >
-      <div className="grid grid-cols-3 grid-rows-2 gap-1">
+      {/*
+        Fluid tile grid: `auto-fit` + `minmax(56px, 80px)` lets the
+        browser compute column count from available width. Because
+        auto-fit prefers the max-width track size (80px) and only
+        breaks to another column when one full 80px + gap fits, the
+        actual breakpoints (4px gap) work out to:
+          • <80px   — 1 col @ panel-width (shrinks min 56→80 per width)
+          •  80-164 — 1 col × 6 rows  (vertical)
+          • 164-248 — 2 cols × 3 rows
+          • 248-332 — 3 cols × 2 rows
+          • 332-416 — 4 cols × 2 rows
+          • 416-500 — 5 cols × 2 rows
+          • 500+    — 6 cols × 1 row  (horizontal)
+
+        ScrollRow note (design decision): we considered wrapping this
+        grid in <ScrollRow> as a fallback for sub-56px panel widths,
+        but ScrollRow forces `overflow-y: hidden` on its viewport
+        which conflicts with this grid's vertical reflow (in narrow
+        mode 6 tiles stack to ~480px tall and need vertical space).
+        Per the spec's escape hatch, we skip ScrollRow here and rely
+        on auto-fit reflow + the panel's own vertical overflow
+        behaviour. Sub-56px widths are degenerate (no real horizontal
+        scrollbar shown either — the parent dockview cell clips).
+      */}
+      <div
+        className="grid gap-1"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(56px, 80px))",
+        }}
+      >
         {MOCK_TOOLS.map((t) => {
           const Icon = TOOL_ICON_BY_NAME[t.icon];
           const active = t.id === activeTool;
@@ -152,7 +181,7 @@ export function ToolPalettePanel(): React.JSX.Element {
               aria-pressed={active}
               onClick={() => handleToolClick(t.id)}
               className={[
-                "h-12 w-full rounded",
+                "aspect-square w-full rounded",
                 "flex flex-col items-center justify-center gap-0.5",
                 "border transition-colors",
                 active
@@ -161,7 +190,7 @@ export function ToolPalettePanel(): React.JSX.Element {
               ].join(" ")}
             >
               {Icon ? <Icon size={14} aria-hidden="true" /> : null}
-              <span className="text-[8px] uppercase tracking-wider leading-tight">
+              <span className="block w-full truncate px-1 text-center text-[8px] uppercase tracking-wider leading-tight">
                 {t.name}
               </span>
             </button>
@@ -170,6 +199,12 @@ export function ToolPalettePanel(): React.JSX.Element {
       </div>
 
       {subTools && subTools.length > 0 ? (
+        // Sub-tool strip uses flex-wrap to flow chips to a second row
+        // naturally when the panel is narrow. ScrollRow was considered
+        // but skipped for the same reason as the tile grid: its
+        // `overflow-y: hidden` would clip a wrapped second row of chips,
+        // which is the more common narrow-width scenario than a single
+        // chip wider than the panel.
         <div className="flex flex-wrap gap-1 pt-1">
           {subTools.map((s) => {
             const active = s.id === activeSubTool;

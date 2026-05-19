@@ -700,7 +700,7 @@
  * strip lacks `.dv-full-width-single-tab`. The `:not(...)` qualifier
  * filters out the single-tab case cleanly. */
 .dockview-theme-cardboard
-  .dv-tabs-and-actions-container:not(.dv-full-width-single-tab)
+  .dv-tabs-and-actions-container:not(.dv-single-tab)
   .dv-tab.dv-active-tab {
   box-shadow: inset 0 -2px 0 0 var(--color-accent);
 }
