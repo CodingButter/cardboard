@@ -10,10 +10,10 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
-  MOCK_LOG_LINES,
-  type LogLineRow,
-  type LogSeverity,
-} from "../scene-fixtures";
+  useDiagnosticsStore,
+  type DiagnosticLine,
+  type DiagnosticSeverity,
+} from "../../../state/useDiagnosticsStore";
 
 /**
  * OutputPanel — log-stream surface for engine and build output.
@@ -21,10 +21,14 @@ import {
  * Visual target: the bottom-strip "Output" console from
  * `Editor Design/Map.png`. VSCode-style: monospace lines with a
  * severity dot, timestamp, message; a filter chip row + Clear/Copy
- * actions across the top. Wave 2 wires this to the editor's
- * diagnostic bus + engine console; for now it consumes the
- * `MOCK_LOG_LINES` fixture so the panel renders identically to its
- * eventual live shape.
+ * actions across the top.
+ *
+ * Wave 3.3 data wiring: reads the live `lines` slice from
+ * `useDiagnosticsStore` (in-memory, capped at 500 entries, broadcast
+ * across popped-out windows). Clear hits `useDiagnosticsStore.clear()`
+ * so other windows + ProblemsPanel observe the same empty buffer.
+ * The active filter remains panel-local UI state (LS-persisted) — the
+ * diagnostics store does NOT model display filters.
  *
  * Registry note: this panel is registered with `surface: false` in
  * `MapView.tsx`, so DockShell does NOT wrap it in a `<PanelSurface/>`.
@@ -46,7 +50,7 @@ import {
 
 const LS_FILTER = "cardboard.scene.output.filter";
 
-type FilterValue = LogSeverity | "all";
+type FilterValue = DiagnosticSeverity | "all";
 const DEFAULT_FILTER: FilterValue = "all";
 
 function readLS(key: string): string | null {
@@ -81,7 +85,7 @@ interface SeverityMeta {
   label: string;
 }
 
-const SEVERITY_META: Record<LogSeverity, SeverityMeta> = {
+const SEVERITY_META: Record<DiagnosticSeverity, SeverityMeta> = {
   info: {
     dot: "bg-sky-400",
     label: "Info",
@@ -201,12 +205,11 @@ export function OutputPanel(): React.JSX.Element {
     return DEFAULT_FILTER;
   });
 
-  // `lines` is the working in-memory view. Clear empties it; remount
-  // re-seeds from the fixture. Wave 2 swaps the seed for a live
-  // subscription to the diagnostic bus.
-  const [lines, setLines] = React.useState<readonly LogLineRow[]>(
-    () => MOCK_LOG_LINES as readonly LogLineRow[],
-  );
+  // Live in-memory log buffer from the diagnostics store. Selector
+  // returns the array ref — Zustand re-renders only when the slice's
+  // identity changes (i.e. on `log()` / `clear()` / capacity trim).
+  // BroadcastChannel keeps popped-out windows in sync.
+  const lines = useDiagnosticsStore((s) => s.lines);
 
   // Persist filter on change.
   React.useEffect(() => {
@@ -219,11 +222,13 @@ export function OutputPanel(): React.JSX.Element {
     setFilter(next);
   }, []);
 
+  // Clear goes through the store so all subscribers (Problems panel,
+  // popout windows) observe the empty buffer.
   const handleClear = React.useCallback(() => {
-    setLines([]);
+    useDiagnosticsStore.getState().clear();
   }, []);
 
-  const visibleLines = React.useMemo(() => {
+  const visibleLines = React.useMemo<readonly DiagnosticLine[]>(() => {
     if (filter === "all") return lines;
     return lines.filter((l) => l.severity === filter);
   }, [lines, filter]);
@@ -603,7 +608,7 @@ function OutputKebab({ onClear, onCopy }: OutputKebabProps): React.JSX.Element {
 // Log list
 
 interface OutputListProps {
-  lines: readonly LogLineRow[];
+  lines: readonly DiagnosticLine[];
 }
 
 const OutputList = React.forwardRef<HTMLDivElement, OutputListProps>(
@@ -627,8 +632,8 @@ const OutputList = React.forwardRef<HTMLDivElement, OutputListProps>(
         ref={ref}
         className="flex-1 min-h-0 overflow-y-auto font-mono text-[11px] leading-snug"
       >
-        {lines.map((line, idx) => (
-          <LogRow key={`${line.ts}-${idx}`} line={line} />
+        {lines.map((line) => (
+          <LogRow key={line.id} line={line} />
         ))}
       </div>
     );
@@ -639,7 +644,7 @@ const OutputList = React.forwardRef<HTMLDivElement, OutputListProps>(
 // Log row
 
 interface LogRowProps {
-  line: LogLineRow;
+  line: DiagnosticLine;
 }
 
 function LogRow({ line }: LogRowProps): React.JSX.Element {

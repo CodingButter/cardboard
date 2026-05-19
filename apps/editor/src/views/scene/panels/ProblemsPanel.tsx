@@ -12,18 +12,25 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { EmptyState } from "../../../components/ui";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
-  MOCK_LOG_LINES,
-  type LogLineRow,
-  type LogSeverity,
-} from "../scene-fixtures";
+  useDiagnosticsStore,
+  type DiagnosticLine,
+  type DiagnosticSeverity,
+} from "../../../state/useDiagnosticsStore";
 
 /**
  * ProblemsPanel — diagnostics surface for the active scene.
  *
  * Visual target: the bottom-strip Problems tab from `Editor Design/Map.png`.
  * Lists current scene warnings and errors (a subset of the Output log)
- * with a severity icon, the message, and — when the message references a
- * cell — a "Go to cell" affordance that calls a stub jump helper.
+ * with a severity icon, the message, and — when the diagnostic carries
+ * a cell ref — a "Go to cell" affordance that calls a stub jump helper.
+ *
+ * Wave 3.3 data wiring: reads the live `lines` slice from
+ * `useDiagnosticsStore` and filters to severity >= warn. Clear hits
+ * `useDiagnosticsStore.clear()` so the Output panel + popout windows
+ * observe the same empty buffer. Cell coords come from the structured
+ * `DiagnosticLine.cell` field when present, with a `(x, y)` regex
+ * fallback for older messages that embedded the coord in plain text.
  *
  * Surface contract:
  *   This panel is registered with `surface: false` in MapView, so
@@ -75,11 +82,11 @@ function isProblemFilter(value: string | null): value is ProblemFilter {
 // so we can render a jump affordance on rows that mention coordinates.
 
 interface ParsedProblem {
-  /** Stable id for this row — `${severity}-${index}` from the source list. */
+  /** Stable id for this row — propagated from the diagnostic line. */
   id: string;
-  severity: Exclude<LogSeverity, "info">;
+  severity: Exclude<DiagnosticSeverity, "info">;
   message: string;
-  /** Cell coords, when the message contains a parseable `(x, y)`. */
+  /** Structured cell ref from the diagnostic, or a parsed `(x, y)` fallback. */
   cell: { x: number; y: number } | null;
 }
 
@@ -96,17 +103,19 @@ function parseCellFromMessage(
   return { x, y };
 }
 
-function buildProblemList(lines: readonly LogLineRow[]): ParsedProblem[] {
+function buildProblemList(lines: readonly DiagnosticLine[]): ParsedProblem[] {
   const out: ParsedProblem[] = [];
-  lines.forEach((line, idx) => {
-    if (line.severity === "info") return;
+  for (const line of lines) {
+    if (line.severity === "info") continue;
     out.push({
-      id: `${line.severity}-${idx}`,
+      id: line.id,
       severity: line.severity,
       message: line.message,
-      cell: parseCellFromMessage(line.message),
+      // Prefer the structured field; fall back to message-text parsing
+      // for legacy log lines that pre-date `DiagnosticLine.cell`.
+      cell: line.cell ?? parseCellFromMessage(line.message),
     });
-  });
+  }
   return out;
 }
 
@@ -189,11 +198,11 @@ function truncate(s: string, n: number): string {
 // Panel
 
 export function ProblemsPanel(): React.JSX.Element {
-  // Resolved problem list — derived from the mock source, modulo the
-  // user clearing it via the registered `clear` command. The "cleared"
-  // state is local-only; Wave 2 swaps this for the real diagnostic
-  // store and the clear action becomes a real mutation.
-  const [cleared, setCleared] = React.useState(false);
+  // Live diagnostics subscription — capped + broadcast across popout
+  // windows by the store. We materialise the warn/error subset locally
+  // (the store doesn't expose a pre-filtered slice) so the panel
+  // re-renders only when the underlying `lines` ref changes.
+  const lines = useDiagnosticsStore((s) => s.lines);
 
   const [filter, setFilter] = React.useState<ProblemFilter>(() => {
     const stored = readLS(LS_FILTER);
@@ -206,8 +215,8 @@ export function ProblemsPanel(): React.JSX.Element {
   }, [filter]);
 
   const allProblems = React.useMemo<ParsedProblem[]>(
-    () => (cleared ? [] : buildProblemList(MOCK_LOG_LINES)),
-    [cleared],
+    () => buildProblemList(lines),
+    [lines],
   );
 
   const visibleProblems = React.useMemo<ParsedProblem[]>(() => {
@@ -239,8 +248,12 @@ export function ProblemsPanel(): React.JSX.Element {
     filterHandlerRef.current = handleFilterClick;
   }, [handleFilterClick]);
 
+  // Clear routes through the store so Output + popout windows observe
+  // the same empty buffer. Going via `getState()` keeps the callback
+  // stable across renders — no selector subscription needed for a
+  // fire-and-forget mutation.
   const handleClear = React.useCallback(() => {
-    setCleared(true);
+    useDiagnosticsStore.getState().clear();
   }, []);
   const clearHandlerRef = React.useRef(handleClear);
   React.useEffect(() => {
@@ -376,7 +389,7 @@ export function ProblemsPanel(): React.JSX.Element {
 
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         {visibleProblems.length === 0 ? (
-          <ProblemsEmptyState filter={filter} cleared={cleared} />
+          <ProblemsEmptyState filter={filter} />
         ) : (
           <ul className="flex flex-col">
             {visibleProblems.map((problem, idx) => (
@@ -591,22 +604,9 @@ function FilterChipRow({
 
 function ProblemsEmptyState({
   filter,
-  cleared,
 }: {
   filter: ProblemFilter;
-  cleared: boolean;
 }): React.JSX.Element {
-  if (cleared) {
-    return (
-      <div className="h-full w-full flex items-center justify-center">
-        <EmptyState
-          icon={<CheckCircle2 size={28} />}
-          title="Problems cleared"
-          description="No diagnostics in the current session."
-        />
-      </div>
-    );
-  }
   if (filter === "warn") {
     return (
       <div className="h-full w-full flex items-center justify-center">
