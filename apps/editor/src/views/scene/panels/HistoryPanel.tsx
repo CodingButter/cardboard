@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Brush,
+  CheckCheck,
   Edit3,
   Eraser,
   History,
@@ -40,10 +41,17 @@ import {
  *   - `cardboard.scene.history.cursorPos`  number, default
  *     MOCK_HISTORY.length (i.e. all-applied / cursor at end).
  *
- * Command-registry contract: undo/redo/clear AND a dynamic per-entry
- * `scene.history.jump.<entryId>` command for every history row. The
- * jump-command titles include the row label so the palette presents
- * "Jump to: Paint Brick (14 cells)".
+ * Command-registry contract: undo / redo / markAllApplied / clear
+ * AND a dynamic per-entry `scene.history.jump.<entryId>` command for
+ * every history row. The jump-command titles include the row label
+ * so the palette presents "Jump to: Paint Brick (14 cells)".
+ *
+ *   - `scene.history.markAllApplied` — moves the cursor to MAX so
+ *     every entry reads as applied. Confirms before running. This is
+ *     the action exposed by the toolbar's "Mark All Applied" button.
+ *   - `scene.history.clear` — true history-clear stub. Registered but
+ *     not yet wired up to a real flow; logs a placeholder until the
+ *     real EditorProjectStore lands in a later wave.
  */
 
 // ---------------------------------------------------------------------------
@@ -161,16 +169,25 @@ export function HistoryPanel(): React.JSX.Element {
     setCursor((prev) => clampCursor(prev + 1));
   }, []);
 
-  const handleClear = React.useCallback(() => {
+  const handleMarkAllApplied = React.useCallback(() => {
     if (typeof window === "undefined") {
       setCursor(MAX_CURSOR);
       return;
     }
     const ok = window.confirm(
-      "Clear scene history? Undo/redo state will be reset.",
+      "Mark every history entry as applied? The cursor will move to the end of history.",
     );
     if (!ok) return;
     setCursor(MAX_CURSOR);
+  }, []);
+
+  // Stub for a true "clear history" flow. Registered as
+  // `scene.history.clear` so the destructive ID is reserved for the
+  // eventual real-clear behavior (drops entries entirely). Today this
+  // just logs — wiring lands with EditorProjectStore.
+  const handleClear = React.useCallback(() => {
+    // eslint-disable-next-line no-console
+    console.log("[history] clear (stub)");
   }, []);
 
   // Jump sets the cursor to the position just AFTER the entry at
@@ -187,17 +204,21 @@ export function HistoryPanel(): React.JSX.Element {
 
   const undoRef = React.useRef(handleUndo);
   const redoRef = React.useRef(handleRedo);
+  const markAllAppliedRef = React.useRef(handleMarkAllApplied);
   const clearRef = React.useRef(handleClear);
   const jumpRef = React.useRef(handleJump);
 
   React.useEffect(() => {
     undoRef.current = handleUndo;
     redoRef.current = handleRedo;
+    markAllAppliedRef.current = handleMarkAllApplied;
     clearRef.current = handleClear;
     jumpRef.current = handleJump;
-  }, [handleUndo, handleRedo, handleClear, handleJump]);
+  }, [handleUndo, handleRedo, handleMarkAllApplied, handleClear, handleJump]);
 
-  // Static commands: undo / redo / clear. Empty-deps register-once.
+  // Static commands: undo / redo / markAllApplied / clear. Empty-deps
+  // register-once. `scene.history.clear` is reserved for the eventual
+  // true history-clear flow and is wired to a logging stub today.
   React.useEffect(() => {
     const unregs: Array<() => void> = [
       registerCommand({
@@ -219,10 +240,22 @@ export function HistoryPanel(): React.JSX.Element {
         run: () => redoRef.current(),
       }),
       registerCommand({
+        id: "scene.history.markAllApplied",
+        title: "Mark All Applied",
+        category: "History",
+        keywords: ["mark", "applied", "all", "history", "cursor", "end"],
+        description:
+          "Move the cursor to the end of history — every entry will read as applied. Confirms before running.",
+        icon: <CheckCheck size={14} />,
+        run: () => markAllAppliedRef.current(),
+      }),
+      registerCommand({
         id: "scene.history.clear",
         title: "Clear History",
         category: "History",
-        keywords: ["clear", "reset", "history"],
+        keywords: ["clear", "delete", "history", "reset", "purge"],
+        description:
+          "Drop every history entry. Destructive and irreversible — not yet wired up.",
         icon: <X size={14} />,
         run: () => clearRef.current(),
       }),
@@ -279,30 +312,54 @@ export function HistoryPanel(): React.JSX.Element {
       data-panel="history"
       className="h-full w-full flex flex-col gap-1.5 min-w-0"
     >
-      {/* Toolbar — Undo / Redo / Clear. Three buttons fit inline even
-          at the narrowest sensible width, so no wrap logic needed. */}
+      {/* Toolbar — Undo / Redo / cursor pip / Mark All Applied. The
+          cursor pip fills the otherwise-empty middle space with a
+          tabular position readout. */}
       <div className="flex items-center gap-1 shrink-0">
         <ToolbarButton
           label="Undo"
-          description="Step the cursor one entry backward — undoes the most recently applied action."
+          description="Step cursor back one entry."
           disabled={cursor <= 0}
           onClick={handleUndo}
           icon={Undo2}
         />
         <ToolbarButton
           label="Redo"
-          description="Step the cursor one entry forward — reapplies the next undone action."
+          description="Step cursor forward one entry."
           disabled={cursor >= MAX_CURSOR}
           onClick={handleRedo}
           icon={Redo2}
         />
         <div className="flex-1" />
+        <Tooltip
+          side="bottom"
+          stages={[
+            { delay: 1000, content: <span>Cursor position</span> },
+            {
+              delay: 3000,
+              content: (
+                <div>
+                  <div className="font-semibold">Cursor position</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px] whitespace-normal">
+                    Applied entries / total entries.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <span
+            className="text-[10px] tabular-nums text-(--color-fg-muted) px-1 select-none"
+            aria-label={`Cursor at ${cursor} of ${MAX_CURSOR}`}
+          >
+            {cursor} / {MAX_CURSOR}
+          </span>
+        </Tooltip>
         <ToolbarButton
-          label="Clear"
-          description="Reset the history cursor. Confirms before running."
-          onClick={handleClear}
-          icon={X}
-          variant="danger"
+          label="Mark All Applied"
+          description="Move cursor to the end — every entry reads as applied."
+          onClick={handleMarkAllApplied}
+          icon={CheckCheck}
         />
       </div>
 
@@ -317,10 +374,13 @@ export function HistoryPanel(): React.JSX.Element {
 
         {reversed.map(({ entry, originalIdx }, _reversedIdx) => {
           const isApplied = originalIdx < cursor;
+          // The most-recently-applied entry — the cursor's anchor —
+          // gets an active indicator (amber accent + font weight bump).
+          const isActive = originalIdx === cursor - 1;
           // The cursor line goes immediately AFTER a reversed entry
           // when that entry is the last APPLIED one — i.e. when
           // originalIdx === cursor - 1.
-          const lineAfterThis = originalIdx === cursor - 1;
+          const lineAfterThis = isActive;
           // Special case: cursor === 0 — line above EVERYTHING.
           // Handled below the map.
           return (
@@ -328,6 +388,7 @@ export function HistoryPanel(): React.JSX.Element {
               <HistoryEntryView
                 entry={entry}
                 isApplied={isApplied}
+                isActive={isActive}
                 compact={compact}
                 onJump={() => handleJump(originalIdx)}
               />
@@ -353,7 +414,6 @@ interface ToolbarButtonProps {
   icon: LucideIcon;
   onClick: () => void;
   disabled?: boolean;
-  variant?: "default" | "danger";
 }
 
 function ToolbarButton({
@@ -362,7 +422,6 @@ function ToolbarButton({
   icon: Icon,
   onClick,
   disabled = false,
-  variant = "default",
 }: ToolbarButtonProps): React.JSX.Element {
   return (
     <Tooltip
@@ -374,7 +433,7 @@ function ToolbarButton({
           content: (
             <div>
               <div className="font-semibold">{label}</div>
-              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+              <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px] whitespace-normal">
                 {description}
               </div>
             </div>
@@ -392,9 +451,7 @@ function ToolbarButton({
           "border transition-colors",
           disabled
             ? "text-(--color-fg-muted) opacity-40 cursor-not-allowed border-(--color-border-strong)"
-            : variant === "danger"
-              ? "text-(--color-fg-secondary) border-(--color-border-strong) hover:text-red-400 hover:border-red-500/60"
-              : "text-(--color-fg-secondary) border-(--color-border-strong) hover:text-(--color-fg-primary) hover:border-amber-500/60",
+            : "text-(--color-fg-secondary) border-(--color-border-strong) hover:text-(--color-fg-primary) hover:border-amber-500/60",
         ].join(" ")}
       >
         <Icon size={12} aria-hidden="true" />
@@ -408,11 +465,15 @@ function ToolbarButton({
 // undone entries. Wraps an accent dot for visual anchor.
 
 function CursorLine(): React.JSX.Element {
+  // Indent the leading dot so it aligns with the row icons' centers.
+  // Row layout: button `px-1.5` (6px) + icon container `w-4` (16px) →
+  // icon center sits at 6 + 8 = 14px. Dot is `w-1.5` (6px), so its
+  // left edge should be at 14 - 3 = 11px → `pl-[11px]`.
   return (
     <div
       role="separator"
       aria-label="History cursor"
-      className="flex items-center gap-1.5 py-0.5 shrink-0"
+      className="flex items-center gap-1.5 py-0.5 pl-[11px] shrink-0"
     >
       <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
       <div className="flex-1 h-px bg-amber-500/70" />
@@ -429,6 +490,7 @@ function CursorLine(): React.JSX.Element {
 interface HistoryEntryViewProps {
   entry: HistoryEntryRow;
   isApplied: boolean;
+  isActive: boolean;
   compact: boolean;
   onJump: () => void;
 }
@@ -436,6 +498,7 @@ interface HistoryEntryViewProps {
 function HistoryEntryView({
   entry,
   isApplied,
+  isActive,
   compact,
   onJump,
 }: HistoryEntryViewProps): React.JSX.Element {
@@ -453,7 +516,7 @@ function HistoryEntryView({
             <div>
               <div className="font-semibold">{entry.label}</div>
               {entry.description ? (
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px] whitespace-normal">
                   {entry.description}
                 </div>
               ) : null}
@@ -469,12 +532,17 @@ function HistoryEntryView({
         type="button"
         onClick={onJump}
         aria-label={`Jump to: ${entry.label}`}
+        aria-current={isActive ? "true" : undefined}
         className={[
           "flex items-center gap-1.5 min-h-[24px] px-1.5 rounded",
           "border border-transparent text-left w-full min-w-0",
           "transition-colors",
           "hover:border-amber-500/40 hover:bg-amber-500/5",
           isApplied ? "" : "opacity-50",
+          // Active-entry indicator: left border accent + slight bg
+          // tint + font weight bump on the label below. Only the most
+          // recently APPLIED entry gets this treatment.
+          isActive ? "border-l-2 border-l-amber-500 bg-amber-500/[0.04]" : "",
         ].join(" ")}
       >
         {/* Type icon — small leading glyph; aria-hidden because the
@@ -495,9 +563,11 @@ function HistoryEntryView({
         <span
           className={[
             "flex-1 min-w-0 truncate text-[11px]",
-            isApplied
-              ? "text-(--color-fg-primary)"
-              : "text-(--color-fg-secondary)",
+            isActive
+              ? "font-medium text-(--color-fg-primary)"
+              : isApplied
+                ? "text-(--color-fg-primary)"
+                : "text-(--color-fg-secondary)",
           ].join(" ")}
         >
           {entry.label}
