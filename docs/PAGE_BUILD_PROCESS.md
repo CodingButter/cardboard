@@ -211,7 +211,13 @@ Orchestrator writes a detailed audit brief with:
 The audit agent:
 - Reads the file + design ref.
 - Uses Playwright (own tab) to capture the current state.
-- Compares against the checklist.
+- **Actively resizes the panel** to verify it works at multiple
+  reasonable sizes — narrow (~150px), medium (~280px), wide (~500px+),
+  tall, short. Either by dragging the dockview splitters in the
+  Playwright session or by programmatically setting the panel
+  `getBoundingClientRect`-derived width via dockview's api. Screenshots
+  at each size to confirm the responsive logic holds.
+- Compares against the checklist at each size.
 - Returns a findings report. Does NOT modify code.
 
 ### 5b. Orchestrator review
