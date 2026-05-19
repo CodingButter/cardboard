@@ -191,7 +191,7 @@ function buildDefaultLayout(): SerializedDockview {
                       activeView: "tool-palette",
                       id: "tool-palette-group",
                     },
-                    size: 110,
+                    size: 220,
                   },
                   {
                     type: "leaf",
@@ -209,7 +209,7 @@ function buildDefaultLayout(): SerializedDockview {
                       activeView: "tile-preset",
                       id: "tile-preset-group",
                     },
-                    size: 403,
+                    size: 293,
                   },
                 ],
                 size: 279,

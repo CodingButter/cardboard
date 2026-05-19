@@ -11,6 +11,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
+import { ScrollRow } from "../../../components/ui/ScrollRow";
 import { registerCommand } from "../../../state/useCommandStore";
 import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
 
@@ -20,13 +21,10 @@ import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
  *
  * Visual target: the TOOLS eyebrow + edit-mode icon row that
  * dominated the top of the leftmost column in `Editor Design/Map.png`.
- * Split off from the legacy `ToolsPanel`; sub-categories Brush, Tile
- * Presets, and Layers each live in their own dock panel now. Wave 2
- * wires the active tool + per-tool sub-tool persistence into the
- * editor's tool store.
+ * Tiles render an icon stacked over a small uppercase name label so
+ * the affordance is self-describing without needing hover.
  *
  * Persistence contract (shared with sibling Scene panels):
- *   - `cardboard.scene.activeMode`             string, default "map"
  *   - `cardboard.scene.activeTool`             string, default "select"
  *   - `cardboard.scene.activeSubTool.<toolId>` string per tool
  */
@@ -43,12 +41,10 @@ const TOOL_ICON_BY_NAME: Record<string, LucideIcon> = {
   PlusSquare,
 };
 
-const LS_ACTIVE_MODE = "cardboard.scene.activeMode";
 const LS_ACTIVE_TOOL = "cardboard.scene.activeTool";
 const LS_ACTIVE_SUBTOOL_PREFIX = "cardboard.scene.activeSubTool.";
 
 const DEFAULT_TOOL_ID = "select";
-const DEFAULT_MODE = "map";
 
 function readLS(key: string): string | null {
   try {
@@ -83,9 +79,6 @@ function resolveSubTool(toolId: string): string | undefined {
 }
 
 export function ToolPalettePanel(): React.JSX.Element {
-  // Mode is read-only here; another panel owns the writer.
-  const [, setMode] = React.useState<string>(DEFAULT_MODE);
-
   const [activeTool, setActiveTool] = React.useState<string>(() => {
     const stored = readLS(LS_ACTIVE_TOOL);
     if (stored && findTool(stored)) return stored;
@@ -93,19 +86,8 @@ export function ToolPalettePanel(): React.JSX.Element {
   });
 
   const [activeSubTool, setActiveSubTool] = React.useState<string | undefined>(
-    () => resolveSubTool(
-      readLS(LS_ACTIVE_TOOL) && findTool(readLS(LS_ACTIVE_TOOL) as string)
-        ? (readLS(LS_ACTIVE_TOOL) as string)
-        : DEFAULT_TOOL_ID,
-    ),
+    () => resolveSubTool(activeTool),
   );
-
-  // One-shot: hydrate mode from localStorage so future agents that
-  // write to LS_ACTIVE_MODE will reflect into this panel on reload.
-  React.useEffect(() => {
-    const storedMode = readLS(LS_ACTIVE_MODE);
-    if (storedMode) setMode(storedMode);
-  }, []);
 
   // Persist active tool whenever it changes.
   React.useEffect(() => {
@@ -194,22 +176,27 @@ export function ToolPalettePanel(): React.JSX.Element {
   // because the MapView registry has `surface: true` by default. So
   // this wrapper only owns layout (flex column + gap between the
   // tool grid and the sub-tool strip), NOT padding.
+  //
+  // `overflow-y-auto` + `min-h-0` keeps the panel scrollable when the
+  // dock leaf is squeezed to a height shorter than the natural tile
+  // grid + sub-tool strip stack — Dockview gives panels arbitrary
+  // heights and we'd rather scroll than clip.
   return (
     <div
       data-panel="tool-palette"
-      className="h-full w-full flex flex-col gap-2"
+      className="h-full w-full min-h-0 flex flex-col gap-2 overflow-y-auto"
     >
       {/*
-        Fluid tile grid: icon-only tiles, ~32–40px square. `auto-fit`
-        + `minmax(32px, 40px)` lets the browser compute column count
-        from available width while clamping tile size to the compact
-        target. Hover-reveal tooltip (multi-stage) carries the name +
-        description so the tile body itself can be purely iconic.
+        Fluid tile grid: icon + uppercase name label stacked vertically.
+        `auto-fill` + `minmax(54px, 64px)` lets the browser pack the
+        widest columns it can fit without leaving phantom empty
+        columns. Tiles are taller than wide (~60px) so the label has a
+        full line beneath the icon without truncation.
       */}
       <div
         className="grid gap-1"
         style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(32px, 40px))",
+          gridTemplateColumns: "repeat(auto-fill, minmax(54px, 64px))",
         }}
       >
         {MOCK_TOOLS.map((t) => {
@@ -242,15 +229,18 @@ export function ToolPalettePanel(): React.JSX.Element {
                 aria-pressed={active}
                 onClick={() => handleToolClick(t.id)}
                 className={[
-                  "aspect-square w-full rounded",
-                  "flex items-center justify-center",
+                  "w-full h-[60px] rounded",
+                  "flex flex-col items-center justify-center gap-1",
                   "border transition-colors",
                   active
                     ? "bg-amber-500 border-amber-500 text-zinc-950"
                     : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 ].join(" ")}
               >
-                {Icon ? <Icon size={16} aria-hidden="true" /> : null}
+                {Icon ? <Icon size={18} aria-hidden="true" /> : null}
+                <span className="text-[9px] uppercase tracking-wide leading-none">
+                  {t.name}
+                </span>
               </button>
             </Tooltip>
           );
@@ -258,33 +248,61 @@ export function ToolPalettePanel(): React.JSX.Element {
       </div>
 
       {subTools && subTools.length > 0 ? (
-        // Sub-tool strip uses flex-wrap to flow chips to a second row
-        // naturally when the panel is narrow. ScrollRow was considered
-        // but skipped for the same reason as the tile grid: its
-        // `overflow-y: hidden` would clip a wrapped second row of chips,
-        // which is the more common narrow-width scenario than a single
-        // chip wider than the panel.
-        <div className="flex flex-wrap gap-1 pt-1">
-          {subTools.map((s) => {
-            const active = s.id === activeSubTool;
-            return (
-              <button
-                key={s.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => handleSubToolClick(s.id)}
-                className={[
-                  "rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
-                  "border transition-colors",
-                  active
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
-                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                ].join(" ")}
-              >
-                {s.name}
-              </button>
-            );
-          })}
+        // Sub-tool strip — single-row horizontal scroller via ScrollRow.
+        // Per the project's no-horizontal-scroll-for-categories rule,
+        // ScrollRow's hover-area affordance handles overflow at narrow
+        // widths so we never render a native horizontal scrollbar and
+        // never wrap chips to a second line (which would steal
+        // vertical space from the tile grid).
+        //
+        // Outer wrapper has a fixed height so ScrollRow's
+        // `h-full w-full` viewport has a definite size to scroll
+        // within (it's positioned `relative` inside a flex column).
+        <div className="h-7 shrink-0 pt-1">
+          <ScrollRow contentClassName="flex items-center gap-1">
+            {subTools.map((s) => {
+              const active = s.id === activeSubTool;
+              const subDescription = tool?.description
+                ? `${s.name} sub-mode of ${tool.name}: ${tool.description}`
+                : `${s.name} sub-mode of ${tool?.name ?? "tool"}.`;
+              return (
+                <Tooltip
+                  key={s.id}
+                  side="bottom"
+                  stages={[
+                    { delay: 1000, content: <span>{s.name}</span> },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div>
+                          <div className="font-semibold">{s.name}</div>
+                          <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                            {subDescription}
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <button
+                    type="button"
+                    aria-label={s.name}
+                    aria-pressed={active}
+                    onClick={() => handleSubToolClick(s.id)}
+                    className={[
+                      "shrink-0 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
+                      "border transition-colors",
+                      active
+                        ? "bg-amber-500 border-amber-500 text-zinc-950"
+                        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                    ].join(" ")}
+                  >
+                    {s.name}
+                  </button>
+                </Tooltip>
+              );
+            })}
+          </ScrollRow>
         </div>
       ) : null}
     </div>
