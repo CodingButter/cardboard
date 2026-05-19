@@ -5,7 +5,6 @@ import React from "react";
 import { Settings, Minus, Plus, RotateCcw } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
-import { TextInput } from "../../../components/ui/TextInput";
 import { NumberInput } from "../../../components/ui/NumberInput";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
@@ -14,22 +13,25 @@ import {
 } from "../scene-fixtures";
 
 /**
- * SceneSettingsPanel — per-scene metadata + global render knobs.
+ * SceneSettingsPanel — per-scene render knobs.
  *
  * Visual target: the bottom card of the right column in
- * `Editor Design/Map.png` — scene name, grid dimensions, fog density,
- * and ambient light. Rendered inside a `PanelSurface` card (DockShell
- * wraps it), so the root is layout-only — no extra card chrome.
+ * `Editor Design/Map.png`. Fog density and ambient light are the two
+ * most-tuned scene-level parameters in a Wolfenstein-style raycaster
+ * and MUST be visible without scrolling at the panel's default size
+ * (~180×160). Dimensions + a discreet reset round out the panel.
  *
- * Responsive behaviour: a `ResizeObserver` on the panel root flips
- * each property row from `[label] [control]` to a stacked
- * `[label]\n[control]` layout below `NARROW_WIDTH_PX`. The dimensions
- * row likewise stacks its `w × h` pair vertically at narrow widths.
- * Vertical overflow uses the themed scrollbar; native horizontal
- * scroll is never introduced.
+ * Layout principle: every row is a single ~22px line of
+ * `[small label] [control] [value]`. No oversized header, no
+ * `NAME` field (name is editable in the project tree elsewhere),
+ * no stacked label-above-control variants — at narrow widths the
+ * sliders themselves are flex-1 so they shrink before anything else.
  *
  * Commands registered (`Scene` category):
- *   - `scene.settings.editName`           — focus the name input.
+ *   - `scene.settings.editName`           — focus the dimensions input
+ *                                            (name field removed; this
+ *                                            now falls through to the
+ *                                            first focusable control).
  *   - `scene.settings.editDimensions`     — focus the width input.
  *   - `scene.settings.fog.increase`       — step fog by +0.05 (clamped 0..1).
  *   - `scene.settings.fog.decrease`       — step fog by -0.05 (clamped 0..1).
@@ -37,11 +39,6 @@ import {
  *   - `scene.settings.ambient.decrease`   — step ambient by -0.05 (clamped 0..1).
  *   - `scene.settings.reset`              — reset all fields to MOCK_SCENE_SETTINGS.
  */
-
-/** Width below which property rows collapse to a single-column stacked
- *  layout. Picked to match `CellInspectorPanel`'s narrow threshold for
- *  consistency across the right column. */
-const NARROW_WIDTH_PX = 220;
 
 /** Step + bounds for the 0..1 sliders. Matches the brief's spec. */
 const SLIDER_STEP = 0.05;
@@ -88,30 +85,15 @@ export function SceneSettingsPanel(): React.JSX.Element {
     seedSettings,
   );
 
-  // Refs for the inputs the command palette can focus.
-  const nameInputRef = React.useRef<HTMLInputElement>(null);
+  // Ref for the dimensions width input — the focus target for both
+  // `scene.settings.editDimensions` and (since the name field is gone)
+  // `scene.settings.editName`. The latter command is preserved for
+  // backwards-compatible registration but no longer has a dedicated
+  // input to focus inside this panel.
   const widthWrapRef = React.useRef<HTMLDivElement>(null);
-
-  // Container width tracking for responsive layout.
-  const rootRef = React.useRef<HTMLDivElement>(null);
-  const [width, setWidth] = React.useState<number>(NARROW_WIDTH_PX + 1);
-  React.useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const narrow = width > 0 && width < NARROW_WIDTH_PX;
 
   // ────────────────────────────────────────────────────────────────
   // Mutators (used by both the UI and the registered commands).
-
-  const setName = React.useCallback((next: string) => {
-    setSettings((prev) => ({ ...prev, name: next }));
-  }, []);
 
   const setWidthValue = React.useCallback((next: number) => {
     setSettings((prev) => ({
@@ -156,15 +138,11 @@ export function SceneSettingsPanel(): React.JSX.Element {
   // ────────────────────────────────────────────────────────────────
   // Handler refs so the command registrations don't have to re-run
   // on every state change.
-  const focusNameRef = React.useRef<() => void>(() => {});
   const focusDimsRef = React.useRef<() => void>(() => {});
   const bumpFogRef = React.useRef(bumpFog);
   const bumpAmbientRef = React.useRef(bumpAmbient);
   const resetRef = React.useRef(reset);
 
-  React.useEffect(() => {
-    focusNameRef.current = () => nameInputRef.current?.focus();
-  }, []);
   React.useEffect(() => {
     focusDimsRef.current = () => {
       // Width input lives inside the wrapper div; reach the first
@@ -193,7 +171,9 @@ export function SceneSettingsPanel(): React.JSX.Element {
         title: "Edit Scene Name",
         category: "Scene",
         keywords: ["scene", "name", "rename", "edit"],
-        run: () => focusNameRef.current(),
+        // Name field lives outside this panel; the closest in-panel
+        // focus target is the dimensions input.
+        run: () => focusDimsRef.current(),
       }),
       registerCommand({
         id: "scene.settings.editDimensions",
@@ -251,27 +231,102 @@ export function SceneSettingsPanel(): React.JSX.Element {
 
   return (
     <div
-      ref={rootRef}
       data-panel="scene-settings"
-      className="h-full w-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
+      className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
     >
-      {/* Header — title + reset. Reset is the only action that needs a
-          chrome affordance; everything else is field-scoped. */}
-      <header
-        className={[
-          "flex gap-2",
-          narrow ? "flex-col" : "items-start justify-between",
-        ].join(" ")}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-            Scene
-          </div>
-          <div className="font-mono text-sm text-(--color-fg-primary) truncate">
-            {settings.name || "(unnamed)"}
-          </div>
-        </div>
+      {/* Fog density — top of the panel so it's never below the fold. */}
+      <SliderRow
+        label="Fog"
+        tooltipShort="Fog Density"
+        tooltipLong="Overall scene fog intensity. Higher values reduce visibility at distance."
+        value={settings.fog}
+        onChange={setFog}
+        onIncrease={() => bumpFog(1)}
+        onDecrease={() => bumpFog(-1)}
+      />
 
+      {/* Ambient light. */}
+      <SliderRow
+        label="Ambient"
+        tooltipShort="Ambient Light"
+        tooltipLong="Base scene lighting applied to every cell. Higher values brighten shadowed areas."
+        value={settings.ambient}
+        onChange={setAmbient}
+        onIncrease={() => bumpAmbient(1)}
+        onDecrease={() => bumpAmbient(-1)}
+      />
+
+      {/* Dimensions — inline `[w] × [h]` pair on a single row. */}
+      <div className="flex items-center gap-1.5 h-[22px]">
+        <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[52px] shrink-0 select-none">
+          Size
+        </span>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <Tooltip
+            stages={[
+              { delay: 2000, content: <span>Width (tiles)</span> },
+              {
+                delay: 5000,
+                content: (
+                  <div className="max-w-[220px]">
+                    <div className="font-semibold">Scene Width</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                      Width of the scene grid in tiles. Clamped to
+                      {` ${DIM_MIN}..${DIM_MAX}`}.
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <div ref={widthWrapRef} className="min-w-0 flex-1">
+              <NumberInput
+                value={settings.dimensions.w}
+                onChange={(next) => setWidthValue(next)}
+                min={DIM_MIN}
+                max={DIM_MAX}
+                step={1}
+                precision={0}
+                aria-label="Scene width"
+              />
+            </div>
+          </Tooltip>
+          <span
+            aria-hidden="true"
+            className="text-[10px] text-(--color-fg-muted) tabular-nums select-none"
+          >
+            ×
+          </span>
+          <Tooltip
+            stages={[
+              { delay: 2000, content: <span>Height (tiles)</span> },
+              {
+                delay: 5000,
+                content: (
+                  <div className="max-w-[220px]">
+                    <div className="font-semibold">Scene Height</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                      Height of the scene grid in tiles. Clamped to
+                      {` ${DIM_MIN}..${DIM_MAX}`}.
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <div className="min-w-0 flex-1">
+              <NumberInput
+                value={settings.dimensions.h}
+                onChange={(next) => setHeightValue(next)}
+                min={DIM_MIN}
+                max={DIM_MAX}
+                step={1}
+                precision={0}
+                aria-label="Scene height"
+              />
+            </div>
+          </Tooltip>
+        </div>
         <Tooltip
           stages={[
             { delay: 2000, content: <span>Reset scene settings</span> },
@@ -281,8 +336,8 @@ export function SceneSettingsPanel(): React.JSX.Element {
                 <div className="max-w-[220px]">
                   <div className="font-semibold">Reset Scene Settings</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Restore name, dimensions, fog, and ambient back to
-                    their seeded defaults. In-memory only.
+                    Restore dimensions, fog, and ambient back to their
+                    seeded defaults. In-memory only.
                   </div>
                 </div>
               ),
@@ -295,150 +350,16 @@ export function SceneSettingsPanel(): React.JSX.Element {
             onClick={reset}
             className={[
               "shrink-0 inline-flex items-center justify-center",
-              "w-6 h-6 rounded border text-(--color-fg-secondary)",
+              "w-5 h-5 rounded border text-(--color-fg-secondary)",
               "border-(--color-border-strong) bg-transparent",
               "hover:text-(--color-fg-primary) hover:border-amber-500/60",
               "transition-colors",
             ].join(" ")}
           >
-            <RotateCcw size={12} aria-hidden="true" />
+            <RotateCcw size={11} aria-hidden="true" />
           </button>
         </Tooltip>
-      </header>
-
-      {/* Property rows. */}
-      <section className="flex flex-col gap-1.5">
-        {/* Name */}
-        <Row label="Name" stacked={narrow}>
-          <Tooltip
-            stages={[
-              { delay: 2000, content: <span>Scene Name</span> },
-              {
-                delay: 5000,
-                content: (
-                  <div className="max-w-[220px]">
-                    <div className="font-semibold">Scene Name</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                      Identifier shown in the scene picker and saved with
-                      the project file.
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
-            <TextInput
-              ref={nameInputRef}
-              value={settings.name}
-              onChange={(e) => setName(e.target.value)}
-              aria-label="Scene name"
-            />
-          </Tooltip>
-        </Row>
-
-        {/* Dimensions — `[w] × [h]` inline at wider widths; stacks at
-            narrow widths. The width wrapper is the focus target for
-            `scene.settings.editDimensions`. */}
-        <Row label="Dimensions" stacked={narrow}>
-          <div
-            className={[
-              "flex min-w-0 gap-1",
-              narrow ? "flex-col" : "items-center",
-            ].join(" ")}
-          >
-            <Tooltip
-              stages={[
-                { delay: 2000, content: <span>Width (tiles)</span> },
-                {
-                  delay: 5000,
-                  content: (
-                    <div className="max-w-[220px]">
-                      <div className="font-semibold">Scene Width</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                        Width of the scene grid in tiles. Clamped to
-                        {` ${DIM_MIN}..${DIM_MAX}`}.
-                      </div>
-                    </div>
-                  ),
-                },
-              ]}
-            >
-              <div ref={widthWrapRef} className="min-w-0 flex-1">
-                <NumberInput
-                  value={settings.dimensions.w}
-                  onChange={(next) => setWidthValue(next)}
-                  min={DIM_MIN}
-                  max={DIM_MAX}
-                  step={1}
-                  precision={0}
-                  aria-label="Scene width"
-                />
-              </div>
-            </Tooltip>
-            {!narrow && (
-              <span
-                aria-hidden="true"
-                className="text-[10px] text-(--color-fg-muted) tabular-nums select-none"
-              >
-                ×
-              </span>
-            )}
-            <Tooltip
-              stages={[
-                { delay: 2000, content: <span>Height (tiles)</span> },
-                {
-                  delay: 5000,
-                  content: (
-                    <div className="max-w-[220px]">
-                      <div className="font-semibold">Scene Height</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                        Height of the scene grid in tiles. Clamped to
-                        {` ${DIM_MIN}..${DIM_MAX}`}.
-                      </div>
-                    </div>
-                  ),
-                },
-              ]}
-            >
-              <div className="min-w-0 flex-1">
-                <NumberInput
-                  value={settings.dimensions.h}
-                  onChange={(next) => setHeightValue(next)}
-                  min={DIM_MIN}
-                  max={DIM_MAX}
-                  step={1}
-                  precision={0}
-                  aria-label="Scene height"
-                />
-              </div>
-            </Tooltip>
-          </div>
-        </Row>
-
-        {/* Fog density slider with +/- steppers. */}
-        <SliderRow
-          label="Fog"
-          tooltipShort="Fog Density"
-          tooltipLong="Overall scene fog intensity. Higher values reduce visibility at distance."
-          value={settings.fog}
-          onChange={setFog}
-          onIncrease={() => bumpFog(1)}
-          onDecrease={() => bumpFog(-1)}
-          narrow={narrow}
-        />
-
-        {/* Ambient light slider with +/- steppers. */}
-        <SliderRow
-          label="Ambient"
-          tooltipShort="Ambient Light"
-          tooltipLong="Base scene lighting applied to every cell. Higher values brighten shadowed areas."
-          value={settings.ambient}
-          onChange={setAmbient}
-          onIncrease={() => bumpAmbient(1)}
-          onDecrease={() => bumpAmbient(-1)}
-          narrow={narrow}
-        />
-      </section>
+      </div>
     </div>
   );
 }
@@ -446,38 +367,6 @@ export function SceneSettingsPanel(): React.JSX.Element {
 /* -------------------------------------------------------------------- */
 /* Helper components                                                     */
 /* -------------------------------------------------------------------- */
-
-/** Property row — `[label] [control]` at wider widths, stacked at
- *  narrow widths. Same shape as `CellInspectorPanel.Row` so the right
- *  column reads as a cohesive property sheet. */
-function Row({
-  label,
-  children,
-  stacked,
-}: {
-  label: React.ReactNode;
-  children: React.ReactNode;
-  stacked: boolean;
-}) {
-  if (stacked) {
-    return (
-      <div className="flex flex-col gap-1 py-0.5">
-        <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-          {label}
-        </div>
-        <div className="min-w-0">{children}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-0.5">
-      <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate">
-        {label}
-      </div>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
 
 interface SliderRowProps {
   label: string;
@@ -487,12 +376,11 @@ interface SliderRowProps {
   onChange: (next: number) => void;
   onIncrease: () => void;
   onDecrease: () => void;
-  narrow: boolean;
 }
 
-/** Slider row — label + `[-]` + slider + `[+]` + numeric readout.
- *  The slider absorbs slack so the row stays usable at wide widths,
- *  while the +/- steppers stay square. */
+/** Slider row — `[label] [-] [slider flex-1] [+] [value]` on a single
+ *  ~22px line. Label has a fixed-ish width so Fog/Ambient align; the
+ *  slider absorbs all slack so the row stays usable at every width. */
 function SliderRow({
   label,
   tooltipShort,
@@ -501,128 +389,123 @@ function SliderRow({
   onChange,
   onIncrease,
   onDecrease,
-  narrow,
 }: SliderRowProps) {
   const atMin = value <= SLIDER_MIN;
   const atMax = value >= SLIDER_MAX;
 
-  const readoutNode = (
-    <span className="text-[10px] font-mono tabular-nums text-(--color-fg-secondary) min-w-[2.5ch] text-right select-none">
-      {value.toFixed(2)}
-    </span>
-  );
-
-  const controlNode = (
-    <div className="flex items-center gap-1 min-w-0">
-      <Tooltip
-        side="top"
-        stages={[
-          { delay: 2000, content: <span>{`Decrease ${label}`}</span> },
-          {
-            delay: 5000,
-            content: (
-              <div className="max-w-[220px]">
-                <div className="font-semibold">{`Decrease ${tooltipShort}`}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                  Step {label.toLowerCase()} down by {SLIDER_STEP.toFixed(2)}
-                  {` (minimum ${SLIDER_MIN.toFixed(2)})`}.
-                </div>
-              </div>
-            ),
-          },
-        ]}
-      >
-        <button
-          type="button"
-          aria-label={`Decrease ${label.toLowerCase()}`}
-          disabled={atMin}
-          onClick={onDecrease}
-          className={[
-            "h-5 w-5 shrink-0 rounded",
-            "flex items-center justify-center",
-            "border transition-colors",
-            atMin
-              ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-              : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-          ].join(" ")}
-        >
-          <Minus size={10} aria-hidden="true" />
-        </button>
-      </Tooltip>
-
-      <Tooltip
-        side="top"
-        stages={[
-          { delay: 2000, content: <span>{tooltipShort}</span> },
-          {
-            delay: 5000,
-            content: (
-              <div className="max-w-[240px]">
-                <div className="font-semibold">{tooltipShort}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
-                  {tooltipLong}
-                </div>
-              </div>
-            ),
-          },
-        ]}
-      >
-        <input
-          type="range"
-          min={SLIDER_MIN}
-          max={SLIDER_MAX}
-          step={SLIDER_STEP}
-          value={value}
-          onChange={(e) => onChange(Number.parseFloat(e.target.value))}
-          aria-label={`${label} (slider)`}
-          className="flex-1 min-w-0 h-5 accent-amber-500"
-        />
-      </Tooltip>
-
-      <Tooltip
-        side="top"
-        stages={[
-          { delay: 2000, content: <span>{`Increase ${label}`}</span> },
-          {
-            delay: 5000,
-            content: (
-              <div className="max-w-[220px]">
-                <div className="font-semibold">{`Increase ${tooltipShort}`}</div>
-                <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                  Step {label.toLowerCase()} up by {SLIDER_STEP.toFixed(2)}
-                  {` (maximum ${SLIDER_MAX.toFixed(2)})`}.
-                </div>
-              </div>
-            ),
-          },
-        ]}
-      >
-        <button
-          type="button"
-          aria-label={`Increase ${label.toLowerCase()}`}
-          disabled={atMax}
-          onClick={onIncrease}
-          className={[
-            "h-5 w-5 shrink-0 rounded",
-            "flex items-center justify-center",
-            "border transition-colors",
-            atMax
-              ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-              : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-          ].join(" ")}
-        >
-          <Plus size={10} aria-hidden="true" />
-        </button>
-      </Tooltip>
-
-      {readoutNode}
-    </div>
-  );
-
   return (
-    <Row label={label} stacked={narrow}>
-      {controlNode}
-    </Row>
+    <div className="flex items-center gap-1.5 h-[22px]">
+      <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) w-[52px] shrink-0 select-none">
+        {label}
+      </span>
+
+      <div className="flex flex-1 items-center gap-1 min-w-0">
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 2000, content: <span>{`Decrease ${label}`}</span> },
+            {
+              delay: 5000,
+              content: (
+                <div className="max-w-[220px]">
+                  <div className="font-semibold">{`Decrease ${tooltipShort}`}</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Step {label.toLowerCase()} down by {SLIDER_STEP.toFixed(2)}
+                    {` (minimum ${SLIDER_MIN.toFixed(2)})`}.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label={`Decrease ${label.toLowerCase()}`}
+            disabled={atMin}
+            onClick={onDecrease}
+            className={[
+              "h-4 w-4 shrink-0 rounded-sm",
+              "flex items-center justify-center",
+              "border transition-colors",
+              atMin
+                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
+                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+            ].join(" ")}
+          >
+            <Minus size={9} aria-hidden="true" />
+          </button>
+        </Tooltip>
+
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 2000, content: <span>{tooltipShort}</span> },
+            {
+              delay: 5000,
+              content: (
+                <div className="max-w-[240px]">
+                  <div className="font-semibold">{tooltipShort}</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
+                    {tooltipLong}
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <input
+            type="range"
+            min={SLIDER_MIN}
+            max={SLIDER_MAX}
+            step={SLIDER_STEP}
+            value={value}
+            onChange={(e) => onChange(Number.parseFloat(e.target.value))}
+            aria-label={`${label} (slider)`}
+            className="flex-1 min-w-0 h-4 accent-amber-500"
+          />
+        </Tooltip>
+
+        <Tooltip
+          side="top"
+          stages={[
+            { delay: 2000, content: <span>{`Increase ${label}`}</span> },
+            {
+              delay: 5000,
+              content: (
+                <div className="max-w-[220px]">
+                  <div className="font-semibold">{`Increase ${tooltipShort}`}</div>
+                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                    Step {label.toLowerCase()} up by {SLIDER_STEP.toFixed(2)}
+                    {` (maximum ${SLIDER_MAX.toFixed(2)})`}.
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        >
+          <button
+            type="button"
+            aria-label={`Increase ${label.toLowerCase()}`}
+            disabled={atMax}
+            onClick={onIncrease}
+            className={[
+              "h-4 w-4 shrink-0 rounded-sm",
+              "flex items-center justify-center",
+              "border transition-colors",
+              atMax
+                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
+                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+            ].join(" ")}
+          >
+            <Plus size={9} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </div>
+
+      <span className="text-[10px] font-mono tabular-nums text-(--color-fg-secondary) w-[28px] text-right select-none shrink-0">
+        {value.toFixed(2)}
+      </span>
+    </div>
   );
 }
 
