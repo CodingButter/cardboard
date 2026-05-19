@@ -1,14 +1,20 @@
-// TODO: wire to selection store. The readout below shows live
-// cursor/cell/layer/selection state from the editor's pointer +
-// selection stores once those land. For Wave 2 the panel simply
-// renders MOCK_SELECTION_INFO so the layout + commands are exercised.
+// Wave 3.3 panel migration #7: SelectionInfoPanel is now read-only on
+// `useSelectionStore` (selected + hover + cursor) plus `useLayerStore`
+// (active layer name). The only mutator wired here is the existing
+// `scene.selection.clear` command, which now actually deselects via
+// `useSelectionStore.getState().select(null)`. Invert / Select-All stay
+// as stubs — those are cross-cell selection ops that no store models
+// today; their commands remain registered so the palette keeps the
+// IDs reserved.
 import React from "react";
 import { Crosshair } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { useSelectionStore } from "../../../state/useSelectionStore";
+import { useLayerStore } from "../../../state/useLayerStore";
 import {
-  MOCK_SELECTION_INFO,
+  MOCK_LAYERS,
   type SelectionInfoRow,
 } from "../scene-fixtures";
 
@@ -101,10 +107,71 @@ function formatClipboard(info: SelectionInfoRow): string {
   ].join("\n");
 }
 
+/** Format a continuous cursor position as `(x.xx, y.xx)`. Falls back
+ *  to an em-dash when no pointer is over the scene. Two decimals keeps
+ *  the status-bar width steady (tabular-nums in the label means the
+ *  string width depends only on character count). */
+function formatPosition(pos: { x: number; y: number } | null): string {
+  if (!pos) return "—";
+  return `(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)})`;
+}
+
+/** Format a hovered/selected cell as `(x, y)`. The cell coord lane is
+ *  what the SelectionInfo readout means by "Cell" — i.e. the cell
+ *  currently under the cursor, not the persisted selection. */
+function formatCell(cell: { x: number; y: number } | null): string {
+  if (!cell) return "—";
+  return `(${cell.x}, ${cell.y})`;
+}
+
+/** Summarise the current selection as a count phrase. Today's store
+ *  only models a single selected cell (`CellCoord | null`); the
+ *  pluralised shape leaves room for multi-cell selections later
+ *  without breaking the readout's column width. */
+function formatSelection(selected: { x: number; y: number } | null): string {
+  return selected ? "1 cell" : "0 cells";
+}
+
 export function SelectionInfoPanel(): React.JSX.Element {
-  // TODO: wire to selection store — replace local fixture with live
-  // pointer + selection state.
-  const info: SelectionInfoRow = MOCK_SELECTION_INFO;
+  // Cross-panel store subscriptions. Each selector returns a primitive
+  // or a stable object reference from the store, so React only
+  // re-renders the panel when those individual slices change.
+  //
+  // `hover` + `cursor` are throttled at the store level to ~30 Hz
+  // (see `useSelectionStore.setHover` / `setCursor`) so dragging the
+  // mouse across the canvas does not flood this panel with renders.
+  const selected = useSelectionStore((s) => s.selected);
+  const hover = useSelectionStore((s) => s.hover);
+  const cursor = useSelectionStore((s) => s.cursor);
+  const activeLayerId = useLayerStore((s) => s.activeId);
+  const customLayers = useLayerStore((s) => s.customLayers);
+
+  // Resolve the active layer's display name from the fixture roster
+  // plus any runtime-added custom layers. Falls back to the raw id so
+  // the readout never goes blank if a layer record is missing.
+  const activeLayerName = React.useMemo(() => {
+    for (const l of MOCK_LAYERS) {
+      if (l.id === activeLayerId) return l.name;
+    }
+    for (const c of customLayers) {
+      if (c.id === activeLayerId) return c.name;
+    }
+    return activeLayerId || "—";
+  }, [activeLayerId, customLayers]);
+
+  // Synthesize the flat SelectionInfoRow that the section + clipboard
+  // formatting code consumes. Memoised on the underlying primitives so
+  // the SelectionSection children only re-render when a value actually
+  // changes.
+  const info = React.useMemo<SelectionInfoRow>(
+    () => ({
+      position: formatPosition(cursor),
+      cell: formatCell(hover),
+      layer: activeLayerName,
+      selection: formatSelection(selected),
+    }),
+    [cursor, hover, activeLayerName, selected],
+  );
 
   // --- Responsive width tracking -----------------------------------
   const rootRef = React.useRef<HTMLDivElement>(null);
@@ -143,17 +210,21 @@ export function SelectionInfoPanel(): React.JSX.Element {
   }, [info]);
 
   const handleClear = React.useCallback(() => {
-    // TODO: wire to selection store.
-    console.log("[selection.clear] (stub) clear current selection");
+    // Live: drop the persisted cell selection. Going through
+    // `getState()` keeps this callback stable across renders — no
+    // selector subscription is needed for a fire-and-forget mutation.
+    useSelectionStore.getState().select(null);
   }, []);
 
+  // Invert + Select-All are cross-cell selection ops that no store
+  // currently models (the selection slice is `CellCoord | null`).
+  // Registrations stay so the command IDs are reserved + discoverable
+  // in the palette; the runtime hooks land in a later wave.
   const handleInvert = React.useCallback(() => {
-    // TODO: wire to selection store.
     console.log("[selection.invert] (stub) invert current selection");
   }, []);
 
   const handleSelectAll = React.useCallback(() => {
-    // TODO: wire to selection store.
     console.log("[selection.selectAll] (stub) select all cells on layer");
   }, []);
 
