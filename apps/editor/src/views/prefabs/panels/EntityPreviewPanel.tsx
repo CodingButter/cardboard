@@ -28,6 +28,13 @@ import { MOCK_ENTITIES, type EntityRow } from "../prefabs-fixtures";
  * "light" entity). Wave 3 swaps this for the real selected-entity
  * id coming from `EntityListPanel`.
  *
+ * TODO (Wave 3): replace the 3D mesh placeholders (cubes/spheres)
+ * with a single billboard quad that always faces the camera. Cardboard
+ * is a Wolfenstein-style raycaster — entities ARE billboard sprites,
+ * not 3D meshes. The current cube placeholders work as visual stubs
+ * but will be torn out when real sprite assets land in Wave 3. See
+ * memory rule `project_raycaster_billboard_prefabs.md`.
+ *
  * Interaction:
  *   - Left-mouse drag inside the canvas orbits the camera (manual
  *     yaw/pitch — no `OrbitControls` jsm dep).
