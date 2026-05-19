@@ -83,6 +83,25 @@ const args = [
   'true',
   '--excludePrivate',
   'true',
+  // MDX-safety flags. typedoc-plugin-markdown by default emits raw
+  // TypeScript type syntax (`Foo<Bar>`, `Record<K, V>`) and JSDoc-derived
+  // prose containing bare `<...>` / `{...}` snippets. MDX 3 parses the
+  // former as JSX tags and the latter as JS expressions in prose
+  // contexts (i.e. anything outside fenced code), which makes the
+  // fumadocs/Next pipeline reject the page. These two flags ask
+  // TypeDoc to escape both before we ever see the markdown:
+  //   --useHTMLEncodedBrackets converts emitted-declaration `<` / `>`
+  //     to `&lt;` / `&gt;` so type params survive prose contexts.
+  //   --sanitizeComments backslash-escapes `<` / `>` / `{` / `}`
+  //     inside JSDoc comments so example blocks and inline snippets
+  //     in TSDoc don't trip MDX/acorn.
+  // Without these the generated pages for CanonicalEvents, KnownTags
+  // and PackComponents fail `next build --webpack` with an MDX parse
+  // error and the GitHub Pages deploy never completes.
+  '--useHTMLEncodedBrackets',
+  'true',
+  '--sanitizeComments',
+  'true',
 ];
 
 console.log(`gen-api: running typedoc against ${entryPoint}`);

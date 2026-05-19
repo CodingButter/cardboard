@@ -258,7 +258,7 @@ JSON files have the extension `.tutorial.json` and live either in
 | `tags` | string[] | no | Filter/category tags for the Help menu's tutorial picker. Default `[]`. Suggested tags: `intro`, `advanced`, `scripts`, `art`, `audio`, `ui`. |
 | `estimatedSeconds` | number | no | Author-provided estimate, shown as "~60 seconds" in the launcher. No runtime enforcement; purely informational. Default `null` (hides the estimate). |
 | `next` | string\|null | no | On completion, auto-prompt to start this tutorial. Modal: "Continue with **`<next.title>`**? [Yes / Not now]". Used to chain `home-intro → map-intro → scripts-intro` for the first-run flow. Default `null`. |
-| `prerequisites` | string[] | no | Slugs that must have `completed=true` in localStorage before this tutorial can launch. Used for advanced tutorials. If unmet, the launcher shows: "Complete *<prereq.title>* first." Default `[]`. |
+| `prerequisites` | string[] | no | Slugs that must have `completed=true` in localStorage before this tutorial can launch. Used for advanced tutorials. If unmet, the launcher shows: "Complete `<prereq.title>` first." Default `[]`. |
 | `steps` | Step[] | yes | The walkthrough. Min length 1, max length 30 (warning above 12 — see §8.2). |
 
 ### 3.2 Step definition
