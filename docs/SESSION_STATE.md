@@ -4,13 +4,78 @@ Pair this with `PLAN.md` and the phase-specific docs under
 `docs/plans/`. Fresh session? Read `docs/PLAN.md` first, this
 second, then the phase doc for whatever you're working on.
 
-Date of last update: **2026-05-17**.
+Date of last update: **2026-05-19**.
 
 ---
 
 ## 1. What just shipped
 
 Chronological since 2026-05-15:
+
+-1. **(2026-05-18 → 19 sprint, pushed through `fd8b1e6`)** — Scene-page
+   panel surface system + responsive ToolPalette + PWA install. All
+   of `docs/EDITOR_DESIGN_INVENTORY.md` §1.2 "Architecture decisions
+   (2026-05-18)" landed.
+
+   - **Dock visual system**: page-bg darkened to `oklch(0.17)`,
+     panel-surface token at translucent `oklch(1 0 0 / 0.02)` (2%
+     white overlay) + `shadow-[var(--shadow-panel)]` + hairline
+     border. Dock chrome (group, tab strip, every tab bg) all
+     transparent — the page bg shows through everywhere and only
+     the per-panel `PanelSurface` card paints anything.
+     `PanelSurface` wraps each opted-in panel inside `dv-content-container`
+     with `px-1.5 pb-1` outer + `p-2` inner so adjacent surface
+     cards have a visible gap from the dock content edges. Active
+     tab amber underline scoped to multi-tab groups via
+     `:not(.dv-single-tab)`.
+   - **DockPanelDef flags**: `surface?: boolean` (default true,
+     stamped via `data-surface="false"` for opt-outs), `headerless?:
+     boolean` (stamped via `data-headerless`, plus `group.locked`).
+     Map Canvas opts out of both; Output/Problems/Selection Info
+     opt out of surface only. CSS targets the data attributes to
+     strip chrome.
+   - **PWA install**: `apps/editor/public/manifest.webmanifest` +
+     `sw.js` (HMR-aware fetch handler) + 3 icons + SW registration
+     in `index.tsx` runs in both dev and prod. `launch_handler:
+     navigate-new` so installed-PWA dock-icon clicks spawn new
+     chrome-less standalone windows. Verified: window.open popouts
+     from inside the installed PWA inherit standalone display mode.
+   - **Ctrl+drag float toggle** experiment dispatched, then removed
+     — too fragile across PWA-vs-tab contexts (Chrome routed
+     popups-to-tabs unpredictably). Native dockview drag-off
+     handles popouts cleanly in the installed PWA; no custom
+     gesture needed.
+   - **Scene panel stubs**: 18 dock panels (12 default-layout, 6
+     opt-in via DocksModal). All registered in `MapView.tsx`. Most
+     bodies are empty `data-panel="..."` stubs awaiting Wave 2.
+   - **Predefined layouts**: 4 presets — Default, Map Focus,
+     Inspect, Debug — rewritten against current panel ids. Default
+     layout is the maintainer's working snapshot (12-panel grid).
+   - **ScrollRow primitive** (`apps/editor/src/components/ui/ScrollRow.tsx`):
+     shared horizontal-scroll component matching `TabStrip` `scrollable={true}`
+     hover-area pattern. Hidden native horizontal scrollbar via
+     Tailwind arbitrary variants; edge fades + RAF auto-scroll;
+     keyboard-accessible. **For panels where reflow can't help.**
+   - **ToolPalette responsive**: tile grid uses
+     `grid-template-columns: repeat(auto-fit, minmax(56px, 80px))`,
+     reflows from 1×6 vertical at narrow widths to 6×1 horizontal
+     at wide. `aspect-square` tiles, `truncate` labels. State /
+     localStorage / MANIFEST unchanged. (Successor in-flight: progressive
+     tooltip + icon-only redo per next bullet.)
+   - **In flight (agent `a4c1e9535e03812f6`)** at time of writing:
+     extend `Tooltip` with `stages?: TooltipStage[]` for two-stage
+     progressive reveal (2s short label, 5s short label + full
+     description); add `description?: string` to MOCK_TOOLS; redo
+     ToolPalette as icon-only 32–40px tiles wrapped in the staged
+     tooltip. Eye Dropper → Dropper, Entity Place → Entity.
+
+   New + updated memories (in
+   `~/.claude/projects/-home-codingbutter-development-cardboard/memory/`):
+   - `feedback_playwright_screenshots_folder.md`
+   - `feedback_dispatch_without_approval_gate.md`
+   - `feedback_panel_responsive_design.md`
+   - `feedback_progressive_tooltips.md` ← project-wide tooltip standard
+
 
 -1. **(uncommitted, 2026-05-17)** — WORLD_STATE "world.json
    full-scope" pass. `world.json` is now the authoritative
