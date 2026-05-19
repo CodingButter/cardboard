@@ -24,6 +24,12 @@ import { MOCK_BRUSHES, type BrushRow } from "../scene-fixtures";
  * authoring can dock independently. Wave 2 wires this to the editor's
  * active brush state.
  *
+ * Visual parity with sibling ToolPalettePanel: tiles render an icon
+ * stacked over a small uppercase name label so the affordance is
+ * self-describing without needing hover. Same `auto-fill` /
+ * `minmax(54px, 64px)` grid template, same ~60px tile height, same
+ * `aria-pressed` a11y pattern.
+ *
  * Persistence contract (page-scope localStorage):
  *   - `cardboard.scene.brush.activeKind`  string, default first brush id.
  *   - `cardboard.scene.brush.size`        number, default 1 (1..20).
@@ -55,6 +61,11 @@ const DEFAULT_SIZE = 1;
 const MIN_SIZE = 1;
 const MAX_SIZE = 20;
 
+/** Width threshold below which the panel collapses to a "Resize panel"
+ *  fallback — at narrower widths only a single tile is visible and the
+ *  size controls disappear off the right edge. */
+const MIN_PANEL_WIDTH = 120;
+
 function readLS(key: string): string | null {
   try {
     if (typeof window === "undefined") return null;
@@ -83,6 +94,9 @@ function clampSize(n: number): number {
 }
 
 export function BrushPanel(): React.JSX.Element {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [panelWidth, setPanelWidth] = React.useState<number>(0);
+
   const [activeKind, setActiveKind] = React.useState<string>(() => {
     const stored = readLS(LS_ACTIVE_KIND);
     if (stored && findBrush(stored)) return stored;
@@ -104,6 +118,24 @@ export function BrushPanel(): React.JSX.Element {
   React.useEffect(() => {
     writeLS(LS_SIZE, String(size));
   }, [size]);
+
+  // ResizeObserver — drives the tiny-width fallback so we don't render
+  // a half-hidden, unusable panel when Dockview squeezes us below
+  // ~120px. Mirrors the pattern in `MinimapPanel`.
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setPanelWidth(Math.round(entry.contentRect.width));
+      }
+    });
+    ro.observe(el);
+    // Seed once immediately so the first paint reflects real width.
+    const rect = el.getBoundingClientRect();
+    setPanelWidth(Math.round(rect.width));
+    return () => ro.disconnect();
+  }, []);
 
   // --- Canonical handlers (single source of truth) -----------------
   // Both button onClicks and command `run` delegate to these via
@@ -184,58 +216,130 @@ export function BrushPanel(): React.JSX.Element {
     return () => {
       for (const u of unregs) u();
     };
-    // MOCK_BRUSHES is a module-level constant today; including it in
-    // deps documents the dependency for the day this turns into a
-    // live store selector. Identity is stable per module load.
+    // MOCK_BRUSHES is a module-level constant; empty deps mirror
+    // BrushPanel/ToolPalettePanel — identity is stable per module load.
   }, []);
 
   const sizeAtMin = size <= MIN_SIZE;
   const sizeAtMax = size >= MAX_SIZE;
 
+  // Tiny-width fallback. Render the wrapper (so the ResizeObserver
+  // stays attached and can re-trigger when the panel grows back) but
+  // swap the contents for an instruction message. The condition guards
+  // against the first-paint 0-width state so we don't flash the
+  // fallback before the observer reports a real size.
+  const tooNarrow = panelWidth > 0 && panelWidth < MIN_PANEL_WIDTH;
+
   // Outer container is just the `data-panel` hook. DockShell wraps
   // this in `<PanelSurface/>` (raised card with p-2 inner padding),
   // so this wrapper only owns layout (flex column + tight gap between
-  // the brush-kind grid and the inline size row), NOT padding or
-  // surface styling.
+  // the brush-kind grid, the SIZE eyebrow, and the inline size row),
+  // NOT padding or surface styling.
   return (
     <div
+      ref={containerRef}
       data-panel="brush"
       className="h-full w-full flex flex-col gap-1 overflow-y-auto"
     >
-      {/*
-        Brush-kind tile grid. Same auto-fit/minmax pattern as the
-        ToolPalette tile grid. Tiles tightened to 32–44px (down from
-        40–56px) so the brush row stays compact and the size controls
-        below the grid are visible above the fold at the default
-        Scene-layout panel size (~230×190).
-      */}
-      <div
-        className="grid gap-1"
-        role="radiogroup"
-        aria-label="Brush kind"
-        style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(32px, 44px))",
-        }}
-      >
-        {(MOCK_BRUSHES as readonly BrushRow[]).map((b) => {
-          const Icon = BRUSH_ICON_BY_KIND[b.kind] ?? Brush;
-          const active = b.id === activeKind;
-          return (
+      {tooNarrow ? (
+        <div className="flex items-center justify-center h-full text-[10px] text-(--color-fg-muted) text-center px-2">
+          Resize panel
+        </div>
+      ) : (
+        <>
+          {/*
+            Brush-kind tile grid. Same `auto-fill` + `minmax(54px, 64px)`
+            pattern as the sibling ToolPalette tile grid so brush tiles
+            visually rhyme with tool tiles directly above. Tiles are
+            ~60px tall with the icon stacked over a small uppercase
+            name label.
+          */}
+          <div
+            className="grid gap-1"
+            role="radiogroup"
+            aria-label="Brush kind"
+            style={{
+              gridTemplateColumns: "repeat(auto-fill, minmax(54px, 64px))",
+            }}
+          >
+            {(MOCK_BRUSHES as readonly BrushRow[]).map((b) => {
+              const Icon = BRUSH_ICON_BY_KIND[b.kind] ?? Brush;
+              const active = b.id === activeKind;
+              return (
+                <Tooltip
+                  key={b.id}
+                  side="right"
+                  stages={[
+                    { delay: 1000, content: <span>{b.name}</span> },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div>
+                          <div className="font-semibold">{b.name}</div>
+                          {b.description && (
+                            <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                              {b.description}
+                            </div>
+                          )}
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <button
+                    type="button"
+                    aria-label={b.name}
+                    aria-pressed={active}
+                    onClick={() => handleSelectBrush(b.id)}
+                    className={[
+                      "w-full h-[60px] rounded",
+                      "flex flex-col items-center justify-center gap-1",
+                      "border transition-colors",
+                      active
+                        ? "bg-amber-500 border-amber-500 text-zinc-950"
+                        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                    ].join(" ")}
+                  >
+                    <Icon size={18} aria-hidden="true" />
+                    <span className="text-[9px] uppercase tracking-wide leading-none">
+                      {b.name}
+                    </span>
+                  </button>
+                </Tooltip>
+              );
+            })}
+          </div>
+
+          {/*
+            SIZE eyebrow — small uppercase sub-label matching the
+            pattern in CellInspector / SceneSettings / Map.png's BRUSH
+            section. Sits between the tile grid and the inline size
+            row so the size controls read as a labeled subsection.
+          */}
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+            Size
+          </div>
+
+          {/*
+            Single-row size control: [−] [slider flex-1] [value input] [+].
+            Wrapped in `max-w-[260px]` so at wide panel widths the
+            slider stays clustered with the −/+ buttons and the number
+            input instead of stretching across the whole panel and
+            visually disconnecting from its controls.
+          */}
+          <div className="flex items-stretch gap-1 max-w-[260px]">
             <Tooltip
-              key={b.id}
-              side="right"
+              side="top"
               stages={[
-                { delay: 1000, content: <span>{b.name}</span> },
+                { delay: 1000, content: <span>Decrease size</span> },
                 {
                   delay: 3000,
                   content: (
                     <div>
-                      <div className="font-semibold">{b.name}</div>
-                      {b.description && (
-                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                          {b.description}
-                        </div>
-                      )}
+                      <div className="font-semibold">Decrease Brush Size</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Steps the brush size down by 1 (minimum {MIN_SIZE}).
+                      </div>
                     </div>
                   ),
                 },
@@ -243,188 +347,160 @@ export function BrushPanel(): React.JSX.Element {
             >
               <button
                 type="button"
-                role="radio"
-                aria-label={b.name}
-                aria-checked={active}
-                onClick={() => handleSelectBrush(b.id)}
+                aria-label="Decrease brush size"
+                disabled={sizeAtMin}
+                onClick={handleSizeDown}
                 className={[
-                  "aspect-square w-full rounded",
+                  "h-7 w-7 shrink-0 rounded",
                   "flex items-center justify-center",
                   "border transition-colors",
-                  active
-                    ? "bg-amber-500 border-amber-500 text-zinc-950"
+                  sizeAtMin
+                    ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
                     : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
                 ].join(" ")}
               >
-                <Icon size={16} aria-hidden="true" />
+                <Minus size={14} aria-hidden="true" />
               </button>
             </Tooltip>
-          );
-        })}
-      </div>
 
-      {/*
-        Single-row size control: [−] [slider flex-1] [value readout] [+].
-        The SIZE label is folded into the slider tooltip (stage 1 shows
-        "Brush size: N", stage 2 shows the full description) so we save
-        a row of vertical space while keeping the discoverable affordance.
-        The value readout is a non-editable tabular-nums chip — the
-        slider IS the primary input; the +/- buttons are the secondary
-        keyboard-free fine-tune affordance. This collapses what used to
-        be 3 stacked rows (label / stepper / slider) into 1 row, which
-        is the only way to keep the slider above the fold at 230×190.
-      */}
-      <div className="flex items-stretch gap-1 pt-0.5">
-        <Tooltip
-          side="top"
-          stages={[
-            { delay: 1000, content: <span>Decrease size</span> },
-            {
-              delay: 3000,
-              content: (
-                <div>
-                  <div className="font-semibold">Decrease Brush Size</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                    Steps the brush size down by 1 (minimum {MIN_SIZE}).
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label="Decrease brush size"
-            disabled={sizeAtMin}
-            onClick={handleSizeDown}
-            className={[
-              "h-7 w-7 shrink-0 rounded",
-              "flex items-center justify-center",
-              "border transition-colors",
-              sizeAtMin
-                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-            ].join(" ")}
-          >
-            <Minus size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
+            {/*
+              The Tooltip component wraps its child in an `inline-flex`
+              span we don't control, so to make the slider absorb slack
+              we wrap the Tooltip itself in `flex-1 min-w-0` and let
+              the slider go `w-full` inside. min-w-0 is required so
+              the flex-1 segment can actually shrink below its
+              intrinsic content width when the panel narrows.
+            */}
+            <div className="flex-1 min-w-0 flex items-center [&>span]:w-full">
+              <Tooltip
+                side="top"
+                stages={[
+                  {
+                    delay: 1000,
+                    content: (
+                      <span>
+                        Brush size:{" "}
+                        <span className="tabular-nums">{size}</span>
+                      </span>
+                    ),
+                  },
+                  {
+                    delay: 3000,
+                    content: (
+                      <div>
+                        <div className="font-semibold">Brush Size</div>
+                        <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                          Drag to set the brush radius ({MIN_SIZE}–{MAX_SIZE}).
+                          Determines how many cells are affected during
+                          paint and erase ops.
+                        </div>
+                      </div>
+                    ),
+                  },
+                ]}
+              >
+                <input
+                  type="range"
+                  min={MIN_SIZE}
+                  max={MAX_SIZE}
+                  step={1}
+                  value={size}
+                  aria-label="Brush size"
+                  onChange={(e) =>
+                    handleSizeSet(Number.parseInt(e.target.value, 10))
+                  }
+                  className="w-full accent-amber-500"
+                />
+              </Tooltip>
+            </div>
 
-        {/*
-          The Tooltip component wraps its child in an `inline-flex`
-          span we don't control, so to make the slider absorb slack we
-          wrap the Tooltip itself in `flex-1 min-w-0` and let the
-          slider go `w-full` inside. min-w-0 is required so the
-          flex-1 segment can actually shrink below its intrinsic
-          content width when the panel narrows past ~150px.
-        */}
-        <div className="flex-1 min-w-0 flex items-center [&>span]:w-full">
-          <Tooltip
-            side="top"
-            stages={[
-              {
-                delay: 1000,
-                content: (
-                  <span>
-                    Brush size: <span className="tabular-nums">{size}</span>
-                  </span>
-                ),
-              },
-              {
-                delay: 3000,
-                content: (
-                  <div>
-                    <div className="font-semibold">Brush Size</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                      Drag to set the brush radius ({MIN_SIZE}–{MAX_SIZE}).
-                      Determines how many cells are affected during
-                      paint and erase ops.
+            {/*
+              Numeric readout / editor. Wrapped in a Tooltip so the
+              affordance is discoverable: stage 1 hints that the field
+              is typable, stage 2 explains the 1–20 range and that all
+              size inputs (slider, +/−, palette commands) feed the
+              same underlying value.
+            */}
+            <Tooltip
+              side="top"
+              stages={[
+                { delay: 1000, content: <span>Type a value</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">Brush Size</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Click to type a brush size (1–20). The slider,
+                        −/+ buttons, and palette commands all map to
+                        the same underlying size.
+                      </div>
                     </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
-            <input
-              type="range"
-              min={MIN_SIZE}
-              max={MAX_SIZE}
-              step={1}
-              value={size}
-              aria-label="Brush size"
-              onChange={(e) =>
-                handleSizeSet(Number.parseInt(e.target.value, 10))
-              }
-              className="w-full accent-amber-500"
-            />
-          </Tooltip>
-        </div>
+                  ),
+                },
+              ]}
+            >
+              <input
+                type="number"
+                min={MIN_SIZE}
+                max={MAX_SIZE}
+                step={1}
+                value={size}
+                aria-label="Brush size value"
+                onChange={(e) => {
+                  const parsed = Number.parseInt(e.target.value, 10);
+                  if (Number.isFinite(parsed)) handleSizeSet(parsed);
+                }}
+                className={[
+                  "w-10 shrink-0 h-7 px-1 rounded",
+                  "text-center text-xs tabular-nums",
+                  "bg-transparent border border-(--color-border-strong)",
+                  "text-(--color-fg-primary)",
+                  "focus:outline-none focus:border-amber-500/80",
+                  "[appearance:textfield]",
+                  "[&::-webkit-inner-spin-button]:appearance-none",
+                  "[&::-webkit-outer-spin-button]:appearance-none",
+                ].join(" ")}
+              />
+            </Tooltip>
 
-        {/*
-          Numeric readout. Editable on click — turns into a hidden
-          spinner number input — so power users can still type a
-          value, but at default size the chip just reads the slider
-          value. Width is min-content + a small floor so 1–2 digits
-          look balanced.
-        */}
-        <input
-          type="number"
-          min={MIN_SIZE}
-          max={MAX_SIZE}
-          step={1}
-          value={size}
-          aria-label="Brush size value"
-          onChange={(e) => {
-            const parsed = Number.parseInt(e.target.value, 10);
-            if (Number.isFinite(parsed)) handleSizeSet(parsed);
-          }}
-          className={[
-            "w-9 shrink-0 h-7 px-1 rounded",
-            "text-center text-xs tabular-nums",
-            "bg-transparent border border-(--color-border-strong)",
-            "text-(--color-fg-primary)",
-            "focus:outline-none focus:border-amber-500/80",
-            "[appearance:textfield]",
-            "[&::-webkit-inner-spin-button]:appearance-none",
-            "[&::-webkit-outer-spin-button]:appearance-none",
-          ].join(" ")}
-        />
-
-        <Tooltip
-          side="top"
-          stages={[
-            { delay: 1000, content: <span>Increase size</span> },
-            {
-              delay: 3000,
-              content: (
-                <div>
-                  <div className="font-semibold">Increase Brush Size</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                    Steps the brush size up by 1 (maximum {MAX_SIZE}).
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label="Increase brush size"
-            disabled={sizeAtMax}
-            onClick={handleSizeUp}
-            className={[
-              "h-7 w-7 shrink-0 rounded",
-              "flex items-center justify-center",
-              "border transition-colors",
-              sizeAtMax
-                ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
-                : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-            ].join(" ")}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </div>
+            <Tooltip
+              side="top"
+              stages={[
+                { delay: 1000, content: <span>Increase size</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div>
+                      <div className="font-semibold">Increase Brush Size</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                        Steps the brush size up by 1 (maximum {MAX_SIZE}).
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            >
+              <button
+                type="button"
+                aria-label="Increase brush size"
+                disabled={sizeAtMax}
+                onClick={handleSizeUp}
+                className={[
+                  "h-7 w-7 shrink-0 rounded",
+                  "flex items-center justify-center",
+                  "border transition-colors",
+                  sizeAtMax
+                    ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed"
+                    : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                ].join(" ")}
+              >
+                <Plus size={14} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          </div>
+        </>
+      )}
     </div>
   );
 }
