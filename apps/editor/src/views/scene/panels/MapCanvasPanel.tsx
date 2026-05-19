@@ -59,6 +59,18 @@ const DEFAULT_ZOOM = 1.0;
 const MIN_RENDER_PX = 80;
 /** Height of the floating layer-chip strip in CSS pixels. */
 const CHIP_STRIP_HEIGHT = 40;
+/** Height (in CSS px) of the X-axis ruler band drawn ABOVE the playfield.
+ *  Reserved BEFORE letterboxing so numbers always have a dedicated strip. */
+const RULER_TOP_PX = 18;
+/** Width (in CSS px) of the Y-axis ruler band drawn LEFT of the playfield. */
+const RULER_LEFT_PX = 24;
+/** Muted gray-brown matching Map.png's axis chrome. */
+const RULER_TEXT_COLOR = "rgba(180,160,140,0.7)";
+/** Slightly darker shade for ruler tick marks (cell boundary indicators). */
+const RULER_TICK_COLOR = "rgba(154,138,120,0.55)";
+/** Background for the ruler bands — a touch darker than the playfield so
+ *  the chrome reads as recessed without competing with cell content. */
+const RULER_BG_COLOR = "#13110e";
 
 function readLS(key: string): string | null {
   try {
@@ -423,20 +435,51 @@ export function MapCanvasPanel(): React.JSX.Element {
 
   // Effective drawable area is the panel minus the bottom chip strip
   // (so the canvas never paints under the chips). Width is unchanged.
+  // We also reserve a ruler band on the TOP and LEFT — the playfield
+  // letterbox is computed within that inset region so the rulers sit
+  // outside (not on top of) the grid.
   const dims = MOCK_SCENE_SETTINGS.dimensions;
   const layout = React.useMemo(() => {
     const canvasW = size.w;
     const canvasH = Math.max(0, size.h - CHIP_STRIP_HEIGHT);
     if (canvasW <= 0 || canvasH <= 0) {
-      return { cell: 0, offX: 0, offY: 0, gridW: 0, gridH: 0, canvasW, canvasH };
+      return {
+        cell: 0,
+        offX: 0,
+        offY: 0,
+        gridW: 0,
+        gridH: 0,
+        canvasW,
+        canvasH,
+        playW: 0,
+        playH: 0,
+      };
     }
-    const fitCell = Math.min(canvasW / dims.w, canvasH / dims.h) * zoom;
+    // Inner playfield region after reserving the ruler bands.
+    const playW = Math.max(0, canvasW - RULER_LEFT_PX);
+    const playH = Math.max(0, canvasH - RULER_TOP_PX);
+    if (playW <= 0 || playH <= 0) {
+      return {
+        cell: 0,
+        offX: RULER_LEFT_PX,
+        offY: RULER_TOP_PX,
+        gridW: 0,
+        gridH: 0,
+        canvasW,
+        canvasH,
+        playW,
+        playH,
+      };
+    }
+    const fitCell = Math.min(playW / dims.w, playH / dims.h) * zoom;
     const cell = Math.max(0, fitCell);
     const gridW = cell * dims.w;
     const gridH = cell * dims.h;
-    const offX = (canvasW - gridW) / 2 + pan.x;
-    const offY = (canvasH - gridH) / 2 + pan.y;
-    return { cell, offX, offY, gridW, gridH, canvasW, canvasH };
+    // Letterbox within the inner playfield region, then offset by the
+    // ruler bands so the playfield sits to the right/below the chrome.
+    const offX = RULER_LEFT_PX + (playW - gridW) / 2 + pan.x;
+    const offY = RULER_TOP_PX + (playH - gridH) / 2 + pan.y;
+    return { cell, offX, offY, gridW, gridH, canvasW, canvasH, playW, playH };
   }, [size.w, size.h, dims.w, dims.h, zoom, pan.x, pan.y]);
 
   // Per-id layer color lookup. Falls back to a neutral gray.
@@ -786,6 +829,132 @@ export function MapCanvasPanel(): React.JSX.Element {
         ctx.textBaseline = "alphabetic";
       }
     }
+
+    // -----------------------------------------------------------------
+    // X / Y axis ruler frame — drawn LAST so any panned cells that
+    // bleed past the playfield edges get cleanly clipped under the
+    // ruler bands. Mirrors `Editor Design/Map.png` chrome: a narrow
+    // band above + left of the grid with cell-stride number labels and
+    // tick marks at every cell boundary.
+    if (cell > 0) {
+      // Stride — number every Nth cell. At low zoom the labels get
+      // crowded so we widen the stride; at high zoom we narrow it.
+      // Picked so that at default zoom (cell ~10-14px on a typical
+      // panel) we get a label every 5 cells, matching Map.png.
+      const stride = cell >= 18 ? 5 : cell >= 9 ? 5 : cell >= 5 ? 10 : 20;
+      // Tick marks: a thin dash at every cell boundary. Skip when
+      // cells are sub-6px wide — at that point the ticks just merge
+      // into a smeared bar and only the numbers carry meaning.
+      const showTicks = cell >= 6;
+      // Per-cell vertical lines inside the ruler when zoomed in
+      // tightly (cell > 30px) — gives the ruler a thin grid look
+      // matching the design comp at zoom.
+      const showFineTicks = cell >= 30;
+
+      // ---- Top ruler band ----
+      ctx.fillStyle = RULER_BG_COLOR;
+      ctx.fillRect(0, 0, layout.canvasW, RULER_TOP_PX);
+      // Inner shadow / lower border so the band reads as recessed.
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(0, RULER_TOP_PX - 1, layout.canvasW, 1);
+
+      // ---- Left ruler band ----
+      ctx.fillStyle = RULER_BG_COLOR;
+      ctx.fillRect(0, 0, RULER_LEFT_PX, layout.canvasH);
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(RULER_LEFT_PX - 1, 0, 1, layout.canvasH);
+
+      // ---- Corner cell ----
+      // A clean dark square where the two rulers meet. Slight inner
+      // shadow on the two playfield-facing edges anchors the corner
+      // visually — same trick Photoshop / Aseprite use.
+      ctx.fillStyle = "#0e0c0a";
+      ctx.fillRect(0, 0, RULER_LEFT_PX, RULER_TOP_PX);
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(RULER_LEFT_PX - 1, 0, 1, RULER_TOP_PX);
+      ctx.fillRect(0, RULER_TOP_PX - 1, RULER_LEFT_PX, 1);
+
+      // ---- Tick marks ----
+      // Ticks scroll WITH the playfield — they sit at every
+      // cell-boundary x/y, clipped to the visible playfield extent so
+      // they don't bleed into the corner cell.
+      if (showTicks) {
+        ctx.fillStyle = RULER_TICK_COLOR;
+        const tickH = 4;
+        const tickW = 4;
+        // X-axis ticks — vertical dashes at the bottom of the top band.
+        for (let x = 0; x <= dims.w; x++) {
+          const px = Math.round(offX + x * cell);
+          if (px < RULER_LEFT_PX || px > layout.canvasW) continue;
+          // Major ticks (every stride) reach further into the band.
+          const isMajor = x % stride === 0;
+          const reach = isMajor ? tickH + 2 : tickH;
+          ctx.fillRect(px, RULER_TOP_PX - reach, 1, reach);
+        }
+        // Y-axis ticks — horizontal dashes at the right of the left band.
+        for (let y = 0; y <= dims.h; y++) {
+          const py = Math.round(offY + y * cell);
+          if (py < RULER_TOP_PX || py > layout.canvasH) continue;
+          const isMajor = y % stride === 0;
+          const reach = isMajor ? tickW + 2 : tickW;
+          ctx.fillRect(RULER_LEFT_PX - reach, py, reach, 1);
+        }
+      }
+
+      // ---- Fine grid lines inside the ruler bands when zoomed in ----
+      if (showFineTicks) {
+        ctx.strokeStyle = "rgba(120,108,94,0.35)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x <= dims.w; x++) {
+          const px = Math.round(offX + x * cell) + 0.5;
+          if (px < RULER_LEFT_PX || px > layout.canvasW) continue;
+          ctx.moveTo(px, 0);
+          ctx.lineTo(px, RULER_TOP_PX);
+        }
+        for (let y = 0; y <= dims.h; y++) {
+          const py = Math.round(offY + y * cell) + 0.5;
+          if (py < RULER_TOP_PX || py > layout.canvasH) continue;
+          ctx.moveTo(0, py);
+          ctx.lineTo(RULER_LEFT_PX, py);
+        }
+        ctx.stroke();
+      }
+
+      // ---- Labels ----
+      // Tabular monospaced 10px, muted gray-brown. Numbers scroll WITH
+      // the playfield (i.e. label at column N sits exactly above the
+      // visible column N), and we skip any label that would land
+      // inside the corner cell.
+      ctx.fillStyle = RULER_TEXT_COLOR;
+      ctx.font =
+        "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+      ctx.textBaseline = "middle";
+
+      // X axis — column numbers along the top band.
+      ctx.textAlign = "center";
+      for (let x = 0; x <= dims.w; x += stride) {
+        // Don't label x=0 if it would crash into the corner cell —
+        // start at the next stride instead.
+        const px = offX + x * cell + cell / 2;
+        if (px < RULER_LEFT_PX + 8) continue;
+        if (px > layout.canvasW - 4) continue;
+        ctx.fillText(String(x), px, RULER_TOP_PX / 2);
+      }
+
+      // Y axis — row numbers along the left band.
+      ctx.textAlign = "right";
+      for (let y = 0; y <= dims.h; y += stride) {
+        const py = offY + y * cell + cell / 2;
+        if (py < RULER_TOP_PX + 8) continue;
+        if (py > layout.canvasH - 4) continue;
+        ctx.fillText(String(y), RULER_LEFT_PX - 5, py);
+      }
+
+      // Reset state for downstream callers.
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
   }, [
     layout,
     visibility,
@@ -1053,12 +1222,15 @@ export function MapCanvasPanel(): React.JSX.Element {
         />
       )}
 
-      {/* Top-left coords readout — small chip pinned in the corner so
-       *  it doesn't fight the layer strip at the bottom. */}
+      {/* Top-left coords readout — small chip pinned just inside the
+       *  playfield region (i.e. past the ruler bands) so it doesn't
+       *  collide with the X/Y coordinate frame chrome painted into
+       *  the canvas. */}
       {!tooSmall && (
         <div
           data-slot="coords-readout"
-          className="absolute left-2 top-2 rounded border border-(--color-border-strong) bg-zinc-900/80 px-2 py-0.5 font-mono text-[10px] text-(--color-fg-secondary) backdrop-blur pointer-events-none"
+          className="absolute rounded border border-(--color-border-strong) bg-zinc-900/80 px-2 py-0.5 font-mono text-[10px] text-(--color-fg-secondary) backdrop-blur pointer-events-none"
+          style={{ left: `${RULER_LEFT_PX + 6}px`, top: `${RULER_TOP_PX + 6}px` }}
           aria-label="Hover cell coordinates"
         >
           {coordsLabel}
