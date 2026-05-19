@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
+import { EmptyState } from "../../../components/ui";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
@@ -116,6 +117,10 @@ function defaultActiveId(): string {
 const COMPACT_WIDTH_PX = 180;
 const TIGHT_WIDTH_PX = 140;
 const HEADER_COLLAPSE_PX = 220;
+// Below this width the toolbar's "LIGHTS" eyebrow label is hidden so
+// the kebab + Add button keep room. The label is purely decorative —
+// the panel's identity is already conveyed by the dock tab.
+const HEADER_LABEL_HIDE_PX = 120;
 
 // ---------------------------------------------------------------------------
 // Kind icon mapping. The fixture's `LightKind` enum maps onto these
@@ -177,6 +182,7 @@ export function LightingPanel(): React.JSX.Element {
   const compact = width > 0 && width < COMPACT_WIDTH_PX;
   const tight = width > 0 && width < TIGHT_WIDTH_PX;
   const headerCollapsed = width > 0 && width < HEADER_COLLAPSE_PX;
+  const hideHeaderLabel = width > 0 && width < HEADER_LABEL_HIDE_PX;
 
   // ---- Persistence -------------------------------------------------------
 
@@ -385,28 +391,39 @@ export function LightingPanel(): React.JSX.Element {
     >
       <LightingToolbar
         collapsed={headerCollapsed}
+        hideLabel={hideHeaderLabel}
         onAdd={addLight}
         onDelete={deleteActiveLight}
         onEnableAll={enableAllLights}
         onDisableAll={disableAllLights}
       />
       <div className="flex-1 min-h-0 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
-        {lights.map((l) => {
-          const enabled = isLightEnabled(l);
-          const isActive = l.id === activeId;
-          return (
-            <LightRowView
-              key={l.id}
-              light={l}
-              isActive={isActive}
-              enabled={enabled}
-              compact={compact}
-              tight={tight}
-              onActivate={activateLight}
-              onToggle={toggleLight}
+        {lights.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <EmptyState
+              icon={<Lightbulb size={28} />}
+              title="No lights"
+              description="Add a light to begin shaping the scene's atmosphere."
             />
-          );
-        })}
+          </div>
+        ) : (
+          lights.map((l) => {
+            const enabled = isLightEnabled(l);
+            const isActive = l.id === activeId;
+            return (
+              <LightRowView
+                key={l.id}
+                light={l}
+                isActive={isActive}
+                enabled={enabled}
+                compact={compact}
+                tight={tight}
+                onActivate={activateLight}
+                onToggle={toggleLight}
+              />
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -419,6 +436,7 @@ export function LightingPanel(): React.JSX.Element {
 
 interface LightingToolbarProps {
   collapsed: boolean;
+  hideLabel: boolean;
   onAdd: () => void;
   onDelete: () => void;
   onEnableAll: () => void;
@@ -427,6 +445,7 @@ interface LightingToolbarProps {
 
 function LightingToolbar({
   collapsed,
+  hideLabel,
   onAdd,
   onDelete,
   onEnableAll,
@@ -434,9 +453,16 @@ function LightingToolbar({
 }: LightingToolbarProps): React.JSX.Element {
   return (
     <div className="shrink-0 h-7 flex items-center gap-1 min-w-0">
-      <span className="flex-1 min-w-0 text-[10px] uppercase tracking-[0.18em] text-(--color-fg-muted) font-semibold truncate">
-        Lights
-      </span>
+      {hideLabel ? (
+        // Keep the spacer so the action cluster stays right-aligned —
+        // dropping the label without a placeholder would shove the
+        // buttons to the left edge.
+        <span className="flex-1 min-w-0" aria-hidden="true" />
+      ) : (
+        <span className="flex-1 min-w-0 text-[10px] uppercase tracking-[0.18em] text-(--color-fg-muted) font-semibold truncate">
+          Lights
+        </span>
+      )}
       <div className="shrink-0 flex items-center gap-1">
         {/* Add is always present — it's the primary "create" action and
             doesn't compete with anything for width. */}
@@ -704,7 +730,7 @@ function LightRowView({
   return (
     <div
       className={[
-        "flex items-center gap-1.5 min-h-[28px] px-1.5 rounded",
+        "flex items-center gap-1.5 min-h-[24px] h-6 px-1.5 rounded min-w-0",
         "border transition-colors",
         isActive
           ? "bg-amber-500/10 border-amber-500"
@@ -793,9 +819,15 @@ function LightRowView({
       ) : null}
 
       {/* Name — click also activates. Truncates with ellipsis on narrow
-          panels; the full name + description is in the hover tooltip. */}
+          panels; the full name + description is in the hover tooltip.
+          `wrapperClassName="flex-1 min-w-0"` makes the Tooltip's wrapper
+          span itself flex-fill the row so the inner button can actually
+          grow — previously the default `relative inline-flex` wrapper
+          collapsed to intrinsic content width and left dead space to the
+          right of the name. */}
       <Tooltip
         side="right"
+        wrapperClassName="flex-1 min-w-0"
         stages={[
           { delay: 1000, content: <span>{light.name}</span> },
           {
@@ -817,7 +849,7 @@ function LightRowView({
           aria-pressed={isActive}
           onClick={() => onActivate(light.id)}
           className={[
-            "flex-1 min-w-0 text-left text-[11px] truncate",
+            "w-full min-w-0 text-left text-[11px] truncate",
             "transition-colors",
             enabled ? "" : "opacity-60",
             isActive
