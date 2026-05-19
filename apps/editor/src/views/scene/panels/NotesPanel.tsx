@@ -306,6 +306,7 @@ export function NotesPanel(): React.JSX.Element {
             onCopy={handleCopy}
             onExport={handleExport}
             narrow={narrow}
+            text={text}
           />
           <NotesTextarea value={text} onChange={setText} />
         </>
@@ -340,6 +341,7 @@ interface NotesToolbarProps {
   onCopy: () => void;
   onExport: () => void;
   narrow: boolean;
+  text: string;
 }
 
 function NotesToolbar({
@@ -347,11 +349,24 @@ function NotesToolbar({
   onCopy,
   onExport,
   narrow,
+  text,
 }: NotesToolbarProps): React.JSX.Element {
+  // Replace the redundant "NOTES" label (already shown in the dockview
+  // tab header) with a live word + char count. Doubles as useful
+  // at-a-glance metadata AND fills the dead horizontal space at wide
+  // widths so the action buttons sit cleanly at the right edge.
+  //
+  // NOTE: Stage-2 tooltips on toolbar buttons can clip past the
+  // viewport when the panel is docked at the right edge. That's a
+  // Tooltip primitive limitation (no viewport-collision detection),
+  // not a NotesPanel concern — tracked separately.
+  const charCount = text.length;
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+
   return (
     <div className="shrink-0 h-7 flex items-center gap-1 min-w-0">
-      <span className="flex-1 min-w-0 text-[10px] uppercase tracking-[0.18em] text-(--color-fg-muted) font-semibold truncate">
-        Notes
+      <span className="flex-1 min-w-0 text-[10px] text-(--color-fg-muted) tabular-nums truncate">
+        {wordCount} words · {charCount} chars
       </span>
       <div className="shrink-0 flex items-center gap-1">
         {narrow ? (
