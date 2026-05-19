@@ -1,18 +1,22 @@
 ## Portable memory — read these BEFORE doing anything else
 
-A git-tracked mirror of Claude's auto-memory lives at `.claude-memory/`.
-It travels with the repo so any machine that clones gets the same
-behavioral rules, project conventions, and engine context.
+The project-scoped Claude config lives at `.claude/` (gitignore is
+selective — `screenshots/`, `worktrees/`, and `*.local.json` files are
+ignored as per-machine state; everything else is committed).
+
+Project memories live at `.claude/memory/` and travel with the repo so
+any machine that clones gets the same behavioral rules, project
+conventions, and engine context.
 
 On session start (fresh machine OR new Claude instance):
 
-1. Read `.claude-memory/MEMORY.md` — the index of rule files.
+1. Read `.claude/memory/MEMORY.md` — the index of rule files.
 2. Follow each `[name](file.md)` link relevant to the current task.
-3. Optionally mirror to auto-memory:
-   `cp .claude-memory/*.md ~/.claude/projects/<slug>/memory/`
+3. Optionally mirror to per-user auto-memory:
+   `cp .claude/memory/*.md ~/.claude/projects/<slug>/memory/`
 
 Rules of note that govern this project right now (skim
-`.claude-memory/MEMORY.md` for the full list):
+`.claude/memory/MEMORY.md` for the full list):
 
 - No git worktrees on this project (VHDX corruption risk).
 - Voice + text both carry content — voice plays on desktop, phone reads text.

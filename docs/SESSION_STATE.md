@@ -191,8 +191,8 @@ These rules in `~/.claude/projects/-home-codingbutter-development-cardboard/memo
 - `project_raycaster_billboard_prefabs.md` — engine context
 
 If the memory files aren't present on this machine, check
-`.claude-memory/` in the repo root — there's a portable copy
-(per the memory-migration work that's now in progress / about to land).
+`.claude/memory/` in the repo root — there's a portable mirror
+committed to the repo (selective gitignore allows it).
 
 ## What NOT to do
 

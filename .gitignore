@@ -40,8 +40,13 @@ apps/pack-builder/.env
 # Local MCP server config (contains bearer tokens)
 .mcp.json
 
-# Claude Code local agent config
-.claude/
+# Claude Code per-machine state — selectively ignored so the project-
+# scoped pieces (memory, settings, commands, agents) stay committed and
+# travel with the repo.
+.claude/screenshots/
+.claude/worktrees/
+.claude/*.local.json
+.claude/settings.local.json
 
 # WAD files — id Software proprietary binary assets, fetched/dropped locally
 apps/game/public/wads/*.wad

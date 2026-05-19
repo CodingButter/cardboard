@@ -35,11 +35,11 @@ there. To keep the in-repo mirror current:
 ```bash
 # Pull the latest memory into the repo (run after Claude writes new rules):
 cp ~/.claude/projects/-home-codingbutter-development-cardboard/memory/*.md \
-   .claude-memory/
+   .claude/memory/
 
 # Or on a fresh machine, push the in-repo memory to the auto-memory location:
 mkdir -p ~/.claude/projects/-home-codingbutter-development-cardboard/memory
-cp .claude-memory/*.md \
+cp .claude/memory/*.md \
    ~/.claude/projects/-home-codingbutter-development-cardboard/memory/
 ```
 
