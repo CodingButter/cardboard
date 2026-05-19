@@ -11,6 +11,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
+import { registerCommand } from "../../../state/useCommandStore";
 import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
 
 /**
@@ -126,6 +127,63 @@ export function ToolPalettePanel(): React.JSX.Element {
 
   const handleSubToolClick = React.useCallback((subToolId: string) => {
     setActiveSubTool(subToolId);
+  }, []);
+
+  // --- Command-registry refs ---------------------------------------
+  // Keep refs current so the registration effects don't need to
+  // re-run on every handler identity change. Matches the canonical
+  // pattern in `state/README.md` and the sibling `BrushPanel`.
+  const toolClickRef = React.useRef(handleToolClick);
+  const subToolClickRef = React.useRef(handleSubToolClick);
+
+  React.useEffect(() => {
+    toolClickRef.current = handleToolClick;
+  }, [handleToolClick]);
+  React.useEffect(() => {
+    subToolClickRef.current = handleSubToolClick;
+  }, [handleSubToolClick]);
+
+  // Dynamic per-tool + per-sub-tool commands. Re-registers when the
+  // tool list identity changes; aggregates unregister fns into an
+  // array per `state/README.md`'s "Dynamic registrations" pattern.
+  // Sub-tool commands auto-activate the parent tool before selecting
+  // the sub-tool so invoking e.g. "Sub-Tool: Select Polygon" from
+  // the palette also switches the active tool to Select.
+  React.useEffect(() => {
+    const unregs: Array<() => void> = [];
+    for (const t of MOCK_TOOLS as readonly ToolRow[]) {
+      unregs.push(
+        registerCommand({
+          id: `scene.tool.select.${t.id}`,
+          title: `Select Tool: ${t.name}`,
+          category: "Tool",
+          keywords: ["tool", "select", t.name, t.id],
+          description: t.description,
+          run: () => toolClickRef.current(t.id),
+        }),
+      );
+      for (const s of t.subTools ?? []) {
+        unregs.push(
+          registerCommand({
+            id: `scene.tool.subTool.select.${t.id}.${s.id}`,
+            title: `Sub-Tool: ${t.name} ${s.name}`,
+            category: "Tool",
+            keywords: ["tool", "sub-tool", "subtool", t.name, s.name, s.id],
+            description: t.description,
+            run: () => {
+              toolClickRef.current(t.id);
+              subToolClickRef.current(s.id);
+            },
+          }),
+        );
+      }
+    }
+    return () => {
+      for (const u of unregs) u();
+    };
+    // MOCK_TOOLS is a module-level constant today; the empty deps
+    // mirror BrushPanel's MOCK_BRUSHES treatment — identity is stable
+    // per module load.
   }, []);
 
   const tool = findTool(activeTool);
