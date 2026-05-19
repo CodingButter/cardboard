@@ -42,10 +42,9 @@ import { MOCK_CELL, MOCK_LAYERS, type CellRow } from "../scene-fixtures";
  */
 
 /** Width below which the panel collapses to a single-column stacked
- *  layout. Picked empirically — at this width the 40/60 PropertyRow
- *  grid leaves the value column too short to render a NumberInput +
- *  unit chip without truncation. */
-const NARROW_WIDTH_PX = 220;
+ *  layout. Picked empirically — at 180px the side-by-side label/control
+ *  grid is still readable; below that, controls need their own row. */
+const NARROW_WIDTH_PX = 180;
 
 /** Human-readable descriptions used by progressive tooltips on the
  *  tag chips. Unknown tags fall back to a generic blurb. */
@@ -325,20 +324,16 @@ export function CellInspectorPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="cell-inspector"
-      className="h-full w-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
+      className="h-full w-full flex flex-col gap-1.5 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
     >
-      {/* Header — coords + type + deselect. Coord display is mono and
-          prominent; collapses to its own row on narrow widths. */}
-      <header
-        className={[
-          "flex gap-2",
-          narrow ? "flex-col" : "items-start justify-between",
-        ].join(" ")}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+      {/* Row 1 — Compact coord inline with deselect button.
+          Keeps the header to a single line so TYPE/TAGS can stay above
+          the fold at default ~180×270 panel size. */}
+      <header className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
             Cell
-          </div>
+          </span>
           <Tooltip
             stages={[
               {
@@ -360,9 +355,9 @@ export function CellInspectorPanel(): React.JSX.Element {
               },
             ]}
           >
-            <div className="font-mono text-sm text-(--color-fg-primary) tabular-nums truncate">
+            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none">
               ({cell.x}, {cell.y})
-            </div>
+            </span>
           </Tooltip>
         </div>
 
@@ -389,19 +384,19 @@ export function CellInspectorPanel(): React.JSX.Element {
             onClick={deselect}
             className={[
               "shrink-0 inline-flex items-center justify-center",
-              "w-6 h-6 rounded border text-(--color-fg-secondary)",
+              "w-5 h-5 rounded border text-(--color-fg-secondary)",
               "border-(--color-border-strong) bg-transparent",
               "hover:text-(--color-fg-primary) hover:border-amber-500/60",
               "transition-colors",
             ].join(" ")}
           >
-            <X size={12} aria-hidden="true" />
+            <X size={11} aria-hidden="true" />
           </button>
         </Tooltip>
       </header>
 
-      {/* Top-level fields: type, height, layer. */}
-      <section className="flex flex-col gap-1.5">
+      {/* Row 2 — Type. Single label:value row. */}
+      <section className="flex flex-col">
         <Row label="Type" stacked={narrow}>
           <TextInput
             value={cell.type}
@@ -413,51 +408,12 @@ export function CellInspectorPanel(): React.JSX.Element {
             aria-label="Cell type"
           />
         </Row>
-        <Row label="Height" stacked={narrow}>
-          <NumberInput
-            value={cell.height}
-            onChange={(next) =>
-              setCell((prev) => (prev ? { ...prev, height: next } : prev))
-            }
-            precision={2}
-            step={0.1}
-            min={0}
-            max={8}
-            unit="m"
-            showSteppers
-          />
-        </Row>
-        <Row label="Layer" stacked={narrow}>
-          <select
-            value={cell.layer}
-            onChange={(e) =>
-              setCell((prev) =>
-                prev ? { ...prev, layer: e.target.value } : prev,
-              )
-            }
-            className={[
-              "w-full appearance-none rounded-md border bg-(--color-bg-card)",
-              "border-(--color-border-strong) text-(--color-fg-primary)",
-              "px-2 h-7 text-xs leading-none",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-            ].join(" ")}
-            aria-label="Cell layer"
-          >
-            {MOCK_LAYERS.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-            {/* If the cell references a layer not in MOCK_LAYERS, keep
-                it as an option so we don't silently lose it. */}
-            {MOCK_LAYERS.every((l) => l.id !== cell.layer) && (
-              <option value={cell.layer}>{cell.layer}</option>
-            )}
-          </select>
-        </Row>
       </section>
 
-      {/* Tags section. */}
+      {/* Row 3 — TAGS. Promoted above height/layer so tag chips are
+          visible without scrolling at default panel size. Tags drive
+          engine behavior (solid/door/trigger/spawn) so they earn the
+          prime real-estate. */}
       <section className="flex flex-col gap-1">
         <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
           Tags
@@ -555,7 +511,67 @@ export function CellInspectorPanel(): React.JSX.Element {
         </div>
       </section>
 
-      {/* Properties section. */}
+      {/* Row 4 — Height + Layer. Side-by-side at wide widths to save
+          vertical space; stacks each as its own row below the narrow
+          breakpoint. */}
+      <section
+        className={
+          narrow
+            ? "flex flex-col"
+            : "grid grid-cols-2 gap-2 items-start"
+        }
+      >
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+            Height
+          </div>
+          <NumberInput
+            value={cell.height}
+            onChange={(next) =>
+              setCell((prev) => (prev ? { ...prev, height: next } : prev))
+            }
+            precision={2}
+            step={0.1}
+            min={0}
+            max={8}
+            unit="m"
+            showSteppers
+          />
+        </div>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
+            Layer
+          </div>
+          <select
+            value={cell.layer}
+            onChange={(e) =>
+              setCell((prev) =>
+                prev ? { ...prev, layer: e.target.value } : prev,
+              )
+            }
+            className={[
+              "w-full appearance-none rounded-md border bg-(--color-bg-card)",
+              "border-(--color-border-strong) text-(--color-fg-primary)",
+              "px-2 h-6 text-xs leading-none",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
+            ].join(" ")}
+            aria-label="Cell layer"
+          >
+            {MOCK_LAYERS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+            {/* If the cell references a layer not in MOCK_LAYERS, keep
+                it as an option so we don't silently lose it. */}
+            {MOCK_LAYERS.every((l) => l.id !== cell.layer) && (
+              <option value={cell.layer}>{cell.layer}</option>
+            )}
+          </select>
+        </div>
+      </section>
+
+      {/* Properties — bottom of the stack, scrolls when overflowing. */}
       <section className="flex flex-col gap-1">
         <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
           Properties
@@ -599,7 +615,7 @@ function Row({
 }) {
   if (stacked) {
     return (
-      <div className="flex flex-col gap-1 py-0.5">
+      <div className="flex flex-col gap-1 py-px">
         <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
           {label}
         </div>
@@ -608,7 +624,7 @@ function Row({
     );
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-0.5">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-px">
       <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate">
         {label}
       </div>
@@ -762,7 +778,7 @@ function PropertyControl({
       inputRef(input ?? null);
     };
     return (
-      <div className={narrow ? "flex flex-col gap-1 py-0.5" : "py-0.5"}>
+      <div className={narrow ? "flex flex-col gap-1 py-px" : "py-px"}>
         {narrow ? (
           <>
             {labelNode}
@@ -786,14 +802,14 @@ function PropertyControl({
   // it right-aligned on the side-by-side layout.
   if (narrow) {
     return (
-      <div className="flex flex-col gap-1 py-0.5">
+      <div className="flex flex-col gap-1 py-px">
         {labelNode}
         <div className="min-w-0 flex items-center">{control}</div>
       </div>
     );
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-0.5">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-px">
       {labelNode}
       <div className="min-w-0 flex items-center">{control}</div>
     </div>
