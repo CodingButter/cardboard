@@ -1,6 +1,12 @@
 import React from "react";
+import { Play } from "lucide-react";
 import { cn } from "../../lib/cn";
 import logoUrl from "../../assets/logo.png" with { type: "file" };
+import {
+  hasTutorial,
+  isCompleted,
+  startTutorial,
+} from "../../tutorials/runtime";
 
 /**
  * EmptyState — §4.24.
@@ -13,8 +19,16 @@ import logoUrl from "../../assets/logo.png" with { type: "file" };
  *     + optional CTA.
  *
  * Per Q10 in EDITOR_REDESIGN.md §12 the optional `tutorial?: string`
- * prop is declared but a no-op for R2/R4 — the tutorial system
- * doesn't exist yet. R5 (or a later phase) can wire it.
+ * prop is the launcher slug for the guided-tour system. Tutorial
+ * system T1 (`docs/plans/TUTORIALS.md`) wires this prop:
+ *
+ *   - If `tutorial` is unset → no Start tutorial button.
+ *   - If `tutorial` is set but no matching slug is registered → no
+ *     Start tutorial button (R2 behaviour preserved).
+ *   - If `tutorial` is set + registered + not yet completed/skipped →
+ *     a secondary "▶ Start tutorial" button alongside the primary CTA.
+ *   - If the tutorial has been completed or skipped → the button
+ *     stays hidden (the user can re-run from the Help menu in T2).
  */
 
 export interface EmptyStateProps {
@@ -23,7 +37,8 @@ export interface EmptyStateProps {
   description?: React.ReactNode;
   /** Optional CTA — typically a Button or a pair of Buttons in a Fragment. */
   action?: React.ReactNode;
-  /** Tutorial slug — reserved for future use, no-op in R2. */
+  /** Tutorial slug. When set + registered + not yet completed, the
+   *  primitive renders a "▶ Start tutorial" launcher next to `action`. */
   tutorial?: string;
   /** Override the background logo path. Defaults to the bundled
    *  cardboard hex. */
@@ -36,10 +51,15 @@ export function EmptyState({
   title,
   description,
   action,
-  tutorial: _tutorial, // eslint-disable-line @typescript-eslint/no-unused-vars
+  tutorial,
   logoSrc = logoUrl,
   className,
-}: EmptyStateProps) {
+}: EmptyStateProps): React.JSX.Element {
+  const showTutorialButton =
+    typeof tutorial === "string" &&
+    tutorial.length > 0 &&
+    hasTutorial(tutorial) &&
+    !isCompleted(tutorial);
   return (
     <div
       className={cn(
@@ -73,7 +93,28 @@ export function EmptyState({
             </p>
           )}
         </div>
-        {action && <div className="mt-2 flex items-center gap-2">{action}</div>}
+        {(action || showTutorialButton) && (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+            {action}
+            {showTutorialButton && (
+              <button
+                type="button"
+                onClick={() => {
+                  void startTutorial(tutorial!);
+                }}
+                data-tutorial-launcher={tutorial}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border border-amber-500/60",
+                  "px-3 py-1.5 text-sm font-medium text-amber-300 hover:bg-amber-500/10",
+                  "transition-colors",
+                )}
+              >
+                <Play size={14} aria-hidden="true" />
+                Start tutorial
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

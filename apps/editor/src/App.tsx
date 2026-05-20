@@ -1,5 +1,6 @@
 import React from "react";
 import { EditorShell } from "./shell/EditorShell";
+import { TutorialOverlayHost } from "./tutorials/TutorialOverlay";
 
 /**
  * App root — R3 introduced the global editor shell (TopBar +
@@ -19,5 +20,12 @@ import { EditorShell } from "./shell/EditorShell";
  * demo route.
  */
 export function App(): React.JSX.Element {
-  return <EditorShell />;
+  return (
+    <>
+      <EditorShell />
+      {/* T1 tutorial overlay — single mount, portals into document.body
+       *  when a tutorial is active. No-op when state is idle. */}
+      <TutorialOverlayHost />
+    </>
+  );
 }

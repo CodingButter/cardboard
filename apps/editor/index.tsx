@@ -6,6 +6,11 @@ import { assetUrl } from "./src/lib/assetUrl";
 import { installReactRuntime } from "./src/packs/reactRuntime";
 import { installShellSdkRuntime } from "./src/packs/shellSdkRuntime";
 import { attachDevHmrClient } from "./src/packs/devHmrClient";
+import { installBuiltinTutorials } from "./src/tutorials";
+import {
+  hasTutorial,
+  startTutorial,
+} from "./src/tutorials/runtime";
 import { useToolStore } from "./src/state/useToolStore";
 import { useBrushStore } from "./src/state/useBrushStore";
 import { useTilePresetStore } from "./src/state/useTilePresetStore";
@@ -50,6 +55,11 @@ installReactRuntime();
 // import from `@cardboard/editor-shell`, which the pack-builder rewrites
 // to a virtual module reading from `globalThis.__cardboard_editor_shell`.
 installShellSdkRuntime();
+
+// T1 tutorial system — register the built-in `.tutorial.json` files
+// BEFORE the EmptyState components rendered by HomeScreen / MapView
+// run their `hasTutorial(slug)` visibility check. Idempotent.
+installBuiltinTutorials();
 
 // Dev-only pack HMR — subscribes to the editor server's
 // `/__dev/pack-hmr` SSE channel and hot-swaps a pack whenever its
@@ -114,3 +124,27 @@ if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
 
 const root = createRoot(document.getElementById("root")!);
 root.render(<App />);
+
+// T1 tutorial deep link — `?tutorial=<slug>` on initial page load
+// starts the named tutorial after one rAF + a small settle delay so
+// the editor's lazy panel loads finish before the overlay queries
+// selectors. Strips the param via history.replaceState so a refresh
+// doesn't re-launch. Per TUTORIALS.md §5.1.3.
+if (typeof window !== "undefined") {
+  const params = new URLSearchParams(window.location.search);
+  const slug = params.get("tutorial");
+  if (slug && hasTutorial(slug)) {
+    params.delete("tutorial");
+    const cleaned = params.toString();
+    const newUrl =
+      window.location.pathname +
+      (cleaned ? `?${cleaned}` : "") +
+      window.location.hash;
+    window.history.replaceState(null, "", newUrl);
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        void startTutorial(slug);
+      }, 500);
+    });
+  }
+}

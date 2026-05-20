@@ -1459,6 +1459,7 @@ export function MapCanvasPanel(): React.JSX.Element {
     <div
       ref={containerRef}
       data-panel="map-canvas"
+      data-tutorial-id="map-canvas"
       className="relative h-full w-full overflow-hidden bg-zinc-950"
     >
       {tooSmall ? (

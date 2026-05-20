@@ -100,7 +100,19 @@ export function ToolPalettePanel(): React.JSX.Element {
     };
   }, []);
 
-  return <PanelRenderer spec={TOOL_PALETTE_SPEC} />;
+  // `data-tutorial-id="tools-palette"` is the stable anchor for the
+  // built-in `intro-scene` tutorial (TUTORIALS.md T1 — §5.3). The
+  // PanelRenderer spec emits its own root, so we wrap it in a
+  // pointer-events-through wrapper to surface the attribute without
+  // affecting layout.
+  return (
+    <div
+      data-tutorial-id="tools-palette"
+      className="h-full w-full min-h-0"
+    >
+      <PanelRenderer spec={TOOL_PALETTE_SPEC} />
+    </div>
+  );
 }
 
 export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {

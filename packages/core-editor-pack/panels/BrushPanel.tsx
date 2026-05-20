@@ -91,7 +91,16 @@ export function BrushPanel(): React.JSX.Element {
     };
   }, []);
 
-  return <PanelRenderer spec={BRUSH_SPEC} />;
+  // `data-tutorial-id="brush-panel"` anchors the built-in `intro-scene`
+  // tutorial (TUTORIALS.md T1 — §5.3).
+  return (
+    <div
+      data-tutorial-id="brush-panel"
+      className="h-full w-full min-h-0"
+    >
+      <PanelRenderer spec={BRUSH_SPEC} />
+    </div>
+  );
 }
 
 export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {

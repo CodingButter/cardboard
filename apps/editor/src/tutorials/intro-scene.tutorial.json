@@ -1,0 +1,36 @@
+{
+  "$schema": "tutorial/1",
+  "id": "intro-scene",
+  "title": "Scene: 60-second tour",
+  "description": "Meet the Tools palette, the Brush, and the map canvas.",
+  "estimatedSeconds": 60,
+  "steps": [
+    {
+      "id": "tools",
+      "target": "tools-palette",
+      "hint": "The Tools palette lives here. Pick a tool — paint, erase, fill — to drive your strokes.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "brush",
+      "target": "brush-panel",
+      "hint": "The Brush panel sets the shape and size of your stroke. Click Next when you're ready.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "canvas",
+      "target": "map-canvas",
+      "hint": "And here's your map canvas — click and drag to paint tiles. That's the scene workflow in a nutshell!",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    }
+  ]
+}

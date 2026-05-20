@@ -112,6 +112,12 @@ import { Modal } from "../components/ui/Modal";
 import { Button } from "../components/ui/Button";
 import { Tooltip } from "../components/ui/Tooltip";
 import { GAME_RUNNER_URL } from "../lib/gameRunnerUrl";
+// T1 tutorial system — surfaced via `__cardboard_editor_shell.tutorials`.
+// Pack-shipped panels can launch built-in tutorials (e.g. an EmptyState
+// inside a pack can call `api.tutorials.start("intro-scene")`). The
+// runtime is a module-level singleton; all calls must route through
+// the host's registry or completion state forks per-window.
+import { tutorialsApi } from "../tutorials/runtime";
 
 /**
  * P3 batch D-light — narrow public surface over `tileTextureCache`.
@@ -332,6 +338,13 @@ export const shellSdk = {
   // host owns this resolution because it depends on `window.location`
   // semantics that aren't part of the pack runtime's contract.
   GAME_RUNNER_URL,
+  // T1 tutorial system — pack-side launchers (EmptyState's "Start
+  // tutorial" button, future Help-menu submenu) hit this surface. The
+  // runtime is a module-level singleton with its own LS-backed
+  // completion map; bundling a duplicate inside the pack would fork
+  // both the registry and the completion state. Per
+  // `docs/plans/TUTORIALS.md` §4.3.
+  tutorials: tutorialsApi,
 } as const;
 
 export type ShellSdk = typeof shellSdk;
