@@ -99,9 +99,11 @@ Create `packages/my-pack/scripts/pickups.js`:
 export default (api) => {
   const C = api.components;
 
-  // Register a "potion" prefab so other scripts (or a scene
-  // entity placement) can call api.spawn("potion", x, y).
-  api.registerPrefab("potion", (x, y) => {
+  // Local helper: spawn one potion at (x, y).
+  // (Prefabs are an editor-only declarative asset and don't
+  // exist as a runtime ModAPI concept — pack scripts build
+  // entities directly via api.world.spawn() + api.world.add().)
+  function spawnPotion(x, y) {
     const e = api.world.spawn();
     api.world
       .add(e, C.Position, new api.Vec2(x, y))
@@ -120,7 +122,7 @@ export default (api) => {
         drawForwardRay: false,
       });
     return e;
-  });
+  }
 
   // After the scene has spawned (so the player exists), scatter
   // 5 potions at random open cells away from spawn.
@@ -141,7 +143,7 @@ export default (api) => {
         const dy = y + 0.5 - playerPos.y;
         if (dx * dx + dy * dy < 9) continue; // keep clear of spawn
       }
-      api.spawn("potion", x + 0.5, y + 0.5);
+      spawnPotion(x + 0.5, y + 0.5);
       placed++;
     }
     console.log(`[my-pack] scattered ${placed} potions`);
@@ -149,10 +151,10 @@ export default (api) => {
 };
 ```
 
-This is the whole script: register a prefab, wait for the
-world, scatter five of them. The pickup behaviour comes for
-free because the default pack's `pickup.js` system handles any
-entity with a `Pickup` component.
+This is the whole script: define a local spawn helper, wait
+for the world, scatter five potions. The pickup behaviour
+comes for free because the default pack's pickup system handles
+any entity with a `Pickup` component.
 
 ## 4. Build the `.apg`
 

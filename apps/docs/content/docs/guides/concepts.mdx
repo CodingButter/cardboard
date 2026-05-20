@@ -138,38 +138,40 @@ world.each(C.PlayerInput, C.Position, C.Inventory, (_p, _i, ppos, inventory) => 
 
 ## Prefabs
 
-A **prefab** is a named factory function — a recipe for spawning
-configured entities.
+Prefabs are an **editor-only declarative asset**, not a runtime
+ModAPI concept. The editor lets you compose an entity out of
+components and save it as a named template; at pack-build time
+the pack-builder flattens every prefab reference in the scene
+into a concrete `scene.entities[]` record. By the time the
+engine loads a scene, there are no prefabs left — just
+entities.
+
+That means pack **scripts** don't register prefabs and don't
+look them up. They spawn entities directly:
 
 ```js
-api.registerPrefab("ammo_pack", (x, y) => {
-  const e = api.world.spawn();
-  api.world
-    .add(e, api.components.Position, new api.Vec2(x, y))
-    .add(e, api.components.Sprite, {
-      imageId: "ammo_pack",
-      worldHeight: 0.4,
-      yOffset: 0.3,
-    })
-    .add(e, api.components.Pickup, { itemId: "rifle_ammo", count: 30 });
-  return e;
-});
-
-// elsewhere:
-const e = api.spawn("ammo_pack", 7.5, 4.5);
+// Spawn one ammo pack at (7.5, 4.5).
+const e = api.world.spawn();
+api.world
+  .add(e, api.components.Position, new api.Vec2(7.5, 4.5))
+  .add(e, api.components.Sprite, {
+    imageId: "ammo_pack",
+    worldHeight: 0.4,
+    yOffset: 0.3,
+  })
+  .add(e, api.components.Pickup, { itemId: "rifle_ammo", count: 30 });
 ```
 
-Scenes can also reference prefabs by name in their entity
-placements — the engine looks each one up at scene load time
-and calls the factory.
+For multi-entity templates the pattern is the same — wrap the
+construction in a local helper that your script calls. If you
+need the template re-usable across packs, declare it in the
+editor and let the pack-builder bake it into the scene.
 
-The default pack's `player` prefab is the canonical example:
-`packages/default-pack/scripts/prefabs/player.js` builds
-`Position + Facing + Movement + PlayerInput + Aim + Camera +
-Weapon + Inventory + MinimapMarker` and seeds the inventory
-from the manifest's `defaultInventory`. The engine has no
-hardcoded "player" — it just calls
-`api.spawn("player", { x, y, facing })` after the scene loads.
+The default pack's player setup follows this shape:
+`packages/default-pack/scripts/setup/player-init.js` finds the
+already-spawned player entity (placed by the scene's
+`entities[]`) and layers on extra state. The engine has no
+hardcoded "player" — the scene file does.
 
 ## Update vs render systems
 
@@ -276,49 +278,39 @@ or a mouse button without your script caring.
 
 ## Inventory + items
 
-Items are declared in the manifest:
+Inventory is a **pack-side** concern, not an engine concern.
+The engine knows nothing about "items", "bags", or "hotbars" —
+those concepts are implemented in the default pack and any
+pack that depends on it.
 
-```jsonc
-"items": {
-  "rifle_ammo": {
-    "name": "5.56mm Rounds",
-    "image": "images/items/ammo_pack.png",
-    "type": "ammo",
-    "stackMax": 120
-  }
-}
-```
+In the current entity-ref model:
 
-The pack-side inventory helpers live on `api.inventory`:
+- An **item** is an entity carrying `Item` (`{ itemId }`) +
+  `Stackable` (`{ count, max }`) plus optional `Equippable` /
+  `Weapon`.
+- A **container** is an entity carrying `Inventory`
+  (`{ slots: (entityId|null)[], capacity }`).
+- The **carrier** (player) carries a `Carrier` component
+  (`{ hotbar: <entityId>, backpack: <entityId> }`) that
+  references its containers by id.
 
-```js
-const inv = api.inventory;
+Moving an item is just writing its entity id into a container
+slot. Items can themselves have variants — icon, held, world —
+which the default pack uses for inventory icon vs viewmodel vs
+on-the-ground sprite.
 
-// Layout sizes (so you can size your hotbar UI):
-inv.BAG_SIZE;     // const
-inv.HOTBAR_SIZE;  // const
+Pack-side helpers live in
+`packages/default-pack/scripts/lib/inventory.js`
+(`addItemEntity`, `removeItemId`, `countItemId`,
+`getActiveItemEntity`, …) and operate on entity ids and
+component instances. The setup scripts that wire the player's
+starting inventory live in
+`packages/default-pack/scripts/setup/`. If you're building a
+pack that depends on the default pack, import from that lib;
+if you're building a standalone pack you'll want to reproduce
+(or replace) those helpers in your own pack.
 
-// Build a fresh, empty inventory shape:
-const inventory = {
-  bag: new Array(inv.BAG_SIZE).fill(null),
-  hotbar: new Array(inv.HOTBAR_SIZE).fill(null),
-  equipment: inv.emptyEquipment(),
-  activeHotbarIndex: 0,
-};
-
-// Seed from a manifest's defaultInventory entries:
-inv.seedInventory(inventory, api.pack.manifest, api.pack.manifest.defaultInventory ?? []);
-
-// Mutate during gameplay:
-const leftover = inv.addItem(inventory, api.pack.manifest, "rifle_ammo", 30);
-inv.removeItem(inventory, "rifle_ammo", 30);
-const count = inv.countItem(inventory, "rifle_ammo");
-const active = inv.getActiveItem(inventory); // current hotbar stack, or null
-```
-
-`addItem` returns leftover — items it couldn't fit. The default
-pack's `pickup.js` uses this to leave a partial pile behind when
-the bag is full.
+There is no `api.inventory` on the runtime ModAPI.
 
 ## Scenes
 
@@ -343,8 +335,9 @@ The default pack's `hello.js` iterates `scene.size` and calls
 
 ## Lifecycle: `onWorldReady`
 
-Script execution order is: every script in `manifest.scripts`
-runs (so `registerPrefab` calls land) **before** the engine
+Script execution order is: every script in
+`world.json.scripts[]` runs (registering components, systems,
+modal screens, and event subscribers) **before** the engine
 spawns the scene's initial entities. If your script needs to
 find an entity the scene placed — typically the player — wait
 for `onWorldReady`:
@@ -374,18 +367,17 @@ Everything a pack script sees lives on the `api` argument:
 | `api.config` | Merged engine + pack config. Live; reads see overrides. |
 | `api.pack` | The active `AssetPack`. `.manifest` for items, default inventory, etc. |
 | `api.components` | Built-in component types, by name. |
-| `api.inventory` | Inventory helpers — `addItem`, `countItem`, `getActiveItem`. |
 | `api.raycast` | `castRayToWall(scene, origin, dir, maxDist)`. |
 | `api.itemImages` | Shared decoded item-image cache. `.get(itemId, "held"?)`. |
 | `api.input` | `keyboard`, `mouse`, `isBindingPressed`. |
 | `api.modals` | `setOpen`, `isOpen`, `any`, `anyOther`. |
+| `api.audio` | Pack-script audio playback. `play`, `playLoop`, `stop`. |
+| `api.events` | Pub/sub event bus. `on`, `once`, `off`, `emit`. |
 | `api.Vec2` | Vec2 constructor. |
 | `api.defineComponent(name)` | Register a custom component. |
 | `api.getComponent(name)` | Look up a component by name. |
 | `api.registerSystem(fn)` | Per-frame logic system. |
 | `api.registerRendererSystem(fn, phase)` | Per-frame draw system. |
-| `api.registerPrefab(name, factory)` | Register a spawn recipe. |
-| `api.spawn(name, ...args)` | Invoke a prefab. |
 | `api.onWorldReady(fn)` | One-shot init after scene loads. |
 
 Everything else is detail. The [ModAPI cookbook](/docs/guides/modapi-cookbook)

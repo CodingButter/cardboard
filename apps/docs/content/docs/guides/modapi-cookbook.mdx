@@ -316,13 +316,19 @@ export default (api) => {
   const C = api.components;
   const Health = api.defineComponent("Health");
 
-  api.registerPrefab("imp", (x, y) => {
+  // Local helper instead of a prefab — prefabs are an
+  // editor-only declarative asset and aren't a runtime concept.
+  function spawnImp(x, y) {
     const e = api.world.spawn();
     api.world
       .add(e, C.Position, new api.Vec2(x, y))
       .add(e, C.Sprite, { imageId: "ammo_pack", worldHeight: 0.6 })
       .add(e, Health, { hp: 30, maxHp: 30 });
     return e;
+  }
+
+  api.onWorldReady(() => {
+    spawnImp(6.5, 6.5);
   });
 
   // Drain HP over time as a demo; despawn at zero.
@@ -342,33 +348,15 @@ script and `api.getComponent("Health")` from the others.
 
 ---
 
-## Add an item to the player's inventory at spawn
-
-The default pack does this through `defaultInventory` in the
-manifest, which is the recommended path. If you want to do it
-**from a script** — e.g. award a starter weapon conditional on
-something — wait for world-ready, find the player, mutate the
-inventory:
-
-```js
-api.onWorldReady((api) => {
-  const C = api.components;
-  const inv = api.inventory;
-
-  const player = api.world.first(C.PlayerInput, C.Inventory);
-  if (player === undefined) return;
-  const inventory = C.Inventory.getOrThrow(player);
-
-  inv.addItem(inventory, api.pack.manifest, "rifle_ammo", 60);
-});
-```
-
-`addItem` respects per-item `stackMax`. The return value is
-**leftover** — what wouldn't fit. The default-pack `pickup.js`
-checks this so a partial pickup leaves the rest of the pile
-on the ground.
-
----
+{/* recipe removed 2026-05-20: depended on api.inventory.addItem
+    which was removed when inventory moved to the entity-ref
+    model. The pack-side equivalent lives in
+    packages/default-pack/scripts/lib/inventory.js
+    (addItemEntity, removeItemId, countItemId,
+    getActiveItemEntity) and operates on container entity ids,
+    not on an api.inventory surface. Default-pack startup
+    inventory now comes from data/default-inventory.json loaded
+    by packages/default-pack/scripts/setup/. */}
 
 ## Detect when the player is near an entity
 
@@ -439,58 +427,29 @@ for a given facing angle.
 
 ---
 
-## Look up an item definition from the manifest
+{/* recipe removed 2026-05-20: depended on
+    api.inventory.getActiveItem AND manifest.items, both of
+    which were removed. Item definitions now live on item
+    entities themselves (Item + Stackable + optional Weapon
+    components) rather than in a manifest.items dictionary; the
+    "active item" lookup is pack-side via
+    packages/default-pack/scripts/lib/inventory.js
+    (getActiveItemEntity), reading components off the returned
+    entity for fire rate / mag size / etc. */}
 
-The manifest's `items` block is the source of truth for item
-metadata — display name, image path, stack limits, type, and
-type-specific data like weapon stats.
-
-```js
-api.registerSystem((world) => {
-  const player = world.first(api.components.PlayerInput, api.components.Inventory);
-  if (player === undefined) return;
-  const inventory = api.components.Inventory.getOrThrow(player);
-
-  const active = api.inventory.getActiveItem(inventory);
-  if (!active) return;
-  const def = api.pack.manifest.items?.[active.itemId];
-  if (!def) return;
-
-  // def.name, def.type, def.image, def.stackMax, def.weapon, ...
-  if (def.type === "weapon") {
-    const magSize = def.weapon?.magazineSize ?? 0;
-    const ammoId = def.weapon?.ammoItem;
-    // ...
-  }
-});
-```
-
-`gun-render.js` does this on every frame to look up fire rate,
-mag size, and reload time for the active weapon.
-
----
-
-## Draw the active item's icon
+## Draw an item icon by id
 
 `api.itemImages` is a shared cache of decoded `HTMLImageElement`s
-keyed by item id. Both inventory-bar-render and gun-render
-blit from it; sharing the cache means every system reads from
-the same decoded image and the textures decode exactly once at
-boot.
+keyed by item id. Pack-side systems blit from it; sharing the
+cache means every system reads from the same decoded image and
+the textures decode exactly once at boot.
 
 ```js
-api.registerRendererSystem((renderer, world) => {
-  const C = api.components;
-  const player = world.first(C.PlayerInput, C.Inventory);
-  if (player === undefined) return;
-  const inventory = C.Inventory.getOrThrow(player);
-  const active = api.inventory.getActiveItem(inventory);
-  if (!active) return;
-
+api.registerRendererSystem((renderer) => {
   // Default variant (inventory icon):
-  const icon = api.itemImages.get(active.itemId);
+  const icon = api.itemImages.get("rifle_ammo");
   // Held variant (viewmodel, larger / posed):
-  const held = api.itemImages.get(active.itemId, "held");
+  const held = api.itemImages.get("rifle_ammo", "held");
 
   const ctx = renderer.ctx;
   if (icon) {
@@ -499,9 +458,13 @@ api.registerRendererSystem((renderer, world) => {
 }, "hud");
 ```
 
-Variants come from the manifest's `items[id].variants` block;
-the default `"held"` variant is used by gun-render for the
-viewmodel pose.
+To draw the *active* item's icon you need to resolve which
+item the carrier is holding — that's pack-side bookkeeping
+(see `packages/default-pack/scripts/lib/inventory.js` →
+`getActiveItemEntity`, then read the `Item` component on the
+returned entity to get its `itemId`). Variants like `"held"`
+are declared in the item's sprite definition; the default
+pack's gun viewmodel uses the `"held"` variant for its pose.
 
 ---
 
