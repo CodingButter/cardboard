@@ -942,9 +942,10 @@ function LightRowView({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "lighting",
   title: "Lighting",
+  category: "Scene",
   icon: <Sun size={12} />,
 };
 

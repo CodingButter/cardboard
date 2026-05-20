@@ -171,6 +171,20 @@ export type DockKind =
 export interface PanelSpec {
   id: string;
   title: string;
+  /** Grouping bucket used by the DocksModal (panel-add modal) to
+   *  cluster cards under a category header instead of dumping every
+   *  panel into one undifferentiated grid.
+   *
+   *  Convention: capitalized, short, plural where natural — e.g.
+   *  `"Tools"`, `"Inspector"`, `"Diagnostics"`, `"Viewport"`,
+   *  `"Scene"`, `"Browse"`.
+   *
+   *  The shell predefines an ordered set of categories (see
+   *  `DocksModal.tsx`), but the field is a free-form string so
+   *  third-party packs may use any category they like; unknown
+   *  categories appear in their own group sorted after the
+   *  predefined ones. */
+  category: string;
   dockKind: DockKind;
   /** Optional per-panel local state slice (Phase 0: accepted, not wired). */
   state?: Record<string, PanelLocalStateSpec>;

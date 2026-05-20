@@ -1,6 +1,7 @@
 {
   "id": "demo-selection-info",
   "title": "Demo: Selection Info (JSON)",
+  "category": "Inspector",
   "dockKind": "dockable-window",
   "state": {},
   "root": {

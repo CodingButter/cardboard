@@ -451,9 +451,10 @@ function PresetRow({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "tile-preset",
   title: "Tile Presets",
+  category: "Tools",
   icon: <Boxes size={12} />,
 };
 

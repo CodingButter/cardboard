@@ -852,9 +852,10 @@ export function ComponentEditorPanel(): React.JSX.Element {
 // needed. Avoids a second import path during the refactor.
 export type { ComponentInstance, EntityRow };
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "component-editor",
   title: "Components",
+  category: "Inspector",
   icon: <Layers size={12} />,
 };
 

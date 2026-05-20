@@ -536,9 +536,10 @@ export function EntityHeaderPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "entity-header",
   title: "Entity Header",
+  category: "Inspector",
   icon: <FileText size={12} />,
 };
 

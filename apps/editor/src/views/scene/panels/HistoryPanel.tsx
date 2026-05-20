@@ -549,9 +549,10 @@ function HistoryEntryView({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "history",
   title: "History",
+  category: "Diagnostics",
   icon: <History size={12} />,
 };
 

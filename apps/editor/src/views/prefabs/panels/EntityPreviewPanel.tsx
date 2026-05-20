@@ -783,9 +783,10 @@ function PreviewIconButton({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "entity-preview",
   title: "Preview",
+  category: "Viewport",
   icon: <Box size={12} />,
 };
 

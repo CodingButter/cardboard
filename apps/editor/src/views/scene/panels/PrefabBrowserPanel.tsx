@@ -560,9 +560,10 @@ function PrefabTile({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "prefab-browser",
   title: "Prefabs",
+  category: "Browse",
   icon: <Boxes size={12} />,
 };
 

@@ -682,9 +682,10 @@ export function MinimapPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "minimap",
   title: "Minimap",
+  category: "Viewport",
   icon: <Map size={12} />,
 };
 

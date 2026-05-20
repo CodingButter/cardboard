@@ -742,9 +742,10 @@ function AssetRow({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "asset-references",
   title: "References",
+  category: "Browse",
   icon: <Link size={12} />,
 };
 

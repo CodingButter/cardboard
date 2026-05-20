@@ -386,9 +386,10 @@ export function JsonPreviewPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "json-preview",
   title: "JSON",
+  category: "Diagnostics",
   icon: <Braces size={12} />,
 };
 

@@ -1128,9 +1128,10 @@ function PropertyControl({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "cell-inspector",
   title: "Cell Inspector",
+  category: "Inspector",
   icon: <SlidersHorizontal size={12} />,
 };
 

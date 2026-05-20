@@ -378,9 +378,10 @@ function SelectionSection({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "selection-info",
   title: "Selection Info",
+  category: "Inspector",
   icon: <Crosshair size={12} />,
 };
 

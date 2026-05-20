@@ -29,6 +29,27 @@ interface DocksModalProps {
 }
 
 /**
+ * Stable category display order. Categories listed here render
+ * top-to-bottom in the modal. Any panel whose `category` is NOT in
+ * this list (e.g. a third-party pack using its own taxonomy) is
+ * appended below the predefined groups, sorted alphabetically.
+ *
+ * Keep this list short — it's the canonical taxonomy the editor's
+ * own panels conform to. The free-form `category` field on
+ * `DockPanelDef` lets packs introduce new buckets without us
+ * gatekeeping; they just appear below the canonical ones.
+ */
+const CATEGORY_ORDER: readonly string[] = [
+  "Tools",
+  "Viewport",
+  "Scene",
+  "Inspector",
+  "Browse",
+  "Diagnostics",
+  "Uncategorized",
+];
+
+/**
  * Tick a counter on every layout change so the cards' "In layout"
  * state reflects live dockview state without us threading a prop
  * through.
@@ -67,6 +88,36 @@ export function DocksModal({
     [registry],
   );
 
+  // Group cards by `category`. Iterate in a stable, predefined order
+  // so the visual grouping is predictable; unknown / third-party
+  // categories appear last, sorted alphabetically.
+  const grouped = React.useMemo(() => {
+    const buckets = new Map<string, DockPanelDef[]>();
+    for (const def of cards) {
+      const key = def.category || "Uncategorized";
+      const existing = buckets.get(key);
+      if (existing) existing.push(def);
+      else buckets.set(key, [def]);
+    }
+    const seen = new Set<string>();
+    const ordered: Array<readonly [string, DockPanelDef[]]> = [];
+    for (const key of CATEGORY_ORDER) {
+      const bucket = buckets.get(key);
+      if (bucket && bucket.length > 0) {
+        ordered.push([key, bucket]);
+        seen.add(key);
+      }
+    }
+    const leftover = [...buckets.keys()]
+      .filter((k) => !seen.has(k))
+      .sort((a, b) => a.localeCompare(b));
+    for (const key of leftover) {
+      const bucket = buckets.get(key);
+      if (bucket && bucket.length > 0) ordered.push([key, bucket]);
+    }
+    return ordered;
+  }, [cards]);
+
   return (
     <Modal
       open={open}
@@ -80,13 +131,24 @@ export function DocksModal({
         </Button>
       }
     >
-      <div
-        className={cn(
-          "grid gap-3",
-          "grid-cols-2 md:grid-cols-3 lg:grid-cols-4",
-        )}
-      >
-        {cards.map((def) => {
+      {grouped.map(([category, defs]) => (
+        <section key={category}>
+          <h3
+            className={cn(
+              "text-xs uppercase tracking-wide font-semibold",
+              "text-(--color-fg-muted)",
+              "mt-4 first:mt-0 mb-2",
+            )}
+          >
+            {category}
+          </h3>
+          <div
+            className={cn(
+              "grid gap-3",
+              "grid-cols-2 md:grid-cols-3 lg:grid-cols-4",
+            )}
+          >
+            {defs.map((def) => {
           const isMounted = !!api?.getPanel(def.id);
           // Add the panel to the live dockview layout. Default
           // placement: split right of the rightmost existing group
@@ -216,7 +278,9 @@ export function DocksModal({
             </Tooltip>
           );
         })}
-      </div>
+          </div>
+        </section>
+      ))}
     </Modal>
   );
 }

@@ -439,9 +439,10 @@ function SliderRow({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "scene-settings",
   title: "Scene Settings",
+  category: "Scene",
   icon: <Settings size={12} />,
 };
 

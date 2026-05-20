@@ -449,9 +449,10 @@ export function BrushPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "brush",
   title: "Brush",
+  category: "Tools",
   icon: <Brush size={12} />,
 };
 

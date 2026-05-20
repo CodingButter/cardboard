@@ -800,9 +800,10 @@ function ProblemRow({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "problems",
   title: "Problems",
+  category: "Diagnostics",
   icon: <AlertCircle size={12} />,
 };
 

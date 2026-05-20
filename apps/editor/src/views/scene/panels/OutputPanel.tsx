@@ -681,9 +681,10 @@ function LogRow({ line }: LogRowProps): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "output",
   title: "Output",
+  category: "Diagnostics",
   icon: <Terminal size={12} />,
 };
 

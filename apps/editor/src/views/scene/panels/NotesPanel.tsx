@@ -624,9 +624,10 @@ function NotesTextarea({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "notes",
   title: "Notes",
+  category: "Diagnostics",
   icon: <StickyNote size={12} />,
 };
 

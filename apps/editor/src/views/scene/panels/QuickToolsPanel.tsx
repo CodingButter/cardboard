@@ -311,9 +311,10 @@ export function QuickToolsPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "quick-tools",
   title: "Quick Tools",
+  category: "Tools",
   icon: <Wrench size={12} />,
 };
 

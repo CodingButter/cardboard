@@ -579,9 +579,10 @@ function EntityRowItem({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "entity-list",
   title: "Entities",
+  category: "Browse",
   icon: <List size={12} />,
 };
 

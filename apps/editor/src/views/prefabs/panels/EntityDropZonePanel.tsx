@@ -265,9 +265,10 @@ export function EntityDropZonePanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "entity-drop-zone",
   title: "Drop Zone",
+  category: "Browse",
   icon: <Upload size={12} />,
 };
 

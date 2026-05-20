@@ -1596,9 +1596,10 @@ export function MapCanvasPanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "map-canvas",
   title: "Map",
+  category: "Viewport",
   icon: <MapIcon size={12} />,
 };
 

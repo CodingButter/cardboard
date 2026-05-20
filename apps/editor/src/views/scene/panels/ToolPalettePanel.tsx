@@ -273,9 +273,10 @@ export function ToolPalettePanel(): React.JSX.Element {
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "tool-palette",
   title: "Tools",
+  category: "Tools",
   icon: <Hammer size={12} />,
 };
 

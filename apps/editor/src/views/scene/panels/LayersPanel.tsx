@@ -662,9 +662,10 @@ function LayerRowView({
   );
 }
 
-export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon"> = {
+export const MANIFEST: Pick<DockPanelDef, "id" | "title" | "icon" | "category"> = {
   id: "layers",
   title: "Layers",
+  category: "Scene",
   icon: <Layers size={12} />,
 };
 
