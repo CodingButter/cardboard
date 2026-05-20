@@ -44,6 +44,8 @@ import {
   RectangleHorizontal,
   Slash,
   Square,
+  Wrench,
+  X,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { NumberInput } from "../components/ui/NumberInput";
@@ -113,6 +115,11 @@ const ICON_REGISTRY: Record<
   RectangleHorizontal,
   Minus,
   Plus,
+  // Added for the QuickToolsPanel migration — `X` is the Clear-all
+  // button icon, `Wrench` is the panel manifest icon (kept here so
+  // the pack-shipped variant can reference it from JSON too).
+  X,
+  Wrench,
 };
 
 // ---------------------------------------------------------------------------
@@ -155,6 +162,18 @@ const FORMATTERS: Record<TextFormat, Formatter> = {
   },
   // "1 cell" / "0 cells" — phase 0 only supports single-cell selection.
   selectionCount: (value) => (value ? "1 cell" : "0 cells"),
+  // ` (N)` when the bound value is a non-empty array, else "". Reads
+  // through the array length so this composes cleanly with a header
+  // like "Quick Tools" + Text{format:"applyCount"} — when no cell is
+  // selected the binding resolves to undefined and the readout
+  // collapses to the empty string with no layout shift. Strings also
+  // accepted (length-bearing) so the formatter is reusable for other
+  // collection-shaped bindings.
+  applyCount: (value) => {
+    if (Array.isArray(value) && value.length > 0) return ` (${value.length})`;
+    if (typeof value === "string" && value.length > 0) return ` (${value.length})`;
+    return "";
+  },
   // Resolve an activeLayerId to its display name. Reads MOCK_LAYERS +
   // useLayerStore.customLayers; falls back to the raw id (or em-dash
   // when the id is empty). The formatter is called every render from
@@ -640,12 +659,24 @@ function ConditionalRenderer({
   node: ConditionalNode;
 }): React.JSX.Element | null {
   const { value } = useStoreBinding(node.when);
-  // Two-mode gate: truthy (default) or strict-equality (when `equals`
-  // is set). The equality branch lets ToolPalette gate the sub-tool
-  // strip on `tool.activeTool === "select"` without a custom
-  // when-expression DSL.
-  const shouldRender =
-    node.equals === undefined ? Boolean(value) : value === node.equals;
+  // Three-mode gate, precedence from most-specific to most-general:
+  //   1. `equals` (including `equals: null`) — strict equality.
+  //   2. `notEmpty` — non-empty array / non-empty string. Distinct
+  //      from the default truthy gate because `[]` is truthy in JS,
+  //      which would let the QuickTools Clear button render against
+  //      an empty tags array. Set `notEmpty: true` to opt into the
+  //      length-aware check.
+  //   3. Default truthy — `Boolean(value)`.
+  let shouldRender: boolean;
+  if (node.equals !== undefined) {
+    shouldRender = value === node.equals;
+  } else if (node.notEmpty === true) {
+    if (Array.isArray(value)) shouldRender = value.length > 0;
+    else if (typeof value === "string") shouldRender = value.length > 0;
+    else shouldRender = false;
+  } else {
+    shouldRender = Boolean(value);
+  }
   if (!shouldRender) return null;
   return (
     <>
@@ -661,20 +692,43 @@ function ConditionalRenderer({
 // ---------------------------------------------------------------------------
 
 /**
- * Pressed-state styling lookup. Shape "tile" matches the ToolPalette
- * 60px square tile (icon above uppercase label); "chip" matches the
- * sub-tool rounded-pill chip. Both reuse the canonical amber active /
- * border-strong inactive colour pair so a global retune still works.
+ * Pressed-state styling lookup.
+ *   • "tile" — ToolPalette 60px square (icon above uppercase label).
+ *   • "chip" — solid-amber rounded pill (ToolPalette sub-tool strip).
+ *   • "tag"  — calm amber-tint rounded pill (QuickTools chip wrap):
+ *              the active state is a tinted border rather than a
+ *              solid fill so multiple active chips don't visually
+ *              shout. Disabled state dims to muted fg + border.
+ *
+ * All three shapes route through the same renderer; only the
+ * className differs. The shared amber palette ties them visually so
+ * a global retune still works.
  */
 function toggleButtonClass(
   shape: ToggleButtonNode["shape"],
   active: boolean,
+  disabled: boolean,
 ): string {
+  if (shape === "tag") {
+    // QuickTools chip — calm amber-tint active state, muted disabled.
+    const tagState = disabled
+      ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-60 cursor-not-allowed"
+      : active
+        ? "bg-amber-500/15 border-amber-500 text-amber-300"
+        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)";
+    return cn(
+      "rounded-full px-2 py-1 text-[10px] uppercase tracking-wide whitespace-nowrap",
+      "border transition-colors",
+      tagState,
+    );
+  }
   const shared =
     "border transition-colors " +
-    (active
-      ? "bg-amber-500 border-amber-500 text-zinc-950"
-      : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)");
+    (disabled
+      ? "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-60 cursor-not-allowed"
+      : active
+        ? "bg-amber-500 border-amber-500 text-zinc-950"
+        : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)");
   if (shape === "chip") {
     return cn(
       "shrink-0 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
@@ -694,19 +748,45 @@ function ToggleButtonRenderer({
   node: ToggleButtonNode;
 }): React.JSX.Element {
   const { value } = useStoreBinding(node.bind);
-  const active = value === node.activeValue;
+  // Pressed-state semantics — `activeValue` (strict-equal) wins when
+  // both discriminants are set; otherwise `activeWhenContains` runs
+  // an `Array.includes` check. Both unset → never active. Documented
+  // precedence in types.ts.
+  const active = React.useMemo(() => {
+    if (node.activeValue !== undefined) return value === node.activeValue;
+    if (node.activeWhenContains !== undefined) {
+      return Array.isArray(value) && value.includes(node.activeWhenContains);
+    }
+    return false;
+  }, [node.activeValue, node.activeWhenContains, value]);
+  // Disabled-state binding — separate hook call so subscription
+  // tracking stays stable. We always call the hook (sentinel path
+  // when no disabledWhen is set) to keep React's hook order
+  // invariant.
+  const disabledBindPath = node.disabledWhen?.bind ?? "store.selection.selected";
+  const { value: disabledValue } = useStoreBinding(disabledBindPath);
+  const disabled = React.useMemo(() => {
+    const dw = node.disabledWhen;
+    if (!dw) return false;
+    if (dw.isNullish === true) return disabledValue == null;
+    return false;
+  }, [node.disabledWhen, disabledValue]);
+
   const shape = node.shape ?? "tile";
   const onClick = React.useCallback(() => {
+    if (disabled) return;
     void invokeScript(node.onClick);
-  }, [node.onClick]);
+  }, [disabled, node.onClick]);
   const Icon = node.icon ? ICON_REGISTRY[node.icon] : undefined;
   return (
     <button
       type="button"
       aria-label={node.ariaLabel ?? node.text}
       aria-pressed={active}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       onClick={onClick}
-      className={toggleButtonClass(shape, active)}
+      className={toggleButtonClass(shape, active, disabled)}
     >
       {shape === "tile" ? (
         <>

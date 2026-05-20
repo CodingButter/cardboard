@@ -130,12 +130,22 @@ export interface HeadingNode {
  *   • "layerName"       — `string`     → display name from `useLayerStore.activeId`
  *                                        (resolves MOCK_LAYERS + customLayers; falls
  *                                        back to the raw id)
+ *   • "applyCount"      — `readonly unknown[] | undefined | null` → ` (N)` when N > 0,
+ *                                        otherwise the empty string. Used by the
+ *                                        QuickTools header to surface a "X (3)" badge
+ *                                        directly from `cells[selected].tags` without
+ *                                        the panel host materialising a derived store.
  *
  * Adding a formatter is a one-line addition to the FORMATTERS map in
  * `PanelRenderer.tsx`; the renderer is the only place that knows the
  * formatter shapes.
  */
-export type TextFormat = "position" | "cell" | "selectionCount" | "layerName";
+export type TextFormat =
+  | "position"
+  | "cell"
+  | "selectionCount"
+  | "layerName"
+  | "applyCount";
 
 /**
  * Semantic Text variants — these map to canonical typography slots
@@ -284,8 +294,17 @@ export interface ConditionalNode {
   /** Optional equality comparand. When set, the children render iff
    *  `resolve(when) === equals`. When omitted, behaviour is the
    *  classic truthy check. Lets Phase 1 panels gate on enum-style
-   *  store fields (e.g. `tool.activeTool === "select"`). */
-  equals?: string | number | boolean;
+   *  store fields (e.g. `tool.activeTool === "select"`). `null` is
+   *  permitted so a panel can gate on "no selection" without an
+   *  inverted-truthy mode — `equals: null` matches the panel's
+   *  hasSelection === false branch directly. */
+  equals?: string | number | boolean | null;
+  /** When true, render iff the resolved value is a non-empty array OR
+   *  a non-empty string. Distinct from the default truthy gate because
+   *  `[]` is truthy in JS — the QuickTools Clear button only wants to
+   *  appear when `cells[selected].tags` is a NON-empty array. Ignored
+   *  when `equals` is also set. */
+  notEmpty?: boolean;
   children: NodeSpec[];
 }
 
@@ -350,10 +369,19 @@ export interface ToggleButtonNode {
   type: "ToggleButton";
   /** Binding read to determine pressed state. */
   bind: StorePath;
-  /** Pressed iff the bound value strictly equals `activeValue`. */
-  activeValue: string | number | boolean;
+  /** Pressed iff the bound value strictly equals `activeValue`.
+   *  Mutually exclusive with `activeWhenContains` — when both are
+   *  set, `activeValue` wins (matches author-intent ordering).
+   *  Optional because the `activeWhenContains` discriminant covers
+   *  the "is in array" case the QuickTools chips need. */
+  activeValue?: string | number | boolean;
+  /** Pressed iff the bound value is an array AND that array includes
+   *  this string. Lets a toggle reflect "tag is applied" without the
+   *  panel host materialising a per-id derived boolean. Added for
+   *  the QuickTools chip migration. */
+  activeWhenContains?: string;
   /** Tile label. Shown beneath the icon in "tile" shape; or as the
-   *  only content in "chip" shape. */
+   *  only content in "chip" / "tag" shape. */
   text: string;
   /** Optional icon name from `ICON_REGISTRY` — used by "tile" shape. */
   icon?: string;
@@ -361,10 +389,22 @@ export interface ToggleButtonNode {
   iconSize?: number;
   /** Click action. */
   onClick: ScriptRef;
-  /** Visual shape. Defaults to "tile". */
-  shape?: "tile" | "chip";
+  /** Visual shape. Defaults to "tile".
+   *  • "tile" — icon-above-label square (ToolPalette / Brush).
+   *  • "chip" — solid-amber rounded pill (ToolPalette sub-tool strip).
+   *  • "tag"  — calm amber-tint rounded pill, used by QuickTools chips
+   *             so multiple active chips don't visually shout. */
+  shape?: "tile" | "chip" | "tag";
   /** Accessibility label. Defaults to `text`. */
   ariaLabel?: string;
+  /** Optional disabled-gate binding. When `isNullish` is true, the
+   *  button is disabled iff the bound value is null/undefined — the
+   *  QuickTools chip pattern (no cell selected ⇒ chips dim). */
+  disabledWhen?: {
+    bind: StorePath;
+    /** Disabled iff resolved value is null/undefined. */
+    isNullish?: boolean;
+  };
 }
 
 /**

@@ -1,0 +1,447 @@
+{
+  "id": "quick-tools",
+  "title": "Quick Tools",
+  "category": "Tools",
+  "dockKind": "dockable-window",
+  "state": {},
+  "rootOptions": {
+    "padding": 0,
+    "bare": true
+  },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 2,
+    "className": "h-full w-full min-h-0 overflow-y-auto overflow-x-hidden",
+    "children": [
+      {
+        "type": "Layout",
+        "direction": "row",
+        "align": "center",
+        "justify": "between",
+        "gap": 1,
+        "className": "min-w-0",
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "row",
+            "gap": 0,
+            "align": "center",
+            "className": "min-w-0 truncate",
+            "children": [
+              {
+                "type": "Conditional",
+                "when": "store.selection.selected",
+                "children": [
+                  {
+                    "type": "Text",
+                    "variant": "label",
+                    "text": "Quick Tools"
+                  },
+                  {
+                    "type": "Text",
+                    "variant": "label",
+                    "text": "store.scene.cells[selected].tags",
+                    "format": "applyCount"
+                  }
+                ]
+              },
+              {
+                "type": "Conditional",
+                "when": "store.selection.selected",
+                "equals": null,
+                "children": [
+                  {
+                    "type": "Text",
+                    "variant": "label",
+                    "text": "Quick Tools — select a cell"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Conditional",
+            "when": "store.scene.cells[selected].tags",
+            "notEmpty": true,
+            "children": [
+              {
+                "type": "Tooltip",
+                "side": "top",
+                "stages": [
+                  {
+                    "delay": 1000,
+                    "content": { "type": "Text", "text": "Clear all" }
+                  },
+                  {
+                    "delay": 3000,
+                    "content": {
+                      "type": "Layout",
+                      "direction": "column",
+                      "gap": 1,
+                      "children": [
+                        { "type": "Heading", "level": 4, "text": "Clear All" },
+                        {
+                          "type": "Text",
+                          "variant": "muted",
+                          "text": "Remove every applied quick-tool tag from the selected cell in one step."
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "child": {
+                  "type": "Button",
+                  "shape": "icon",
+                  "icon": "X",
+                  "iconSize": 11,
+                  "ariaLabel": "Clear all applied quick tools",
+                  "onClick": { "script": "scene.quickTools.clear" }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 1,
+        "align": "start",
+        "className": "flex-wrap",
+        "children": [
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Solid" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Solid" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Mark the selection as a solid blocker — collides with movement and blocks projectiles."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "solid",
+              "text": "Solid",
+              "ariaLabel": "Solid",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.solid" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Door" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Door" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as a door — interactable opening that can swing, slide, or be locked."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "door",
+              "text": "Door",
+              "ariaLabel": "Door",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.door" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Trigger" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Trigger" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as a trigger volume — fires script events when entered or exited."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "trigger",
+              "text": "Trigger",
+              "ariaLabel": "Trigger",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.trigger" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Spawn" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Spawn" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Mark the selection as a spawn point — players or entities enter the scene here."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "spawn",
+              "text": "Spawn",
+              "ariaLabel": "Spawn",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.spawn" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Exit" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Exit" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Mark the selection as an exit point — leads to the next scene or level."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "exit",
+              "text": "Exit",
+              "ariaLabel": "Exit",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.exit" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Secret" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Secret" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as a secret — hidden area tracked by the level's completion stats."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "secret",
+              "text": "Secret",
+              "ariaLabel": "Secret",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.secret" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Cover" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Cover" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as ambush cover — AI uses it for line-of-sight breaks and flanking."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "ambush-cover",
+              "text": "Cover",
+              "ariaLabel": "Cover",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.ambush-cover" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Decor" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Decor" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as decor — non-interactive visual dressing that doesn't affect gameplay."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "decor",
+              "text": "Decor",
+              "ariaLabel": "Decor",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.decor" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Lit" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Lit" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Mark the selection as a light source — emits illumination into the surrounding cells."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "lit",
+              "text": "Lit",
+              "ariaLabel": "Lit",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.lit" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Loot" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Loot" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Tag the selection as a loot container — drops items when interacted with or destroyed."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tag",
+              "bind": "store.scene.cells[selected].tags",
+              "activeWhenContains": "loot",
+              "text": "Loot",
+              "ariaLabel": "Loot",
+              "disabledWhen": { "bind": "store.selection.selected", "isNullish": true },
+              "onClick": { "script": "scene.quickTools.tag.toggle.loot" }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

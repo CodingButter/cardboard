@@ -34,6 +34,8 @@ import demoSpec from "./test-fixtures/demo-selection-info.json";
 import selectionInfoSpec from "./specs/selection-info.json";
 import toolPaletteSpec from "./specs/tool-palette.json";
 import brushSpec from "./specs/brush.json";
+import quickToolsSpec from "./specs/quick-tools.json";
+import { MOCK_QUICK_TOOLS } from "../views/scene/scene-fixtures";
 import type { NodeSpec, PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -979,5 +981,328 @@ describe("Brush JSON spec", () => {
     expect(useBrushStore.getState().size).toBe(1);
     await invokeScript({ script: "scene.brush.sizeUp" });
     expect(useBrushStore.getState().size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QuickTools JSON spec — Phase 1b migration target
+// ---------------------------------------------------------------------------
+
+describe("QuickTools JSON spec", () => {
+  test("loads as a PanelSpec with id 'quick-tools'", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    expect(spec.id).toBe("quick-tools");
+    expect(spec.title).toBe("Quick Tools");
+    expect(spec.category).toBe("Tools");
+    expect(spec.dockKind).toBe("dockable-window");
+    expect(spec.root.type).toBe("Layout");
+  });
+
+  test("includes one ToggleButton tag per MOCK_QUICK_TOOLS entry (10)", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    let tagCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton" && obj.shape === "tag") tagCount++;
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(tagCount).toBe(MOCK_QUICK_TOOLS.length);
+    expect(tagCount).toBe(10);
+  });
+
+  test("each tag ToggleButton binds to cells[selected].tags + activeWhenContains its id", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    const ids = new Set<string>();
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton" && obj.shape === "tag") {
+        expect(obj.bind).toBe("store.scene.cells[selected].tags");
+        if (typeof obj.activeWhenContains === "string") {
+          ids.add(obj.activeWhenContains);
+        }
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    // Every MOCK_QUICK_TOOLS id should appear as an activeWhenContains
+    // discriminant — otherwise a chip's pressed state would never flip.
+    for (const t of MOCK_QUICK_TOOLS) {
+      expect(ids.has(t.id)).toBe(true);
+    }
+  });
+
+  test("each tag chip is gated disabled when selection is nullish", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    let gatedCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton" && obj.shape === "tag") {
+        const dw = obj.disabledWhen as
+          | { bind?: string; isNullish?: boolean }
+          | undefined;
+        if (
+          dw?.bind === "store.selection.selected" &&
+          dw.isNullish === true
+        ) {
+          gatedCount++;
+        }
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(gatedCount).toBe(MOCK_QUICK_TOOLS.length);
+  });
+
+  test("Clear-all button is gated by notEmpty on cells[selected].tags", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Conditional" &&
+        obj.when === "store.scene.cells[selected].tags" &&
+        obj.notEmpty === true
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("header has a Conditional gated by selection === null for the empty-state label", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Conditional" &&
+        obj.when === "store.selection.selected" &&
+        obj.equals === null
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("uses the applyCount text formatter for the header badge", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Text" &&
+        obj.format === "applyCount" &&
+        obj.text === "store.scene.cells[selected].tags"
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("every script-ref onClick points at a known scene.quickTools.* command id", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    const scripts: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Button" || obj.type === "ToggleButton") {
+        const oc = obj.onClick as { script?: unknown } | undefined;
+        if (oc && typeof oc.script === "string") scripts.push(oc.script);
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const s of scripts) {
+      expect(s.startsWith("scene.quickTools.")).toBe(true);
+    }
+  });
+
+  test("every binding path in the spec resolves without throwing", () => {
+    const spec = quickToolsSpec as PanelSpec;
+    const paths: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if ((k === "bind" || k === "when") && typeof v === "string") {
+          paths.push(v);
+        }
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => resolveBinding(p).get()).not.toThrow();
+    }
+  });
+
+  test("invoking scene.quickTools.tag.toggle.solid toggles the tag on the selected cell", async () => {
+    useCommandStore.getState().register({
+      id: "scene.quickTools.tag.toggle.solid",
+      title: "Toggle Quick-Tool: Solid",
+      run: () => {
+        const sel = useSelectionStore.getState().selected;
+        if (!sel) return;
+        useSceneStore.getState().toggleCellTag(sel.x, sel.y, "solid");
+      },
+    });
+    useSelectionStore.getState().select({ x: 2, y: 3 });
+    expect(
+      useSceneStore.getState().cells["2,3"]?.tags ?? [],
+    ).not.toContain("solid");
+    await invokeScript({ script: "scene.quickTools.tag.toggle.solid" });
+    expect(useSceneStore.getState().cells["2,3"]?.tags).toContain("solid");
+    // Toggling again removes it.
+    await invokeScript({ script: "scene.quickTools.tag.toggle.solid" });
+    expect(
+      useSceneStore.getState().cells["2,3"]?.tags ?? [],
+    ).not.toContain("solid");
+  });
+
+  test("invoking scene.quickTools.tag.toggle is a no-op when nothing is selected", async () => {
+    useCommandStore.getState().register({
+      id: "scene.quickTools.tag.toggle.solid",
+      title: "Toggle Quick-Tool: Solid",
+      run: () => {
+        const sel = useSelectionStore.getState().selected;
+        if (!sel) return;
+        useSceneStore.getState().toggleCellTag(sel.x, sel.y, "solid");
+      },
+    });
+    expect(useSelectionStore.getState().selected).toBeNull();
+    await invokeScript({ script: "scene.quickTools.tag.toggle.solid" });
+    // No cells should have been touched.
+    expect(Object.keys(useSceneStore.getState().cells).length).toBe(0);
+  });
+
+  test("invoking scene.quickTools.clear clears only quick-tool tags, not user tags", async () => {
+    useCommandStore.getState().register({
+      id: "scene.quickTools.clear",
+      title: "Clear All Quick-Tools",
+      run: () => {
+        const sel = useSelectionStore.getState().selected;
+        if (!sel) return;
+        const k = `${sel.x},${sel.y}`;
+        const cur = useSceneStore.getState().cells[k]?.tags ?? [];
+        const quickIds = new Set<string>(MOCK_QUICK_TOOLS.map((t) => t.id));
+        const toggle = useSceneStore.getState().toggleCellTag;
+        for (const tag of cur) {
+          if (quickIds.has(tag)) toggle(sel.x, sel.y, tag);
+        }
+      },
+    });
+    // Plant a cell with mixed quick-tool + user-added tags.
+    useSceneStore.setState((s) => ({
+      cells: {
+        ...s.cells,
+        "5,5": {
+          layers: {},
+          height: 0,
+          tags: ["solid", "door", "user-custom"],
+          properties: {},
+        },
+      },
+    }));
+    useSelectionStore.getState().select({ x: 5, y: 5 });
+    await invokeScript({ script: "scene.quickTools.clear" });
+    const remaining = useSceneStore.getState().cells["5,5"]?.tags ?? [];
+    expect(remaining).not.toContain("solid");
+    expect(remaining).not.toContain("door");
+    // User-added tag survives — that's the contract.
+    expect(remaining).toContain("user-custom");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New node-type extensions (Phase 1b — QuickToolsPanel)
+// ---------------------------------------------------------------------------
+
+describe("New node-types (Phase 1b — QuickToolsPanel)", () => {
+  test("ToggleButton accepts activeWhenContains + disabledWhen.isNullish + shape 'tag'", () => {
+    const node: NodeSpec = {
+      type: "ToggleButton",
+      shape: "tag",
+      bind: "store.scene.cells[selected].tags",
+      activeWhenContains: "solid",
+      text: "Solid",
+      disabledWhen: {
+        bind: "store.selection.selected",
+        isNullish: true,
+      },
+      onClick: { script: "scene.quickTools.tag.toggle.solid" },
+    };
+    expect(node.type).toBe("ToggleButton");
+    expect(node.shape).toBe("tag");
+    expect(node.activeWhenContains).toBe("solid");
+    expect(node.disabledWhen?.isNullish).toBe(true);
+  });
+
+  test("Conditional accepts equals: null for nullish gating", () => {
+    const node: NodeSpec = {
+      type: "Conditional",
+      when: "store.selection.selected",
+      equals: null,
+      children: [{ type: "Text", text: "Quick Tools — select a cell" }],
+    };
+    expect(node.equals).toBeNull();
+  });
+
+  test("Conditional accepts notEmpty for length-aware gating", () => {
+    const node: NodeSpec = {
+      type: "Conditional",
+      when: "store.scene.cells[selected].tags",
+      notEmpty: true,
+      children: [{ type: "Text", text: "Clear all" }],
+    };
+    expect(node.notEmpty).toBe(true);
+  });
+
+  test("Text accepts the applyCount format", () => {
+    const node: NodeSpec = {
+      type: "Text",
+      variant: "label",
+      text: "store.scene.cells[selected].tags",
+      format: "applyCount",
+    };
+    expect(node.format).toBe("applyCount");
   });
 });
