@@ -155,6 +155,13 @@ export async function bootFromChain(
   // 3. Scene
   bootStatus("Loading scene…");
   const scenePath = sceneOverride ?? pack.manifest.startScene;
+  if (!scenePath) {
+    throw new Error(
+      `Pack ${pack.manifest.id ?? pack.manifest.name} has no startScene` +
+        ` declared and no scene override was supplied. Game packs must` +
+        ` set manifest.startScene.`,
+    );
+  }
   const scene: Scene = await pack.scene(scenePath);
   console.log(`Loaded scene: ${scenePath} (${scene.size.x}×${scene.size.y})`);
 

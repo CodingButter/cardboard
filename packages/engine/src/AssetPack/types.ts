@@ -461,6 +461,37 @@ export interface PackManifest {
   /** Engine version the pack targets (semver string). */
   engine?: string;
   /**
+   * Scopes this pack contributes to. Defaults to `["game"]` for
+   * back-compat — every pre-existing manifest (no `scope` field)
+   * loads into the runtime engine only.
+   *
+   *  - `"game"`  — runtime-side contributions (components, scripts,
+   *    prefabs, tile textures, sprites, audio, …). Tree-shaken OUT of
+   *    editor-only loads.
+   *  - `"editor"` — editor-side contributions (currently
+   *    `editorPanels`; future: command-palette entries, inspectors,
+   *    keybindings). Tree-shaken OUT of production game builds.
+   *
+   * A pack MAY declare both — paired contributions (e.g. a runtime
+   * component schema + an editor inspector for that component) live
+   * in the same manifest. See `docs/plans/EDITOR_ENGINE.md` §6.
+   */
+  scope?: ReadonlyArray<"game" | "editor">;
+  /**
+   * Editor-scope: list of JSON panel-spec files (paths relative to
+   * the pack root). The editor's pack loader fetches each file at
+   * startup, validates it against `PanelSpec` from
+   * `apps/editor/src/panel-renderer/types.ts`, and registers the
+   * panel as a `DockPanelDef` so it appears in the DocksModal under
+   * its declared `category`. Loaded panels render via
+   * `<PanelRenderer spec={…}>` — same component a hand-written panel
+   * would use to mount JSON-authored content.
+   *
+   * Ignored on the runtime engine side (the engine never reads this
+   * field). See `docs/plans/EDITOR_ENGINE.md` §4 + §8 Phase 0.
+   */
+  editorPanels?: ReadonlyArray<string>;
+  /**
    * Declared dependencies. The chain resolver walks every entry,
    * fetches the referenced pack, verifies integrity, and inserts
    * dependencies before the dependent in the resulting chain. P1 of
@@ -476,10 +507,18 @@ export interface PackManifest {
    * `idMap` entries point at preset ids that round-trip through here
    * for the renderer's tile-id world. See
    * `docs/plans/TILE_PRESETS.md` § 5.3.
+   *
+   * Optional when the pack's `scope` does NOT include `"game"`
+   * (editor-only packs don't ship texture content). Game-scope packs
+   * SHOULD set this — omitting it results in a pack that contributes
+   * no tile textures.
    */
-  tileTextures: Record<number, string>;
-  /** Sprite sheets that get cropped into multiple tiles at load time. */
-  tileSheets: SheetEntry[];
+  tileTextures?: Record<number, string>;
+  /**
+   * Sprite sheets that get cropped into multiple tiles at load time.
+   * Optional under the same conditions as `tileTextures`.
+   */
+  tileSheets?: SheetEntry[];
   /**
    * Optional list of JSONC preset library paths (relative to the pack
    * root). Each file is `{ "preset.id": { ...PresetSource } }`. Order
@@ -487,8 +526,14 @@ export interface PackManifest {
    * `docs/plans/TILE_PRESETS.md` § 3 + § 5.1.
    */
   tilePresets?: string[];
-  /** Path inside the pack to the scene loaded at startup. */
-  startScene: string;
+  /**
+   * Path inside the pack to the scene loaded at startup.
+   *
+   * Optional when the pack's `scope` does NOT include `"game"`
+   * (editor-only packs don't ship a startup scene). Game-scope packs
+   * SHOULD set this.
+   */
+  startScene?: string;
   /**
    * Optional path to a `config.json` inside the pack. Loaded values are
    * deep-merged over the engine's baseline `game.config.json`, so packs

@@ -1,0 +1,8 @@
+{
+  "id": "cardboard-editor-pack-demo",
+  "name": "Cardboard Editor Pack Demo",
+  "version": "0.0.1",
+  "engine": "two_5_d@0.1",
+  "scope": ["editor"],
+  "editorPanels": ["panels/selection-info.json"]
+}

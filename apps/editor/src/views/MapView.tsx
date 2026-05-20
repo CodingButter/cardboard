@@ -82,10 +82,9 @@ import {
   AssetReferencesPanel,
   MANIFEST as ASSET_REFERENCES_MANIFEST,
 } from "./scene/panels/AssetReferencesPanel";
-import {
-  JsonDemoPanel,
-  MANIFEST as JSON_DEMO_MANIFEST,
-} from "../panel-renderer/JsonDemoPanel";
+import { useEditorPackPanels } from "../packs/editorPackLoader";
+import { registerCommand } from "../state/useCommandStore";
+import { useSelectionStore } from "../state/useSelectionStore";
 
 /**
  * MapView — Scene page shell.
@@ -150,9 +149,11 @@ const PANELS: readonly DockPanelDef[] = [
   { ...LIGHTING_MANIFEST, component: LightingPanel },
   { ...NOTES_MANIFEST, component: NotesPanel },
   { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
-  // JSON-renderer Phase 0 demo wired as a real dockable panel. Opens
-  // from the DocksModal under Inspector → "JSON: Selection Info".
-  { ...JSON_DEMO_MANIFEST, component: JsonDemoPanel },
+  // Editor packs (loaded asynchronously via `useEditorPackPanels`)
+  // are MERGED into this list at runtime — see the MapView component
+  // body below. The dogfooding proof point: the JSON-authored
+  // "Editor Pack: Selection Info" panel is contributed by an
+  // editor-scoped pack, not by a hardcoded entry here.
 ];
 
 /** Initial layout JSON — captured from the maintainer's working
@@ -388,6 +389,33 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
   const topBarSlot = React.useMemo(() => <SceneTopBarSlot />, []);
   useTabContextSlot(topBarSlot);
 
+  // Editor-pack contributions — fetched async on mount, merged into
+  // the live panel registry once loaded. Empty array until the load
+  // resolves (so the layout works without them). See
+  // `apps/editor/src/packs/editorPackLoader.ts`.
+  const editorPackPanels = useEditorPackPanels();
+  const panels = React.useMemo<readonly DockPanelDef[]>(
+    () => [...PANELS, ...editorPackPanels],
+    [editorPackPanels],
+  );
+
+  // Register the demo's `demo.selection.clear` command — formerly
+  // owned by the in-tree JSON-demo panel's in-component useEffect.
+  // The editor-pack-loaded panel references this command id by name;
+  // the ownership migrates here (Phase 1) and ultimately moves into
+  // the editor pack itself (Phase 2, once packs can contribute
+  // scripts alongside panels).
+  React.useEffect(() => {
+    return registerCommand({
+      id: "demo.selection.clear",
+      title: "Demo: Clear Selection",
+      category: "View",
+      run: () => {
+        useSelectionStore.getState().select(null);
+      },
+    });
+  }, []);
+
   // Guard rail: if for some reason there's no project (e.g. someone
   // navigates here without one), render a polite empty state rather
   // than mount a dock shell with no persistence key.
@@ -417,12 +445,12 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
         pageId="scene"
         storageKey={storageKey}
         apiRef={apiRef}
-        registry={PANELS}
+        registry={panels}
       />
       <div className="flex-1 min-w-0 h-full">
         <DockShell
           storageKey={storageKey}
-          panels={PANELS}
+          panels={panels}
           defaultLayout={defaultLayout}
           apiRef={apiRef}
         />

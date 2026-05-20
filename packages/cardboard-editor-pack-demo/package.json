@@ -1,0 +1,6 @@
+{
+  "name": "@two_5_d/editor-pack-demo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Editor-only demo pack. Contributes one JSON-authored panel (Editor Pack: Selection Info) to the Scene workspace's DocksModal. The first editor pack — proof of the editor-pack loader. See docs/plans/EDITOR_ENGINE.md §8 Phase 0."
+}

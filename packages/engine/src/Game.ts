@@ -701,7 +701,7 @@ export class Game {
     // can override it, but in either case the path is the canonical
     // identifier for `scene:loaded` event listeners.
     if (this.currentScenePath === "") {
-      this.currentScenePath = this.pack.manifest.startScene;
+      this.currentScenePath = this.pack.manifest.startScene ?? "";
     }
     // WORLD_STATE.md §10.2 — pack-shipped `world.json` seeds initial
     // singleton state. Runs BEFORE `world:ready` so any pack-script

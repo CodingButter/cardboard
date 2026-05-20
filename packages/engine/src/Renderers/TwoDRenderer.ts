@@ -199,9 +199,10 @@ export class TwoDRenderer implements SceneRenderer {
     // collected into `assetsReady` so the boot overlay can wait for the
     // first complete frame.
     const pending: Promise<unknown>[] = [];
-    for (const tileStr in pack.manifest.tileTextures) {
+    const tileTextures = pack.manifest.tileTextures ?? {};
+    for (const tileStr in tileTextures) {
       const tile = Number(tileStr);
-      const path = pack.manifest.tileTextures[tile]!;
+      const path = tileTextures[tile]!;
       pending.push(
         pack
           .textureBlob(path)
@@ -210,7 +211,7 @@ export class TwoDRenderer implements SceneRenderer {
           .catch((err) => console.warn(`Failed to load ${path}:`, err)),
       );
     }
-    for (const sheet of pack.manifest.tileSheets) {
+    for (const sheet of pack.manifest.tileSheets ?? []) {
       pending.push(
         pack
           .textureBlob(sheet.path)

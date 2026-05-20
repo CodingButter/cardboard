@@ -1,9 +1,5 @@
 import React from "react";
 import { EditorShell } from "./shell/EditorShell";
-import {
-  RendererDemoRoute,
-  isRendererDemoActive,
-} from "./panel-renderer/DemoRoute";
 
 /**
  * App root — R3 introduced the global editor shell (TopBar +
@@ -15,13 +11,13 @@ import {
  * directly via `useRoute()`. That logic now lives in `EditorShell`,
  * so App is intentionally a one-liner mount point.
  *
- * The `?renderer-demo` query param short-circuits the shell and
- * mounts the JSON-panel-renderer Phase 0 demo route. This stays out
- * of the production path — it's only loaded when the URL opts in.
+ * The Phase 0 `?renderer-demo` short-circuit route was retired when
+ * the JSON-panel renderer demo migrated into a real editor pack —
+ * see `packages/cardboard-editor-pack-demo/` + the
+ * `useEditorPackPanels` hook in `MapView.tsx`. The pack-loaded
+ * "Editor Pack: Selection Info" panel supersedes the standalone
+ * demo route.
  */
-export function App() {
-  if (isRendererDemoActive()) {
-    return <RendererDemoRoute />;
-  }
+export function App(): React.JSX.Element {
   return <EditorShell />;
 }

@@ -1095,9 +1095,10 @@ export class WebGLRenderer implements SceneRenderer {
     // the boot overlay can wait for them.
     const pending: Promise<unknown>[] = [];
     this.tilesTex = this.makeTileArray();
-    for (const tileStr in pack.manifest.tileTextures) {
+    const tileTextures = pack.manifest.tileTextures ?? {};
+    for (const tileStr in tileTextures) {
       const tile = Number(tileStr);
-      const path = pack.manifest.tileTextures[tile]!;
+      const path = tileTextures[tile]!;
       pending.push(
         pack
           .textureBlob(path)
@@ -1106,7 +1107,7 @@ export class WebGLRenderer implements SceneRenderer {
           .catch((err) => console.warn(`Tile ${tile} (${path}) failed:`, err)),
       );
     }
-    for (const sheet of pack.manifest.tileSheets) {
+    for (const sheet of pack.manifest.tileSheets ?? []) {
       pending.push(
         pack
           .textureBlob(sheet.path)

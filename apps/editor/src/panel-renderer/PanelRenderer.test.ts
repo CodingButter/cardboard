@@ -14,8 +14,8 @@
  * a thin switch over the resolved bindings — exercising the bindings
  * via `getState()` is the load-bearing test surface. React tree
  * rendering needs a DOM (happy-dom / jsdom) which isn't wired into
- * `bun test` here; punted to a Playwright smoke test (see the
- * `?renderer-demo` route).
+ * `bun test` here; punted to a Playwright smoke test against the
+ * editor-pack-loaded "Editor Pack: Selection Info" panel.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -27,7 +27,7 @@ import { invokeScript, getInvokeContext } from "./invokeScript";
 import { useSceneStore } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
 import { useCommandStore } from "../state/useCommandStore";
-import demoSpec from "./test-panels/demo-selection-info.json";
+import demoSpec from "./test-fixtures/demo-selection-info.json";
 import type { PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,78 @@
+{
+  "id": "editor-pack-demo.selection-info",
+  "title": "Editor Pack: Selection Info",
+  "category": "Inspector",
+  "dockKind": "dockable-window",
+  "state": {},
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 3,
+    "children": [
+      {
+        "type": "Heading",
+        "text": "Editor Pack Demo — JSON-loaded panel",
+        "level": 2
+      },
+      {
+        "type": "Text",
+        "text": "This panel is shipped by the cardboard-editor-pack-demo .apg, loaded into the editor at startup, and rendered from a JSON spec — no TSX in the editor app for this panel.",
+        "muted": true
+      },
+      {
+        "type": "Heading",
+        "text": "Scene settings",
+        "level": 3
+      },
+      {
+        "type": "Input",
+        "label": "Scene name",
+        "bind": "store.scene.settings.name",
+        "placeholder": "level-01"
+      },
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 2,
+        "children": [
+          {
+            "type": "Input",
+            "label": "Fog (0..1)",
+            "bind": "store.scene.settings.fog"
+          },
+          {
+            "type": "Input",
+            "label": "Ambient (0..1)",
+            "bind": "store.scene.settings.ambient"
+          }
+        ]
+      },
+      {
+        "type": "Heading",
+        "text": "Selection",
+        "level": 3
+      },
+      {
+        "type": "Conditional",
+        "when": "store.selection.selected",
+        "children": [
+          {
+            "type": "Text",
+            "text": "A cell is selected."
+          },
+          {
+            "type": "Button",
+            "text": "Clear selection",
+            "onClick": { "script": "demo.selection.clear" },
+            "variant": "secondary"
+          }
+        ]
+      },
+      {
+        "type": "Text",
+        "text": "Tip: open the Map tab and click a cell to populate `store.selection.selected`. The Conditional above will reveal the Clear button.",
+        "muted": true
+      }
+    ]
+  }
+}

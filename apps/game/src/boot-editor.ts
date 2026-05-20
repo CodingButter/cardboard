@@ -32,7 +32,7 @@ export async function bootForEditor(
   const startScene =
     sceneOverride && sceneOverride.length > 0
       ? sceneOverride
-      : pack.manifest.startScene;
+      : pack.manifest.startScene ?? "";
   installEditorBridge(game, projectId, pack, startScene);
 
   return game;

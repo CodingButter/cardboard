@@ -111,7 +111,14 @@ export abstract class AssetPack {
 
   /** Convenience: load the scene named in `manifest.startScene`. */
   async startScene(): Promise<Scene> {
-    return this.scene(this.manifest.startScene);
+    const startScenePath = this.manifest.startScene;
+    if (!startScenePath) {
+      throw new Error(
+        `Pack ${this.manifest.id ?? this.manifest.name} has no startScene` +
+          ` declared — startScene() is only valid for game-scope packs.`,
+      );
+    }
+    return this.scene(startScenePath);
   }
 
   /**
