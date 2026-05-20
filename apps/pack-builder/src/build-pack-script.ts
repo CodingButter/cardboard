@@ -408,6 +408,14 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const Button = __mod.Button;
               export const Tooltip = __mod.Tooltip;
               export const GAME_RUNNER_URL = __mod.GAME_RUNNER_URL;
+              // VB5 — store-path picker + script-ref picker enumerate
+              // the live store registries. STORE_REGISTRY is the
+              // built-in catalog (scene/selection/layer/tool/brush);
+              // listDynamicStores() returns pack-contributed stores at
+              // call time so a picker mounted later in the session
+              // still sees freshly-registered packs.
+              export const STORE_REGISTRY = __mod.STORE_REGISTRY;
+              export const listDynamicStores = __mod.listDynamicStores;
             `,
           }));
         },

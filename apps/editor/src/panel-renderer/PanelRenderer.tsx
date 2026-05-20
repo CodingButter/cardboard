@@ -67,6 +67,7 @@ import type {
   ButtonNode,
   CanvasNode,
   ConditionalNode,
+  CustomNode,
   HeadingNode,
   IconNode,
   InputNode,
@@ -87,6 +88,7 @@ import type {
   ToggleButtonNode,
   TooltipNode,
 } from "./types";
+import { EmptyState } from "../components/ui/EmptyState";
 import { PackContext } from "../packs/PackContextProvider";
 
 // ---------------------------------------------------------------------------
@@ -1110,6 +1112,96 @@ function coerceSpecValue(value: unknown): NodeSpec | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Custom component registry — VB5.
+//
+// Pack-registered component map keyed by string id. Editor packs call
+// `ctx.registerCustomComponent(id, Component)` from their setup script;
+// the returned unregister fn is stashed in the loader's per-pack cleanup
+// ring so a pack disable rips every registered component out.
+//
+// The registry is intentionally module-level (and NOT per-pack-context)
+// so a Custom node anywhere in the editor can reach any registered
+// component by id. The id convention is `<pack-id>.<component-name>` —
+// the visual builder pack registers `panel-builder.store-path-picker`
+// and `panel-builder.script-ref-picker`. Any pack can reuse those ids
+// from its own panels by referencing them via `{ type: "Custom",
+// component: "panel-builder.store-path-picker", props: { ... } }`.
+//
+// Unknown ids render an `<EmptyState>` showing the missing name so the
+// canvas doesn't crash on a stale spec — same defensive-render shape
+// the renderer takes for unknown lucide icons.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pack-registered component shape. Receives the Custom node's `props`
+ * (free-form Record) verbatim. Returns React JSX. Implementations are
+ * fully responsible for their own prop typing — the registry stores
+ * them as a permissive component type to keep the lookup site
+ * type-erased.
+ */
+export type CustomComponentRenderer = React.ComponentType<
+  Record<string, unknown>
+>;
+
+const CUSTOM_COMPONENT_REGISTRY: Map<string, CustomComponentRenderer> =
+  new Map();
+
+/**
+ * Register a custom component under `id`. Returns an unregister fn the
+ * caller MUST hold — calling it removes the entry. Re-registering the
+ * same id overwrites the previous entry with a console.warn (matches
+ * the dynamic-store registration shape in `resolveBinding.ts`).
+ */
+export function registerCustomComponent(
+  id: string,
+  component: CustomComponentRenderer,
+): () => void {
+  if (CUSTOM_COMPONENT_REGISTRY.has(id)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[PanelRenderer] custom component "${id}" was already registered; ` +
+        `the previous registration's unregister fn is now a no-op`,
+    );
+  }
+  CUSTOM_COMPONENT_REGISTRY.set(id, component);
+  let active = true;
+  return () => {
+    if (!active) return;
+    if (CUSTOM_COMPONENT_REGISTRY.get(id) === component) {
+      CUSTOM_COMPONENT_REGISTRY.delete(id);
+    }
+    active = false;
+  };
+}
+
+/**
+ * Test-only / introspection-only — list every registered id. The visual
+ * builder's own canvas reads this to validate `Custom` refs.
+ */
+export function listCustomComponents(): string[] {
+  return Array.from(CUSTOM_COMPONENT_REGISTRY.keys());
+}
+
+function CustomRenderer({
+  node,
+}: {
+  node: CustomNode;
+}): React.JSX.Element {
+  const Component = CUSTOM_COMPONENT_REGISTRY.get(node.component);
+  if (!Component) {
+    return (
+      <EmptyState
+        icon={null}
+        title={`Unknown component "${node.component}"`}
+        description="No pack has registered a component with this id. Check the visual builder pack is installed."
+      />
+    );
+  }
+  // Spread the props verbatim — the component owns its prop schema.
+  return <Component {...(node.props ?? {})} />;
+}
+
 function RenderSpecRenderer({
   node,
 }: {
@@ -1189,6 +1281,8 @@ function dispatchNodeRenderer(node: NodeSpec): React.JSX.Element | null {
       return CanvasRenderer({ node });
     case "RenderSpec":
       return RenderSpecRenderer({ node });
+    case "Custom":
+      return CustomRenderer({ node });
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.

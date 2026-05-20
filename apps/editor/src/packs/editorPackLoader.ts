@@ -74,6 +74,10 @@ import {
   type RegisteredTab,
 } from "../state/useTabRegistryStore";
 import { registerDynamicStore } from "../panel-renderer/resolveBinding";
+import {
+  registerCustomComponent as registerRendererCustomComponent,
+} from "../panel-renderer/PanelRenderer";
+import type { CustomComponentRenderer } from "../panel-renderer/PanelRenderer";
 import { resolveLibrary } from "./libraryCache";
 import {
   PackContextProvider,
@@ -242,6 +246,22 @@ export interface EditorPackContext extends RendererPackContextSlice {
    */
   registerTab: (tab: RegisteredTab) => () => void;
   /**
+   * VB5 — Register a custom React component under `id` so JSON authors
+   * can reference it from a `{ type: "Custom", component: id }` node.
+   * Used by the JSON Visual Builder pack to ship the store-path picker
+   * and script-ref picker as `Custom` nodes referenced from the
+   * inspector form, but available to any pack that needs a controlled
+   * component the renderer doesn't ship (color pickers, code editors,
+   * charts).
+   *
+   * Convention: ids carry a pack-id prefix (e.g.
+   * `panel-builder.store-path-picker`). Returns an unregister fn.
+   */
+  registerCustomComponent: (
+    id: string,
+    component: CustomComponentRenderer,
+  ) => () => void;
+  /**
    * Read a value stashed via `share`. Returns `undefined` if no
    * sibling script wrote the key yet. Scripts can poll, or order
    * declarations in `manifest.scripts[]` so the consumer runs
@@ -338,6 +358,10 @@ interface PackLoadState {
   viewUnregistrars: Array<() => void>;
   layoutUnregistrars: Array<() => void>;
   tabUnregistrars: Array<() => void>;
+  /** VB5 — unregistrars for custom components registered via
+   *  `ctx.registerCustomComponent(...)`. Aggregated into the cleanup
+   *  ring so disable rips them out alongside everything else. */
+  customComponentUnregistrars: Array<() => void>;
   /** Mount counter per panel — defensive for future split-mount work. */
   mountCounters: Map<string, number>;
 }
@@ -416,6 +440,7 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     viewUnregistrars: [],
     layoutUnregistrars: [],
     tabUnregistrars: [],
+    customComponentUnregistrars: [],
     mountCounters: new Map(),
   };
 
@@ -656,6 +681,15 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
         unregister();
       };
     },
+    registerCustomComponent: (id, component) => {
+      const unregister = registerRendererCustomComponent(id, component);
+      state.customComponentUnregistrars.push(unregister);
+      return () => {
+        const idx = state.customComponentUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.customComponentUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
   };
 
   for (const scriptPath of scriptPaths) {
@@ -758,6 +792,15 @@ async function runEditorPackScript(
       cleanups.push(...state.viewUnregistrars.splice(0));
       cleanups.push(...state.layoutUnregistrars.splice(0));
       cleanups.push(...state.tabUnregistrars.splice(0));
+    }
+    // VB5 — custom-component unregistrars ride the same cleanup ring.
+    if (state.customComponentUnregistrars.length > 0) {
+      let cleanups = packScriptCleanups.get(packId);
+      if (!cleanups) {
+        cleanups = [];
+        packScriptCleanups.set(packId, cleanups);
+      }
+      cleanups.push(...state.customComponentUnregistrars.splice(0));
     }
     console.debug(
       `[editorPackLoader] ${packId}/${scriptPath}: loaded`,

@@ -540,6 +540,34 @@ export interface RenderSpecNode {
 }
 
 /**
+ * Custom — pack-registered component escape hatch.
+ *
+ * Reaches into the renderer's `CUSTOM_COMPONENT_REGISTRY` (populated by
+ * editor packs via `ctx.registerCustomComponent(id, Component)`) and
+ * renders the registered component with `props`. Unknown component ids
+ * render an `<EmptyState>` showing the missing name so the canvas
+ * doesn't crash on a stale ref.
+ *
+ * Added for the JSON Visual Builder VB5 — the inspector pane needs the
+ * store-path picker + script-ref picker which are imperative (live
+ * autocomplete, keyboard nav) and can't be expressed with the existing
+ * JSON node-type set. Custom lets the pack ship those controls and
+ * reference them by id from inspector.json.
+ *
+ * Beyond the visual builder: any pack that needs a controlled component
+ * the renderer doesn't ship (color pickers, image croppers, code
+ * editors, charts) uses the same mechanism. Keeps the renderer surface
+ * narrow without forcing every new control to land in the union.
+ */
+export interface CustomNode {
+  type: "Custom";
+  /** Component id registered via `ctx.registerCustomComponent(id, ...)`. */
+  component: string;
+  /** Free-form props passed verbatim to the registered component. */
+  props?: Record<string, unknown>;
+}
+
+/**
  * Discriminated union of every node type the Phase 0 renderer
  * understands. Adding a new node type is a four-step process:
  *   1. Add the interface above.
@@ -566,7 +594,8 @@ export type NodeSpec =
   | ScrollRowNode
   | SelectNode
   | CanvasNode
-  | RenderSpecNode;
+  | RenderSpecNode
+  | CustomNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire

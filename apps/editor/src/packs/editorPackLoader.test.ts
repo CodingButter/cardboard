@@ -55,6 +55,7 @@ function makeStubContext(): EditorPackContext {
     registerLayout: () => () => {},
     registerPredefinedLayout: () => () => {},
     registerTab: () => () => {},
+    registerCustomComponent: () => () => {},
     _registerCanvasRef: () => {},
     _unregisterCanvasRef: () => {},
     _firePanelMount: () => {},

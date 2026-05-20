@@ -27,6 +27,8 @@ import React from "react";
 import { LayoutPanelTop, Library } from "lucide-react";
 import { PanelBuilderView } from "../views/PanelBuilderView";
 import { PanelLibraryPanel } from "../components/PanelLibraryPanel";
+import { StorePathPicker } from "../components/StorePathPicker";
+import { ScriptRefPicker } from "../components/ScriptRefPicker";
 import {
   bumpDraftsRefresh,
   initPanelBuilderStore,
@@ -129,6 +131,22 @@ export default function setup(ctx: EditorPackContext): () => void {
     },
   });
 
+  // ── VB5 — register Custom-node components ───────────────────────
+  // The inspector's bind / when / onClick fields look these up by id
+  // via `{ type: "Custom", component: "panel-builder.store-path-picker" }`.
+  // Any pack-side inspector can reach the same pickers by referencing
+  // the same ids — the registry is module-level on the renderer side
+  // so cross-pack reuse comes free (per the dogfooding contract in
+  // `docs/plans/JSON_VISUAL_BUILDER.md` §6.x).
+  const unregStorePathPicker = ctx.registerCustomComponent(
+    "panel-builder.store-path-picker",
+    StorePathPicker as React.ComponentType<Record<string, unknown>>,
+  );
+  const unregScriptRefPicker = ctx.registerCustomComponent(
+    "panel-builder.script-ref-picker",
+    ScriptRefPicker as React.ComponentType<Record<string, unknown>>,
+  );
+
   // ── Tab + view ──────────────────────────────────────────────────
   const disposers: Array<() => void> = [
     ctx.registerView("panel-builder", PanelBuilderView),
@@ -162,6 +180,8 @@ export default function setup(ctx: EditorPackContext): () => void {
     unregUndo,
     unregRedo,
     unregSave,
+    unregStorePathPicker,
+    unregScriptRefPicker,
   ];
 
   return () => {

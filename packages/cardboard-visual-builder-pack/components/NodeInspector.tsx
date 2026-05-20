@@ -43,6 +43,8 @@ import type {
   ToggleButtonNode,
   TooltipNode,
 } from "../../../apps/editor/src/panel-renderer/types";
+import { StorePathPicker } from "./StorePathPicker";
+import { ScriptRefPicker } from "./ScriptRefPicker";
 
 // ---------------------------------------------------------------------------
 // Small form primitives — bespoke to the inspector so the styling stays
@@ -315,7 +317,7 @@ function InputInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="Bind (store path)"
         value={node.bind}
         onChange={(v) => onPatch({ bind: v as StorePath })}
@@ -344,7 +346,7 @@ function NumberInputInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="Bind (store path)"
         value={node.bind}
         onChange={(v) => onPatch({ bind: v as StorePath })}
@@ -392,7 +394,7 @@ function SliderInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="Bind (store path)"
         value={node.bind}
         onChange={(v) => onPatch({ bind: v as StorePath })}
@@ -430,7 +432,7 @@ function ButtonInspector({
         value={node.text ?? ""}
         onChange={(v) => onPatch({ text: v })}
       />
-      <TextField
+      <ScriptRefPicker
         label="onClick script id"
         value={node.onClick.script}
         onChange={(v) => onPatch({ onClick: { ...node.onClick, script: v } })}
@@ -475,7 +477,7 @@ function ToggleButtonInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="Bind"
         value={node.bind}
         onChange={(v) => onPatch({ bind: v as StorePath })}
@@ -509,7 +511,7 @@ function ToggleButtonInspector({
           { value: "tag", label: "tag" },
         ]}
       />
-      <TextField
+      <ScriptRefPicker
         label="onClick script id"
         value={node.onClick.script}
         onChange={(v) => onPatch({ onClick: { ...node.onClick, script: v } })}
@@ -555,7 +557,7 @@ function ConditionalInspector({
         : String(node.equals);
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="When (binding)"
         value={node.when}
         onChange={(v) => onPatch({ when: v as StorePath })}
@@ -665,7 +667,7 @@ function SelectInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="Bind"
         value={node.bind}
         onChange={(v) => onPatch({ bind: v as StorePath })}
@@ -725,7 +727,7 @@ function RenderSpecInspector({
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2">
-      <TextField
+      <StorePathPicker
         label="From (binding)"
         value={node.from}
         onChange={(v) => onPatch({ from: v as StorePath })}

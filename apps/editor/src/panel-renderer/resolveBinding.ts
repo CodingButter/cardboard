@@ -241,6 +241,26 @@ function isKnownStore(name: string): name is KnownStoreName {
 }
 
 /**
+ * VB5 — snapshot the current dynamic-store names + their bound hooks.
+ *
+ * The store-path picker (shipped as a `Custom` component by the visual
+ * builder pack) walks both `STORE_REGISTRY` AND this list to surface
+ * pack-contributed stores like `$store.panelBuilder.*` /
+ * `$store.profiler.*` in autocomplete. Returning a defensive copy keeps
+ * callers from mutating the live map; the map identity is module-local
+ * so an exported reference would leak the mutable state.
+ */
+export function listDynamicStores(): Array<{
+  name: string;
+  hook: UseBoundStore<StoreApi<unknown>>;
+}> {
+  return Array.from(DYNAMIC_STORES.entries()).map(([name, hook]) => ({
+    name,
+    hook,
+  }));
+}
+
+/**
  * Look up either a built-in or dynamic store by name. Used by the
  * resolver's `get` traversal so a `$store.profiler.fps` path works
  * the same way as `$store.scene.settings.name`.

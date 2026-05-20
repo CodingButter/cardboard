@@ -43,6 +43,10 @@ import {
 } from "../state/tileTextureCache";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PanelRenderer, NodeIdProvider } from "../panel-renderer/PanelRenderer";
+import {
+  STORE_REGISTRY,
+  listDynamicStores,
+} from "../panel-renderer/resolveBinding";
 // P4 view-shell migration — views moving into the pack need access to
 // the DockShell primitive, the WorkspaceRail chrome, the per-tab
 // context-slot hook, the URL-hash router, and the editor-pack registry
@@ -250,6 +254,15 @@ export const shellSdk = {
   // the same need (per the dogfooding rubric in
   // `docs/plans/JSON_VISUAL_BUILDER.md` §6.x).
   NodeIdProvider,
+  // VB5 — pickers shipped by the visual builder pack need to enumerate
+  // the live store registries to autocomplete `bind:` paths. The
+  // resolver's `STORE_REGISTRY` is the built-in catalog (scene /
+  // selection / layer / tool / brush); `listDynamicStores()` returns
+  // the pack-contributed stores currently registered (panelBuilder /
+  // profiler / etc.). Pickers walk `getState()` per store to enumerate
+  // nested keys — that walk lives in the pack, not here.
+  STORE_REGISTRY,
+  listDynamicStores,
   // P3 batch D-light — `undoOnce` / `redoOnce` walk the history store
   // cursor + replay paint/erase ops into the scene store. MapCanvas
   // wires Ctrl+Z / Ctrl+Shift+Z commands to these. Any pack that
