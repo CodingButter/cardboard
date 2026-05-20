@@ -36,7 +36,10 @@ import React from "react";
 import {
   ArrowRightLeft,
   Boxes,
+  Braces,
+  Check,
   Download,
+  Eye,
   FilePlus,
   GitBranch,
   Hash,
@@ -88,6 +91,7 @@ import {
   type PanelDraftRow,
 } from "../state/draftsStore";
 import { NodeInspector } from "../components/NodeInspector";
+import { PanelBuilderCanvasErrorBoundary } from "../components/PanelBuilderCanvasErrorBoundary";
 
 const CANVAS_HOST_SPEC: PanelSpec = {
   id: "panel-builder-canvas-host",
@@ -335,20 +339,46 @@ function downloadSpecAsJson(spec: PanelSpec, baseName: string): void {
   URL.revokeObjectURL(url);
 }
 
+type CanvasMode = "visual" | "json";
+
 /**
- * Canvas toolbar — Save / Export / Import / Undo / Redo. Lives above
- * the canvas drop-target so the actions stay in reach while authoring.
+ * Canvas toolbar — Save / Export / Import / Undo / Redo + mode toggle
+ * (VB6). Lives above the canvas drop-target so the actions stay in
+ * reach while authoring.
  */
-function CanvasToolbar(): React.JSX.Element {
+function CanvasToolbar({
+  mode,
+  onModeChange,
+}: {
+  mode: CanvasMode;
+  onModeChange: (next: CanvasMode) => void;
+}): React.JSX.Element {
   const state = usePanelBuilderState();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = React.useState<string | null>(null);
+  const savedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canUndo = state ? state.history.cursor > 0 : false;
   const canRedo = state
     ? state.history.cursor < state.history.entries.length - 1
     : false;
   const currentName = state?.currentDraftName ?? null;
+
+  React.useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
+
+  const flashSaved = React.useCallback((name: string) => {
+    setSavedFlash(name);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => {
+      setSavedFlash(null);
+      savedTimerRef.current = null;
+    }, 2500);
+  }, []);
 
   const onSave = React.useCallback(async () => {
     const actions = getActions();
@@ -357,14 +387,16 @@ function CanvasToolbar(): React.JSX.Element {
     const name = window.prompt("Save draft as:", defaultName);
     if (!name) return;
     try {
-      await saveDraftToIdb(name.trim(), actions.spec);
-      actions.setCurrentDraftName(name.trim());
+      const trimmed = name.trim();
+      await saveDraftToIdb(trimmed, actions.spec);
+      actions.setCurrentDraftName(trimmed);
       bumpDraftsRefresh();
       setError(null);
+      flashSaved(trimmed);
     } catch (e) {
       setError((e as Error).message || "Failed to save draft");
     }
-  }, [currentName]);
+  }, [currentName, flashSaved]);
 
   const onExport = React.useCallback(() => {
     const actions = getActions();
@@ -427,6 +459,44 @@ function CanvasToolbar(): React.JSX.Element {
         {currentName ?? <em className="text-zinc-500">Unsaved draft</em>}
       </span>
       <span className="flex-1" />
+      <div
+        className="inline-flex items-center rounded border border-zinc-800 overflow-hidden"
+        role="tablist"
+        aria-label="Canvas mode"
+        data-testid="panel-builder-mode-toggle"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "visual"}
+          onClick={() => onModeChange("visual")}
+          className={[
+            "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 transition-colors",
+            mode === "visual"
+              ? "bg-amber-500/20 text-amber-200"
+              : "text-zinc-300 hover:bg-zinc-800",
+          ].join(" ")}
+          data-testid="panel-builder-mode-visual"
+        >
+          <Eye size={12} /> Visual
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "json"}
+          onClick={() => onModeChange("json")}
+          className={[
+            "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 transition-colors border-l border-zinc-800",
+            mode === "json"
+              ? "bg-amber-500/20 text-amber-200"
+              : "text-zinc-300 hover:bg-zinc-800",
+          ].join(" ")}
+          data-testid="panel-builder-mode-json"
+        >
+          <Braces size={12} /> JSON
+        </button>
+      </div>
+      <span className="w-px h-4 bg-zinc-800 mx-1" />
       <button
         type="button"
         onClick={onUndo}
@@ -483,6 +553,15 @@ function CanvasToolbar(): React.JSX.Element {
         className="hidden"
         data-testid="panel-builder-file-input"
       />
+      {savedFlash && !error && (
+        <span
+          className="inline-flex items-center gap-1 text-[10px] text-emerald-300 ml-2 max-w-[18rem] truncate"
+          data-testid="panel-builder-saved-toast"
+          title={`Saved "${savedFlash}"`}
+        >
+          <Check size={11} /> Saved "{savedFlash}"
+        </span>
+      )}
       {error && (
         <span
           className="text-[10px] text-rose-300 ml-2 max-w-[18rem] truncate"
@@ -495,7 +574,13 @@ function CanvasToolbar(): React.JSX.Element {
   );
 }
 
-function CanvasPane(): React.JSX.Element {
+function CanvasPane({
+  mode,
+  onModeChange,
+}: {
+  mode: CanvasMode;
+  onModeChange: (next: CanvasMode) => void;
+}): React.JSX.Element {
   const state = usePanelBuilderState();
   const [isOver, setIsOver] = React.useState(false);
   const wrapperRef = React.useRef<HTMLDivElement | null>(null);
@@ -645,44 +730,186 @@ function CanvasPane(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full">
-      <CanvasToolbar />
+      <CanvasToolbar mode={mode} onModeChange={onModeChange} />
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pt-2 pb-1">
-        Canvas
+        {mode === "json" ? "Canvas — JSON" : "Canvas"}
       </div>
-      {ringCss && <style>{ringCss}</style>}
-      <div
-        ref={wrapperRef}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        onClick={onClick}
-        tabIndex={0}
-        className={[
-          "flex-1 m-2 rounded border-2 border-dashed",
-          "transition-colors overflow-auto",
-          "focus:outline-none",
-          isOver
-            ? "border-amber-500/80 bg-amber-500/5"
-            : "border-zinc-800 bg-zinc-950",
-        ].join(" ")}
-        data-testid="panel-builder-canvas"
-        aria-label="Panel Builder canvas drop target"
-      >
-        {showEmptyState ? (
-          <div className="h-full flex items-center justify-center p-4 pointer-events-none">
-            <EmptyState
-              title="Drag a node from the palette"
-              description="Drop tiles here. The canvas previews your draft live."
-            />
+      {mode === "json" ? (
+        <JsonModePane />
+      ) : (
+        <>
+          {ringCss && <style>{ringCss}</style>}
+          <div
+            ref={wrapperRef}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            onClick={onClick}
+            tabIndex={0}
+            className={[
+              "flex-1 m-2 rounded border-2 border-dashed",
+              "transition-colors overflow-auto",
+              "focus:outline-none",
+              isOver
+                ? "border-amber-500/80 bg-amber-500/5"
+                : showEmptyState
+                  ? "border-amber-500/40 bg-amber-500/5"
+                  : "border-zinc-800 bg-zinc-950",
+            ].join(" ")}
+            data-testid="panel-builder-canvas"
+            aria-label="Panel Builder canvas drop target"
+          >
+            {showEmptyState ? (
+              <div className="h-full flex items-center justify-center p-4 pointer-events-none">
+                <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+                  <div
+                    className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-500/15 text-amber-300"
+                    aria-hidden="true"
+                  >
+                    <LayoutDashboard size={22} />
+                  </div>
+                  <div className="text-sm font-medium text-zinc-100">
+                    Drag a node from the palette
+                  </div>
+                  <div className="text-xs text-zinc-400 leading-relaxed">
+                    Drop tiles here. The canvas previews your draft live —
+                    click any node to edit it in the inspector.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="h-full">
+                <PanelBuilderCanvasErrorBoundary resetKey={root}>
+                  <NodeIdProvider getId={getId}>
+                    <PanelRenderer spec={CANVAS_HOST_SPEC} />
+                  </NodeIdProvider>
+                </PanelBuilderCanvasErrorBoundary>
+              </div>
+            )}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// JSON mode pane (VB6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Plain `<textarea>` JSON editor over the full PanelSpec.
+ *
+ * Two-way sync:
+ *   • External mutations → reset the textarea text when the spec
+ *     reference changes AND we don't have unsaved edits in the buffer
+ *     (the user is mid-edit). The "isDirty" flag tracks that.
+ *   • Internal edits → parse on every keystroke. If parse succeeds AND
+ *     the result looks like a PanelSpec, call `replaceSpec(parsed)`.
+ *     If parse fails, show a chip + leave the store alone.
+ *
+ * No monaco / codemirror — just a mono-font textarea + JSON.parse.
+ */
+function JsonModePane(): React.JSX.Element {
+  const state = usePanelBuilderState();
+  const spec = state?.spec ?? null;
+  const specRef = React.useRef(spec);
+  const [text, setText] = React.useState<string>(() =>
+    spec ? JSON.stringify(spec, null, 2) : "{}",
+  );
+  const [parseError, setParseError] = React.useState<string | null>(null);
+  // Track when the most recent text change came from our own
+  // syncing-from-store branch — so we don't fight the user mid-edit.
+  const lastAppliedSpecRef = React.useRef(spec);
+
+  // Sync textarea from external spec changes (undo/redo, library load,
+  // visual-mode edits while in JSON view — though that's rare). We
+  // detect "the store changed but we DIDN'T cause it" by comparing the
+  // current spec to the last spec we applied from the textarea.
+  React.useEffect(() => {
+    if (!spec) return;
+    if (spec === lastAppliedSpecRef.current) return;
+    // External mutation — overwrite the textarea.
+    setText(JSON.stringify(spec, null, 2));
+    setParseError(null);
+    lastAppliedSpecRef.current = spec;
+    specRef.current = spec;
+  }, [spec]);
+
+  const onTextChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const next = e.target.value;
+      setText(next);
+      // Try to parse + apply on every keystroke. Empty string is a
+      // valid "in-progress" state — don't treat it as an error.
+      if (next.trim() === "") {
+        setParseError(null);
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(next);
+      } catch (err) {
+        setParseError((err as Error).message || "Invalid JSON");
+        return;
+      }
+      if (!isPanelSpec(parsed)) {
+        setParseError(
+          "Not a PanelSpec — needs id, title, category, dockKind, root.",
+        );
+        return;
+      }
+      setParseError(null);
+      const actions = getActions();
+      if (!actions) return;
+      // Mark this spec as "ours" so the sync-effect doesn't overwrite
+      // the textarea on the next render.
+      lastAppliedSpecRef.current = parsed;
+      actions.replaceSpec(parsed);
+    },
+    [],
+  );
+
+  return (
+    <div className="flex-1 flex flex-col m-2 rounded border border-zinc-800 bg-zinc-950 overflow-hidden">
+      <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-800 bg-zinc-900/60">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500 flex-1">
+          PanelSpec (JSON)
+        </span>
+        {parseError ? (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] text-rose-300 max-w-[24rem] truncate"
+            data-testid="panel-builder-json-parse-error"
+            title={parseError}
+          >
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-400" />
+            {parseError}
+          </span>
         ) : (
-          <div className="h-full">
-            <NodeIdProvider getId={getId}>
-              <PanelRenderer spec={CANVAS_HOST_SPEC} />
-            </NodeIdProvider>
-          </div>
+          <span
+            className="inline-flex items-center gap-1 text-[10px] text-emerald-300"
+            data-testid="panel-builder-json-ok"
+          >
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            in sync
+          </span>
         )}
       </div>
+      <textarea
+        value={text}
+        onChange={onTextChange}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        data-testid="panel-builder-json-textarea"
+        aria-label="PanelSpec JSON editor"
+        className={[
+          "flex-1 w-full resize-none p-3 font-mono text-xs leading-relaxed",
+          "bg-zinc-950 text-zinc-100",
+          "focus:outline-none",
+          parseError ? "border-t border-rose-900/60" : "",
+        ].join(" ")}
+      />
     </div>
   );
 }
@@ -761,10 +988,12 @@ export interface PanelBuilderViewProps {
 export function PanelBuilderView(
   _props: PanelBuilderViewProps = {},
 ): React.JSX.Element {
+  const [mode, setMode] = React.useState<CanvasMode>("visual");
   return (
     <div
       className="flex w-full h-full bg-zinc-950 text-zinc-100 overflow-hidden"
       data-testid="panel-builder-view"
+      data-mode={mode}
     >
       <aside
         className="w-56 shrink-0 border-r border-zinc-800 overflow-hidden"
@@ -776,7 +1005,7 @@ export function PanelBuilderView(
         className="flex-1 min-w-0 border-r border-zinc-800 overflow-hidden"
         aria-label="Canvas"
       >
-        <CanvasPane />
+        <CanvasPane mode={mode} onModeChange={setMode} />
       </main>
       <aside
         className="w-72 shrink-0 overflow-hidden"

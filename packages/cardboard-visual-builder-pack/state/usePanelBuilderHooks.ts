@@ -38,3 +38,24 @@ export function useDraftsRefreshTick(): number {
   );
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
+
+/**
+ * Subscribe to the panel-builder store's `currentDraftName` field.
+ * Re-renders whenever a Save / Load updates the name.
+ */
+export function useCurrentDraftName(): string | null {
+  const store = getPanelBuilderStore();
+  const subscribe = React.useCallback(
+    (cb: () => void): (() => void) => {
+      if (!store) return () => {};
+      return store.subscribe(cb);
+    },
+    [store],
+  );
+  const getSnapshot = React.useCallback(
+    (): string | null =>
+      store ? (store.getState() as PanelBuilderState).currentDraftName : null,
+    [store],
+  );
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}

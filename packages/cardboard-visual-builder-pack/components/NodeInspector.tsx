@@ -42,6 +42,7 @@ import type {
   TextNode,
   ToggleButtonNode,
   TooltipNode,
+  TooltipStageSpec,
 } from "../../../apps/editor/src/panel-renderer/types";
 import { StorePathPicker } from "./StorePathPicker";
 import { ScriptRefPicker } from "./ScriptRefPicker";
@@ -591,6 +592,60 @@ function TooltipInspector({
   node: TooltipNode;
   onPatch: Patcher<TooltipNode>;
 }): React.JSX.Element {
+  const updateStage = React.useCallback(
+    (idx: number, partial: Partial<TooltipStageSpec>): void => {
+      const stages = node.stages.slice();
+      const existing = stages[idx];
+      if (!existing) return;
+      stages[idx] = { ...existing, ...partial };
+      onPatch({ stages });
+    },
+    [node.stages, onPatch],
+  );
+
+  const updateStageText = React.useCallback(
+    (idx: number, text: string): void => {
+      const stages = node.stages.slice();
+      const existing = stages[idx];
+      if (!existing) return;
+      // Update the stage content's `text` field IF the content is a
+      // Text/Heading node — most stages authored via the inspector
+      // are simple text labels. Anything more complex (Layouts) the
+      // user edits via JSON-mode.
+      const content = existing.content;
+      if (content.type === "Text" || content.type === "Heading") {
+        stages[idx] = {
+          ...existing,
+          content: { ...content, text } as typeof content,
+        };
+        onPatch({ stages });
+      }
+    },
+    [node.stages, onPatch],
+  );
+
+  const addStage = React.useCallback((): void => {
+    const lastDelay =
+      node.stages.length > 0 ? node.stages[node.stages.length - 1]!.delay : 0;
+    const stages: TooltipStageSpec[] = [
+      ...node.stages,
+      {
+        delay: lastDelay + 300,
+        content: { type: "Text", text: "New stage" },
+      },
+    ];
+    onPatch({ stages });
+  }, [node.stages, onPatch]);
+
+  const removeStage = React.useCallback(
+    (idx: number): void => {
+      const stages = node.stages.slice();
+      stages.splice(idx, 1);
+      onPatch({ stages });
+    },
+    [node.stages, onPatch],
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <SelectField
@@ -604,8 +659,72 @@ function TooltipInspector({
           { value: "right", label: "right" },
         ]}
       />
-      <div className="text-[10px] text-zinc-500">
-        Stage editing is a VB4 feature — edit JSON-mode for now.
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <span className={FIELD_LABEL}>Stages</span>
+          <button
+            type="button"
+            onClick={addStage}
+            className="text-[10px] rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800"
+          >
+            + Add
+          </button>
+        </div>
+        {node.stages.length === 0 ? (
+          <div className="text-[10px] text-zinc-500 italic">
+            No stages — click + Add.
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {node.stages.map((stage, idx) => {
+              const content = stage.content;
+              const textValue =
+                content.type === "Text" || content.type === "Heading"
+                  ? typeof content.text === "string"
+                    ? content.text
+                    : ""
+                  : null;
+              return (
+                <li
+                  key={idx}
+                  className="rounded border border-zinc-800 bg-zinc-950/60 p-2 flex flex-col gap-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-500">
+                      Stage {idx + 1} ({content.type})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeStage(idx)}
+                      className="text-[10px] text-rose-400 hover:text-rose-300"
+                      aria-label={`Remove stage ${idx + 1}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <NumberField
+                    label="Delay (ms)"
+                    value={stage.delay}
+                    onChange={(v) => updateStage(idx, { delay: v ?? 0 })}
+                    min={0}
+                    step={50}
+                  />
+                  {textValue !== null ? (
+                    <TextField
+                      label="Content text"
+                      value={textValue}
+                      onChange={(v) => updateStageText(idx, v)}
+                    />
+                  ) : (
+                    <div className="text-[10px] text-zinc-500 italic">
+                      Non-text content — edit via JSON-mode.
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );

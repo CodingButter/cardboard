@@ -122,6 +122,12 @@ export interface PanelBuilderActions extends Record<string, unknown> {
   /** Replace the root NodeSpec wholesale. Used by VB4 load + VB6
    *  JSON-mode sync. */
   replaceRoot: (root: NodeSpec) => void;
+  /** Replace the ENTIRE PanelSpec wholesale — title, id, dockKind,
+   *  root, the lot. Used by VB6 JSON-mode sync where the user is
+   *  editing the full spec as text. History snapshot is recorded
+   *  same as any other mutation; selection is cleared because old
+   *  node ids may no longer resolve. */
+  replaceSpec: (spec: PanelSpec) => void;
   /** Reset to a fresh empty draft (new draftId, empty Layout root,
    *  cleared selection). */
   resetDraft: () => void;
@@ -444,6 +450,15 @@ export function initPanelBuilderStore(
           // A replaceRoot may invalidate the current selection — drop it.
           selectedNodeId: null,
           history: pushHistory(get().history, nextSpec),
+        } as Partial<PanelBuilderState>);
+      },
+      replaceSpec: (spec: PanelSpec): void => {
+        set({
+          spec,
+          root: spec.root,
+          // Old ids may not resolve in the new tree — drop selection.
+          selectedNodeId: null,
+          history: pushHistory(get().history, spec),
         } as Partial<PanelBuilderState>);
       },
       resetDraft: (): void => {

@@ -32,7 +32,10 @@ import {
   type PanelBuilderActions,
   type PanelBuilderState,
 } from "../state/usePanelBuilderStore";
-import { useDraftsRefreshTick } from "../state/usePanelBuilderHooks";
+import {
+  useDraftsRefreshTick,
+  useCurrentDraftName,
+} from "../state/usePanelBuilderHooks";
 import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
 
 function getActions(): (PanelBuilderState & PanelBuilderActions) | null {
@@ -68,6 +71,7 @@ function formatRelativeTime(ts: number): string {
 
 export function PanelLibraryPanel(): React.JSX.Element {
   const refreshTick = useDraftsRefreshTick();
+  const currentDraftName = useCurrentDraftName();
   const [rows, setRows] = React.useState<PanelDraftRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -201,7 +205,18 @@ export function PanelLibraryPanel(): React.JSX.Element {
       data-testid="panel-library"
     >
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800">
-        <span className="text-[10px] uppercase tracking-wider text-zinc-500 flex-1">
+        <span
+          className="text-[10px] uppercase tracking-wider text-zinc-500 flex-1 truncate"
+          title={currentDraftName ?? "Unsaved draft"}
+        >
+          {currentDraftName ? (
+            <span className="text-amber-400 normal-case tracking-normal">
+              {currentDraftName}
+            </span>
+          ) : (
+            <em className="not-italic">Unsaved</em>
+          )}
+          <span className="text-zinc-600"> · </span>
           {rows.length} draft{rows.length === 1 ? "" : "s"}
         </span>
         <button
