@@ -12,7 +12,7 @@
  *     hits the browser. Bun's bundler handles both via the file
  *     extension.
  *
- * Preact externalisation:
+ * Preact externalisation (game-side packs):
  *   - Pack code authoring uses `import { h } from "preact"` etc. The
  *     engine ships its own Preact instance; pack components need to
  *     share it (otherwise hooks dispatch and DOM reconciliation
@@ -26,6 +26,24 @@
  *        engine populates those slots at boot via
  *        `installPreactRuntime()` in `packages/engine/src/PreactRuntime.ts`.
  *
+ * React externalisation (editor-side packs) — CORE_EDITOR_PACK.md §11:
+ *   - The editor uses React, not Preact. Editor packs (the core
+ *     editor pack + any third-party editor pack that ships TSX) author
+ *     against `import React from "react"` like any normal React
+ *     codebase. The same identity hazard applies: two React instances
+ *     in one tree means hooks dispatch breaks the moment a pack
+ *     component mounts inside the editor's reconciler.
+ *   - Same two-plugin shape as Preact. The editor's bootstrap
+ *     (`apps/editor/index.tsx`) calls `installReactRuntime()` from
+ *     `apps/editor/src/packs/reactRuntime.ts` which populates the
+ *     `__cardboard_react*` global slots with the editor's own React +
+ *     ReactDOM + ReactDOM/client modules. The stub modules emitted
+ *     here read from those slots at runtime.
+ *   - We externalise BOTH preact and react in every pack build. A
+ *     pack that imports neither pays nothing (the resolver plugins
+ *     never fire). A pack that imports both (unlikely but possible)
+ *     gets each module routed to the right runtime.
+ *
  * Type-only `@two_5_d/engine` imports the script uses for ambient
  * typing get tree-shaken by Bun automatically (TypeScript erases them
  * before the bundler ever sees runtime references).
@@ -34,6 +52,7 @@
 import { basename } from "node:path";
 
 const PREACT_NS = "two5d-preact";
+const REACT_NS = "cardboard-react";
 
 /**
  * The four Preact specifiers we externalise → matching global slot.
@@ -46,6 +65,25 @@ const PREACT_SPECIFIERS: Record<string, string> = {
   "preact/hooks": "__two5d_preact_hooks",
   "preact/jsx-runtime": "__two5d_preact_jsx_runtime",
   "preact/jsx-dev-runtime": "__two5d_preact_jsx_runtime",
+};
+
+/**
+ * React + ReactDOM specifiers externalised for editor-pack scripts →
+ * matching global slot populated by the editor bootstrap. Same
+ * pattern as the Preact map above; bumping these requires a
+ * coordinated change in `apps/editor/src/packs/reactRuntime.ts`.
+ *
+ * `react/jsx-dev-runtime` aliases to the prod runtime slot — Bun
+ * emits the dev runtime when bundling for browsers in dev mode but
+ * the runtime exports are a superset of the prod runtime; mapping
+ * both to the same slot is safe.
+ */
+const REACT_SPECIFIERS: Record<string, string> = {
+  react: "__cardboard_react",
+  "react/jsx-runtime": "__cardboard_react_jsx_runtime",
+  "react/jsx-dev-runtime": "__cardboard_react_jsx_runtime",
+  "react-dom": "__cardboard_react_dom",
+  "react-dom/client": "__cardboard_react_dom_client",
 };
 
 /**
@@ -136,6 +174,141 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
                 export const jsx = __mod.jsx;
                 export const jsxs = __mod.jsxs;
                 export const jsxDEV = __mod.jsxDEV;
+              `,
+            };
+          });
+        },
+      },
+      {
+        name: "cardboard-react-externals",
+        setup(build) {
+          // Route bare `react` / `react-dom` / `react-dom/client` /
+          // `react/jsx-runtime` imports through our virtual namespace
+          // so the load hook below owns them. Pack scripts don't have
+          // a node_modules/react reachable from packRoot (no devDep
+          // declared); without onResolve Bun would error out. CORE_
+          // EDITOR_PACK.md §11 "Risk: pack-builder must externalize
+          // React".
+          build.onResolve(
+            { filter: /^react(-dom(\/client)?|\/jsx-runtime|\/jsx-dev-runtime)?$/ },
+            (args) => ({
+              path: args.path,
+              namespace: REACT_NS,
+            }),
+          );
+          // Emit a stub module that reads from the editor-populated
+          // global slot. Mirrors the Preact stub shape — enumerate
+          // the named exports we know pack code touches, plus a
+          // default re-export so `import React from "react"` works.
+          // Anything not in the enumerated list isn't reachable from
+          // the pack; if a future pack needs e.g. `useTransition` we
+          // add a single line here and the editor's reactRuntime.ts
+          // is unchanged (it already publishes the whole React
+          // namespace into the global slot).
+          build.onLoad({ filter: /.*/, namespace: REACT_NS }, (args) => {
+            const globalSlot = REACT_SPECIFIERS[args.path];
+            if (!globalSlot) {
+              throw new Error(`unexpected react specifier: ${args.path}`);
+            }
+            // `react` and `react/jsx-runtime` expose different surfaces
+            // — branch the stub body on the requested specifier so we
+            // don't dereference undefined properties on the wrong
+            // module.
+            if (args.path === "react") {
+              return {
+                loader: "js",
+                contents: `
+                  const __mod = globalThis.${globalSlot};
+                  if (!__mod) {
+                    throw new Error(
+                      "cardboard: react not available — editor must call installReactRuntime() before pack scripts run"
+                    );
+                  }
+                  export default __mod.default ?? __mod;
+                  // Top-level
+                  export const createElement = __mod.createElement;
+                  export const cloneElement = __mod.cloneElement;
+                  export const createContext = __mod.createContext;
+                  export const createRef = __mod.createRef;
+                  export const forwardRef = __mod.forwardRef;
+                  export const isValidElement = __mod.isValidElement;
+                  export const memo = __mod.memo;
+                  export const lazy = __mod.lazy;
+                  export const Suspense = __mod.Suspense;
+                  export const Fragment = __mod.Fragment;
+                  export const StrictMode = __mod.StrictMode;
+                  export const Children = __mod.Children;
+                  export const Component = __mod.Component;
+                  export const PureComponent = __mod.PureComponent;
+                  export const startTransition = __mod.startTransition;
+                  export const version = __mod.version;
+                  // Hooks
+                  export const useState = __mod.useState;
+                  export const useEffect = __mod.useEffect;
+                  export const useLayoutEffect = __mod.useLayoutEffect;
+                  export const useInsertionEffect = __mod.useInsertionEffect;
+                  export const useRef = __mod.useRef;
+                  export const useMemo = __mod.useMemo;
+                  export const useCallback = __mod.useCallback;
+                  export const useContext = __mod.useContext;
+                  export const useReducer = __mod.useReducer;
+                  export const useImperativeHandle = __mod.useImperativeHandle;
+                  export const useId = __mod.useId;
+                  export const useDebugValue = __mod.useDebugValue;
+                  export const useDeferredValue = __mod.useDeferredValue;
+                  export const useTransition = __mod.useTransition;
+                  export const useSyncExternalStore = __mod.useSyncExternalStore;
+                `,
+              };
+            }
+            if (args.path === "react/jsx-runtime" || args.path === "react/jsx-dev-runtime") {
+              return {
+                loader: "js",
+                contents: `
+                  const __mod = globalThis.${globalSlot};
+                  if (!__mod) {
+                    throw new Error(
+                      "cardboard: ${args.path} not available — editor must call installReactRuntime() before pack scripts run"
+                    );
+                  }
+                  export const Fragment = __mod.Fragment;
+                  export const jsx = __mod.jsx;
+                  export const jsxs = __mod.jsxs;
+                  export const jsxDEV = __mod.jsxDEV;
+                `,
+              };
+            }
+            if (args.path === "react-dom") {
+              return {
+                loader: "js",
+                contents: `
+                  const __mod = globalThis.${globalSlot};
+                  if (!__mod) {
+                    throw new Error(
+                      "cardboard: react-dom not available — editor must call installReactRuntime() before pack scripts run"
+                    );
+                  }
+                  export default __mod.default ?? __mod;
+                  export const flushSync = __mod.flushSync;
+                  export const createPortal = __mod.createPortal;
+                  export const findDOMNode = __mod.findDOMNode;
+                  export const unmountComponentAtNode = __mod.unmountComponentAtNode;
+                  export const version = __mod.version;
+                `,
+              };
+            }
+            // react-dom/client
+            return {
+              loader: "js",
+              contents: `
+                const __mod = globalThis.${globalSlot};
+                if (!__mod) {
+                  throw new Error(
+                    "cardboard: react-dom/client not available — editor must call installReactRuntime() before pack scripts run"
+                  );
+                }
+                export const createRoot = __mod.createRoot;
+                export const hydrateRoot = __mod.hydrateRoot;
               `,
             };
           });

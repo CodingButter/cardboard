@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./src/App";
 import { assetUrl } from "./src/lib/assetUrl";
+import { installReactRuntime } from "./src/packs/reactRuntime";
 import { useToolStore } from "./src/state/useToolStore";
 import { useBrushStore } from "./src/state/useBrushStore";
 import { useTilePresetStore } from "./src/state/useTilePresetStore";
@@ -35,6 +36,14 @@ declare global {
     };
   }
 }
+// Expose React + ReactDOM on `globalThis` BEFORE any pack script can
+// run. Pack-shipped TSX components compile against externalised
+// `import React from "react"` specifiers that read from these slots
+// at runtime (see `src/packs/reactRuntime.ts` + the pack-builder's
+// `cardboard-react-externals` plugin). Without this, the first
+// pack-shipped hook call throws "Invalid hook call".
+installReactRuntime();
+
 if (typeof window !== "undefined") {
   window.__cardboard = {
     stores: {

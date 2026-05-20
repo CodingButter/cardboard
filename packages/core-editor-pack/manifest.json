@@ -1,0 +1,9 @@
+{
+  "id": "cardboard-core-editor",
+  "name": "Cardboard Editor",
+  "version": "0.1.0",
+  "engine": "two_5_d@0.1",
+  "scope": ["editor"],
+  "scripts": ["scripts/spike.tsx"],
+  "editorPanels": []
+}

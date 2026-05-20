@@ -601,7 +601,19 @@ async function buildPack(
   try {
     const manifestText = await Bun.file(manifestPath).text();
     manifest = JSON.parse(manifestText) as PackManifest;
-    if (typeof manifest.name === "string" && manifest.name.length > 0) {
+    // Prefer `manifest.id` over `manifest.name` for the output filename
+    // — the editor-pack loader fetches `/packs/<packId>.apg` (per
+    // `editorPackLoader.ts:266`) keyed by the manifest id, so the file
+    // on disk must use the id, not the human-readable name. Most
+    // existing packs use the same string for both fields (and the
+    // legacy fallback to `name` still works when id is absent), but
+    // packs that distinguish them (e.g. core-editor pack: id =
+    // "cardboard-core-editor", name = "Cardboard Editor") need the id
+    // path so the loader's URL line resolves.
+    const manifestId = (manifest as unknown as { id?: string }).id;
+    if (typeof manifestId === "string" && manifestId.length > 0) {
+      outName = manifestId;
+    } else if (typeof manifest.name === "string" && manifest.name.length > 0) {
       outName = manifest.name;
     }
     const lighting = (manifest as unknown as { lighting?: ManifestLightingBlock }).lighting;

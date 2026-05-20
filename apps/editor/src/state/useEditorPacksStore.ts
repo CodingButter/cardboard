@@ -88,6 +88,17 @@ export type EditorPacksState = EditorPacksStateData & EditorPacksStateActions;
  *  any pack from the Extensions tab. */
 const INITIAL_STATE: EditorPacksStateData = {
   packs: {
+    "cardboard-core-editor": {
+      // The editor itself, shipped as a pack — CORE_EDITOR_PACK.md P1
+      // (spike). Today this pack only contains a trivial React
+      // externalization canary (`scripts/spike.tsx`); subsequent
+      // phases move every view/panel/layout into it. Enabled by
+      // default so a fresh install gets the editor's own contributions
+      // through the same pack-chain path third-party packs use.
+      id: "cardboard-core-editor",
+      enabled: true,
+      meta: null,
+    },
     "cardboard-editor-pack-demo": {
       id: "cardboard-editor-pack-demo",
       enabled: true,
