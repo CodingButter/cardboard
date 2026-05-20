@@ -1,6 +1,7 @@
 /**
- * Build-time GLSL shader validator (M5 of MATERIALS.md, supersedes the
- * S5 sketch in ENGINE_PACK_SHADERS.md §9).
+ * Build-time GLSL shader validator (M5 of materials plan, shipped
+ * 2026-05-16 — see git log; supersedes the S5 sketch in
+ * ENGINE_PACK_SHADERS.md §9).
  *
  * Pure utility module — never imported by the runtime renderer. Lives
  * next to its renderer siblings because the canonical hook prelude +
@@ -524,8 +525,8 @@ export async function resolveShaderBackend(): Promise<{
 
 /**
  * Render a single validation error as the multi-line block shown in
- * the report. The format mirrors the example in MATERIALS.md / the
- * spec for the M5 task:
+ * the report. The format mirrors the example in the materials plan
+ * (shipped, see git log) / the spec for the M5 task:
  *
  *     X path/to/file.glsl
  *        from: <origin.source>

@@ -27,7 +27,7 @@ import { castRayToWall } from "Libs/Raycast";
  * `manifest.scripts[]`; the field has been retired.)
  *
  * Prefabs are an editor-only concept (see
- * `docs/plans/PREFABS_EDITOR_ONLY.md`) — scenes ship every entity
+ * the prefabs-editor-only plan — shipped 2026-05-17, see git log) — scenes ship every entity
  * pre-flattened in `scene.entities[]` and pack-script spawn loops
  * call `api.world.spawn()` + `api.world.add(...)` directly.
  *
@@ -210,7 +210,7 @@ export interface BindingsAPI {
  * The engine itself does NOT declare built-ins on this interface —
  * the default-pack manifest's `components[]` is the authoritative
  * source for Position / Facing / Aim / Camera / Sprite / Animation /
- * Light / Shader shapes. See `docs/plans/PREFABS_EDITOR_ONLY.md` §17
+ * Light / Shader shapes. See the prefabs-editor-only plan §17 (shipped 2026-05-17, see git log)
  * and WORLD_STATE.md §4.
  */
 export interface PackComponents {

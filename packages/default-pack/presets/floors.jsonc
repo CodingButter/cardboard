@@ -13,7 +13,7 @@
   "wood.floor": {
     "texture": "images/tiles/wood_floor.jpg"
   },
-  // M2 of MATERIALS.md smoke test — `wet.floor` inherits the wood
+  // M2 of materials plan smoke test (see git log) — `wet.floor` inherits the wood
   // floor texture but attaches a per-preset world shader that
   // forces 85% mirror reflectivity. Cells assigned `wet.floor` in
   // scene_heights_demo.json (smoke-test on) render as a strong

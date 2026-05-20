@@ -46,7 +46,7 @@ export default class SpriteRenderSystem {
 
     this.requests.length = 0;
     world.each(Position, Sprite, (entity, position, sprite) => {
-      // Per-entity shader-variant lookup (M1 of MATERIALS.md). Entities
+      // Per-entity shader-variant lookup (M1 of materials plan — see git log). Entities
       // without a `Shader` component, or carrying one not registered
       // as a variant at scene-load, get variant 0 — the pack default.
       // Renderers that don't implement variants (canvas2d) ignore the

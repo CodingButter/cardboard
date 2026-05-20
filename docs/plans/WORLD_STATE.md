@@ -7,8 +7,9 @@ game-specific — components, controllers, per-scene controllers,
 systems, even "what makes a scene start" — is declared by the
 active pack as data + script bodies. The engine just plumbs it.
 
-This is sibling to PREFABS_EDITOR_ONLY.md (PE1+PE2+PE3 already
-shipped 2026-05-17). PE collapsed runtime prefab resolution into
+This is sibling to the prefabs-editor-only plan (PE1+PE2+PE3
+already shipped 2026-05-17; doc since deleted, see git log). PE
+collapsed runtime prefab resolution into
 flat `scene.entities[]` records. WORLD_STATE finishes the job by
 collapsing the last hardcoded game-shaped surfaces (`scene.spawn`,
 hardcoded engine systems, hidden "player must exist" assumptions)
@@ -913,8 +914,9 @@ which is the only source of truth for the spawn point.
 
 ### 11.6 Engine is now maximally unopinionated (2026-05-17)
 
-Following the PE2/PE3 re-implementation (see
-`PREFABS_EDITOR_ONLY.md` §17), the engine's built-in component set
+Following the PE2/PE3 re-implementation (prefabs-editor-only plan
+§17, shipped 2026-05-17; doc since deleted, see git log), the
+engine's built-in component set
 is the slim render/lifecycle infrastructure only: `Position`,
 `Facing`, `Aim`, `Camera`, `Sprite`, `Animation`, `Light`,
 `Shader`. These are the components engine code reads directly
@@ -1134,10 +1136,11 @@ fields; `player-spawn.js` revert restores `api.scene.spawn` read.
 
 ## 16. Cross-references
 
-  - **`docs/plans/PREFABS_EDITOR_ONLY.md`** — PE1+PE2+PE3 are the
-    foundation. WORLD_STATE is the second half of the same shift:
-    PE removed prefab runtime resolution; WORLD_STATE removes
-    runtime game-type assumption.
+  - **Prefabs-editor-only plan (shipped 2026-05-17; doc since
+    deleted, see git log)** — PE1+PE2+PE3 are the foundation.
+    WORLD_STATE is the second half of the same shift: PE removed
+    prefab runtime resolution; WORLD_STATE removes runtime
+    game-type assumption.
   - **`docs/plans/PACK_CHAIN.md`** — override semantics are
     unchanged. Component-name conflicts get the same
     "later-pack-wins-with-warning" treatment as other manifest

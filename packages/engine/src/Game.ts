@@ -126,8 +126,8 @@ export class Game {
   readonly api: ModAPIImpl;
   readonly pack: AssetPack;
   /**
-   * Ordered pack chain (deps-first → root-last) — M4 of
-   * `docs/plans/MATERIALS.md` §10. `pack` is the chain's last entry
+   * Ordered pack chain (deps-first → root-last) — M4 of materials
+   * plan §10 (shipped, see git log). `pack` is the chain's last entry
    * (root); earlier entries are transitive dependencies whose
    * `manifest.shaders` files cascade into the assembled shader
    * programs. Stored on Game so post-load passes (variant rebuild,
@@ -195,7 +195,7 @@ export class Game {
     shaderSources?: Partial<Record<ShaderRole, string>>,
     /**
      * Optional ordered pack chain (deps-first → root-last) — M4 of
-     * `docs/plans/MATERIALS.md` §10. When omitted, defaults to
+     * materials plan §10 (shipped, see git log). When omitted, defaults to
      * `[pack]` so single-pack callers see no behaviour change.
      * Multi-pack chains feed the renderer's hook / Mode 1 / post-pass
      * cascades.
@@ -243,7 +243,7 @@ export class Game {
 
     // Reuse devices and the world across HMR reloads. On the first
     // ever load, build a fresh world; scene-shipped entities (per
-    // `PREFABS_EDITOR_ONLY.md` §4.2) and pack-script boot loops
+    // prefabs-editor-only plan §4.2 — see git log, shipped 2026-05-17) and pack-script boot loops
     // (`player-spawn.js` et al.) populate the world via
     // `spawnInitialEntities()`, which `main()` calls AFTER
     // `runPackScripts()` has registered systems + `onWorldReady`
@@ -628,8 +628,9 @@ export class Game {
   }
 
   /**
-   * Walk `scene.entities[]` and spawn one entity per record per
-   * `PREFABS_EDITOR_ONLY.md` §4.2. Each component name resolves
+   * Walk `scene.entities[]` and spawn one entity per record per the
+   * prefabs-editor-only plan §4.2 (shipped 2026-05-17 — see git log).
+   * Each component name resolves
    * through the shared `ComponentRegistry`; unknown components log a
    * warning and are skipped (one bad entry doesn't take the rest
    * down). `_*`-prefixed keys are editor-only metadata and ignored.
@@ -683,7 +684,8 @@ export class Game {
   /**
    * Spawn the entities the scene + engine expect to exist before the
    * first frame renders. Walks `scene.entities[]` per
-   * `PREFABS_EDITOR_ONLY.md` §4.2 and spawns one entity per record,
+   * the prefabs-editor-only plan §4.2 (see git log) and spawns one
+   * entity per record,
    * resolving each component name through the shared
    * `ComponentRegistry`. Pack-script boot logic (the default pack's
    * `player-spawn.js`) runs through `onWorldReady` and is free to
@@ -716,7 +718,7 @@ export class Game {
     // entity so `api.sceneController.components` is populated by the
     // time `onWorldReady` callbacks fire.
     this.spawnSceneController();
-    // PREFABS_EDITOR_ONLY.md §4.2 — walk pre-flattened scene entity
+    // Prefabs-editor-only plan §4.2 (see git log) — walk pre-flattened scene entity
     // records and materialise each as a live entity. Empty grids are
     // the common case today (default-pack scenes don't carry an
     // `entities` array); the loop short-circuits.
@@ -822,7 +824,7 @@ export class Game {
     // from the new scene's `controller.components` block. Previous
     // controller is despawned inside `spawnSceneController`.
     this.spawnSceneController();
-    // PREFABS_EDITOR_ONLY.md §4.2 — walk the fresh scene's flattened
+    // Prefabs-editor-only plan §4.2 (see git log) — walk the fresh scene's flattened
     // entity records and materialise each as a live entity. The
     // default-pack ships empty `entities` arrays so this is a no-op
     // there; mod packs that author scene-scoped entities pick up
@@ -879,7 +881,8 @@ export class Game {
 
   /**
    * Material-variant collection + program recompiles (M1 + M2 + M3 of
-   * MATERIALS.md). Three things happen here:
+   * materials plan; shipped 2026-05-16 — see git log). Three things
+   * happen here:
    *
    *  1. **Per-entity sprite variants** (M1) — every entity carrying a
    *     `Shader` component contributes a unique combination of hook-
@@ -901,13 +904,13 @@ export class Game {
    *  - No `Shader` entities + no `preset.shader` + no `scene.shaders`
    *    → the renderer's `rebuildSpriteProgram` / `rebuildWorldProgram`
    *    no-op and the constructor's pack-default programs stay bound
-   *    (byte-identical to pre-MATERIALS rendering).
+   *    (byte-identical to pre-materials rendering).
    *  - Canvas2D backend → both rebuilds skip (the backend ignores
    *    per-fragment shaders entirely).
    *
    * Live-edit of `Shader` components / preset shaders after this
    * point falls back to variant 0 at render time. Reload the scene
-   * to compile new variants — see MATERIALS.md §7.
+   * to compile new variants — see materials plan §7 in git log.
    */
   async collectShaderVariants(): Promise<void> {
     // Material smoke-test gate. M1 + M2 + M3 share the
@@ -917,7 +920,7 @@ export class Game {
     // attached `Shader` component, every preset `shader.*` field,
     // and every scene-level `shaders` block. With it off, the
     // renderer compiles its pack-default programs and rendering is
-    // byte-identical to pre-MATERIALS today.
+    // byte-identical to pre-materials today.
     const flag = (this.pack.manifest as unknown as { materialsSmokeTest?: boolean })
       .materialsSmokeTest === true;
 

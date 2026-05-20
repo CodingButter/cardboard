@@ -19,7 +19,7 @@ on top of; [EDITOR_REDESIGN.md §7](./EDITOR_REDESIGN.md) owns the
 TopBar / StatusBar surfaces where the sync indicator and sign-in flow
 land. Source-of-truth IDB code:
 [apps/editor/src/lib/EditorProjectStore.ts](../../apps/editor/src/lib/EditorProjectStore.ts).
-Tone reference: [MATERIALS.md](./MATERIALS.md) +
+Tone reference: the materials plan (shipped; see git log) +
 [CONSOLE.md](./CONSOLE.md).
 
 Date: 2026-05-17.
@@ -1535,7 +1535,7 @@ None block CS1 (this doc) or CS2 (schema + auth scaffolding).
 | [EDITOR_REDESIGN.md §7](./EDITOR_REDESIGN.md) | This doc consumes | TopBar + StatusBar surfaces for the sync indicator (§8.1). EditorSettingsModal "Sync" tab (§8.4). EDITOR_REDESIGN.md should pick up §8.1's wireframe spec when R3 (shell) defines the TopBar slots. |
 | [EDITOR_IFRAME.md](./EDITOR_IFRAME.md) | This doc surfaces | The editor-as-iframe ([STORE.md §11.2](./STORE.md) Mod-from-store) inherits cloud sync transparently — the iframe boot flow already calls into `EditorProjectStore`, so cloud sync layers on without iframe-specific changes. |
 | [IDEAS.md](../IDEAS.md) | This doc materializes | The "Cloud sync architecture / Hybrid: content-addressed asset store + project manifest" entry. The idea-log entry should be reopened or back-referenced once this doc lands — currently the idea exists in conversation but no IDEAS.md entry was committed; recommend adding one with a `→ CLOUD_SYNC.md` pointer. |
-| [MATERIALS.md](./MATERIALS.md) + [CONSOLE.md](./CONSOLE.md) | Tone reference only | Density + structural style. No functional dependency. |
+| Materials plan (shipped, see git log) + [CONSOLE.md](./CONSOLE.md) | Tone reference only | Density + structural style. No functional dependency. |
 | [MULTIPLAYER_PLAN.md](./MULTIPLAYER_PLAN.md) | Future cross-link | Multi-device collab (CS6) might overlap with multiplayer session sync. The two are orthogonal in v1 (cloud sync is single-author cross-device; multiplayer is multi-player same-session) but a CRDT layer would benefit both. Cross-ref deferred until CS6 has a concrete shape. |
 | [IMAGE_LAB.md](./IMAGE_LAB.md) + [SOUND_LAB.md](./SOUND_LAB.md) | This doc surfaces | Procedural recipe outputs are assets like any other — they get hashed, synced, and dedup'd alongside hand-authored bytes. A pack whose primary content is recipes (cheap to author, cheap to share, cheap to store) is well-served by the content-addressed store. |
 

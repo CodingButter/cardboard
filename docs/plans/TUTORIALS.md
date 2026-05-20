@@ -19,8 +19,8 @@ Source-of-truth for implementation. Phases T1–T5 below. Cross-refs:
 [EDITOR_REDESIGN.md](./EDITOR_REDESIGN.md) §12 Q10 (entry point —
 `EmptyState.tutorial` prop), §4.24 (the `EmptyState` primitive
 itself), §6 (shell — TopBar Help menu),
-[MATERIALS.md](./MATERIALS.md) (tone reference — declarative
-hierarchy with a code escape hatch),
+the materials plan (shipped — tone reference: declarative
+hierarchy with a code escape hatch; see git log),
 [UI_BUILDER.md](./UI_BUILDER.md) (parallel pattern — JSON-first
 authoring, pack-distributable, editor authoring tab),
 [PACK_CHAIN.md](./PACK_CHAIN.md) (T5 — pack-authored tutorials ride
@@ -1200,11 +1200,11 @@ Status: **resolved** (yes, namespaced).
     `map-intro` on completion; the first-run auto-launch is
     gated by `cardboard:firstrun:done`.
 
-- **[MATERIALS.md](./MATERIALS.md)** — tone reference + parallel
-  architectural pattern. MATERIALS is declarative-first
+- **The materials plan (shipped; see git log)** — tone reference
+  + parallel architectural pattern. Materials is declarative-first
   (`.glsl` hooks) with a code escape hatch (component-attached
   variant ids). Tutorials are declarative-first (JSON) with no
-  code in JSON — slightly stricter than MATERIALS, but the same
+  code in JSON — slightly stricter than materials, but the same
   shape.
 
 - **[UI_BUILDER.md](./UI_BUILDER.md)** — closest sibling plan.

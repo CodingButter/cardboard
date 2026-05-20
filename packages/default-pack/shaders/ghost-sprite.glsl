@@ -1,4 +1,4 @@
-// M1 of MATERIALS.md — per-entity sprite-shader smoke test.
+// M1 of materials plan (see git log) — per-entity sprite-shader smoke test.
 //
 // Attaches to ammo-pack pickups when `manifest.materialsSmokeTest`
 // is on (see hello.js). Each ammo pickup carrying this shader

@@ -220,7 +220,7 @@ export class CellPreviewEngine {
   private async bootstrap(): Promise<void> {
     // Pre-resolve shader sources from the pack's manifest so the
     // renderer's program-build path can stay synchronous. M4 of
-    // MATERIALS.md handles the chain case; here we only need the
+    // The materials plan (see git log) handles the chain case; here we only need the
     // single root pack — preview surfaces don't load dep chains.
     const shaderSources = await WebGLRenderer.prefetchShaderSources(this.pack);
     if (this.disposed) return;

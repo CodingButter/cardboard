@@ -1,4 +1,4 @@
-// M2 of MATERIALS.md smoke test — per-cell wet floor shader.
+// M2 of materials plan smoke test (see git log) — per-cell wet floor shader.
 //
 // Attached to the `wet.floor` preset (see presets/floors.jsonc).
 // Cells whose floor uses this preset get bumped to 85% mirror

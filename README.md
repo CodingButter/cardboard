@@ -78,4 +78,3 @@ has its own plan doc under `docs/plans/`:
 | `MULTIPLAYER_PLAN.md` | Networked multiplayer as a drop-in pack. |
 | `WALL_OVERHAUL.md` | Variable wall heights, partial walls, caps. |
 | `LIGHTING_OVERHAUL.md` | Bake-heavy emissive lighting model. |
-| `MONOREPO_PLAN.md` | Workspace restructure (mostly landed). |

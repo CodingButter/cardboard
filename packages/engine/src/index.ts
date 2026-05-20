@@ -143,7 +143,7 @@ export { Vec2 } from "./Libs/Vector";
 export { bakeScene } from "./Lighting";
 export type { BakeOpts, BakeResult, BakeStats } from "./Lighting";
 
-// Shader validation surface (M5 / MATERIALS.md §11). Pack-builder
+// Shader validation surface (M5 / materials plan §11 — see git log). Pack-builder
 // consumes this at build-time. Kept additive — never imported by
 // the runtime renderer. See `Renderers/ShaderValidator.ts`.
 export {
@@ -159,7 +159,7 @@ export {
   type BackendStatus,
 } from "./Renderers/ShaderValidator";
 
-// ── M4 — pack-chain shader cascade (MATERIALS.md §10) ─────────────────
+// ── M4 — pack-chain shader cascade (materials plan §10, see git log) ──
 // Exposed for the multi-pack smoke test + the future P2 conflict-
 // report UI in Settings → Packs. Kept additive in its own section so
 // the parallel engine-pack-split work (R3/R4) doesn't collide on this

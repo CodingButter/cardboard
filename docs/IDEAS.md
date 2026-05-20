@@ -149,8 +149,8 @@ PROC3 audio engine / PROC4 image editor / PROC5 audio editor).
 
 ## 2026-05-16 — Idea log + plan-doc audit
 
-This very file. Plus an audit pass that produced
-`docs/audits/AUDIT_2026-05-16.md` (767 lines) — 18 docs audited, top
+This very file. Plus an audit pass (see git log around 2026-05-16,
+767-line report, since deleted as obsolete) — 18 docs audited, top
 findings: SESSION_STATE.md 12 commits stale, 6 plan docs with
 "not started" rows for phases that shipped, ENGINE_PACK_SPLIT.md
 §R4/§R5 should redirect to newer canonical docs.
@@ -305,7 +305,7 @@ tier hierarchy: pack → scene → material, most-specific wins.
 
 Status: Shipped (M1+M2+M3+M5). M4 chain cascade also shipped.
 
-Refs: MATERIALS.md, commits `bdab12a` / `be31fea`.
+Refs: commits `bdab12a` / `be31fea` (materials plan in git log, shipped 2026-05-16).
 
 ---
 

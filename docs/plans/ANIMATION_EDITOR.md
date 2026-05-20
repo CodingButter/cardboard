@@ -15,8 +15,8 @@ must emit unmodified),
 [EDITOR.md](./EDITOR.md) (editor shell, workflow modes, IDB-backed
 project store, asset sidebar — animation editing slots in as a new
 workflow mode),
-[MATERIALS.md](./MATERIALS.md) (precedent for editor-side baking
-that touches engine asset formats),
+the materials plan (shipped — precedent for editor-side baking
+that touches engine asset formats; see git log),
 [PACK_CHAIN.md](./PACK_CHAIN.md) (source assets vs shipped assets —
 the FBX itself is dev-only, the rendered sheet ships).
 

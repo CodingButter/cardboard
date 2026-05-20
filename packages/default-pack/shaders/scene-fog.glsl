@@ -1,4 +1,4 @@
-// M3 of MATERIALS.md smoke test — scene-level world hooks.
+// M3 of materials plan smoke test (see git log) — scene-level world hooks.
 //
 // Attached to scene2.json via the scene's top-level `shaders`
 // field. Every fragment in scene2 routes through these hooks; the

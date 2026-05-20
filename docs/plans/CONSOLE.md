@@ -10,9 +10,9 @@ builds, without smuggling cheats past a published pack and without
 denying themselves their own tooling during development.
 
 Source-of-truth for implementation. Phases C1–C4 below. Cross-refs:
-[MATERIALS.md](./MATERIALS.md) (precedent for engine-ships-the-mechanism
-and packs-ship-the-content split, plus the cascading-policy precedent
-M1's cascade established),
+the materials plan (shipped; see git log — precedent for engine-ships-
+the-mechanism and packs-ship-the-content split, plus the
+cascading-policy precedent M1's cascade established),
 [ANIMATIONS.md](./ANIMATIONS.md) + [ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md)
 (companion-doc pattern — engine plan plus editor authoring plan),
 [EVENTS.md](./EVENTS.md) (the bus the console subscribes to for
@@ -183,9 +183,9 @@ Layer 1 (mechanism) is engine-owned because it touches world,
 components, scene loader, event bus. Layer 2 (policy) is pack data
 because the pack author owns the answer to "who can run what."
 Layer 3 (UI) is pack content because every modder will theme it
-differently. Mirror precedent: [MATERIALS.md](./MATERIALS.md) ships
-the shader cascade mechanism in engine, shader content in packs,
-the visual policy editor in the editor.
+differently. Mirror precedent: the materials plan (shipped; see git
+log) ships the shader cascade mechanism in engine, shader content
+in packs, the visual policy editor in the editor.
 
 `commands.json` is a JSONC file shipped inside the `.apg` at root,
 peer to `manifest.json`. Pack-builder reads it at build time for
@@ -1419,10 +1419,10 @@ build. Negligible against the existing bake/asset-encode cost.
   adds **Commands** as the fifth tab.
 - [PACK_CHAIN.md](./PACK_CHAIN.md) — multi-pack chain semantics
   define how multiple packs' `commands.json` files merge.
-- [MATERIALS.md § 7](./MATERIALS.md) — the precedent for how the
-  pack-builder reads a pack JSON file and rewrites pack-script
-  source (MATERIALS' Shader-component validation pass) — similar
-  static-analysis discipline applies to command stripping.
+- The materials plan § 7 (shipped; see git log) — the precedent
+  for how the pack-builder reads a pack JSON file and rewrites
+  pack-script source (the Shader-component validation pass) —
+  similar static-analysis discipline applies to command stripping.
 - [ANIMATIONS.md § 3](./ANIMATIONS.md) + [ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md) —
   the companion-doc pattern this doc follows: engine plan +
   editor authoring plan, two docs cross-referenced.

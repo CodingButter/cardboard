@@ -212,7 +212,8 @@ export async function bootFromChain(
   // a pack body inside the boot path.
   await game.spawnInitialEntities();
 
-  // 5c. Collect per-entity shader variants (M1 of MATERIALS.md).
+  // 5c. Collect per-entity shader variants (M1 of materials plan,
+  // shipped 2026-05-16 — see git log).
   bootStatus("Compiling shader variants…");
   await game.collectShaderVariants();
 

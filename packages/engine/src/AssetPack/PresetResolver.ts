@@ -37,7 +37,8 @@ import type { PackManifest } from "./types";
 export type PresetWallFace = "north" | "south" | "east" | "west";
 
 /**
- * Preset-attached shader-hook bundle (M2 of MATERIALS.md §8.1).
+ * Preset-attached shader-hook bundle (M2 of materials plan §8.1,
+ * shipped 2026-05-16 — see git log).
  *
  * Mirrors the `ShaderData` shape on the `Shader` ECS component — same
  * three optional fields, same semantics — except attached to a tile
@@ -145,7 +146,7 @@ export interface ResolvedPresetData {
   /** Editor thumbnail override (not rendered). */
   thumbnail?: string;
   /**
-   * Per-preset shader-hook bundle (M2 of MATERIALS.md §8). Optional.
+   * Per-preset shader-hook bundle (M2 of materials plan §8 — see git log). Optional.
    * Cells using this preset get a non-zero variant id at scene-load
    * and route world-frag hook calls through the variant dispatcher.
    * Sprite / sky hooks on a preset are accepted for forward-compat
@@ -263,7 +264,7 @@ const EMISSIVE_SCHEMA: SchemaShape = {
 };
 
 /**
- * `shader` sub-object — M2 of MATERIALS.md §8.1. All three fields
+ * `shader` sub-object — M2 of materials plan §8.1 (see git log). All three fields
  * optional; a `shader: {}` block validates clean and is a no-op
  * (every hook tier falls through to the next).
  */

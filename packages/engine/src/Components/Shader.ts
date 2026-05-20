@@ -1,7 +1,7 @@
 import { Component } from "ECS";
 
 /**
- * Per-entity shader-hook attachment (M1 of MATERIALS.md).
+ * Per-entity shader-hook attachment (M1 of materials plan — see git log).
  *
  * Each entity may carry a `Shader` component pointing at one or more
  * pack-shipped `.glsl` files containing `hook_modify*` definitions. The

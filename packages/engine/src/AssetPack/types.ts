@@ -264,7 +264,7 @@ export type ShaderEntry = ShaderRole | ShaderHookRole;
 /**
  * Editor-authored declarative prefab — pure component bundle used at
  * authoring time as a reusable template. Prefabs are EDITOR-ONLY per
- * `docs/plans/PREFABS_EDITOR_ONLY.md`: the engine never reads
+ * the prefabs-editor-only plan (shipped 2026-05-17, see git log): the engine never reads
  * `manifest.prefabs` or this shape. The editor stores templates here
  * (or under `pack/prefabs/*.json`) and stamps the flattened component
  * data into `scene.entities[]` records at save time.

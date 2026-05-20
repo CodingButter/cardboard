@@ -25,7 +25,7 @@ export interface SpriteDrawRequest {
   /** Vertical offset of the sprite's center from eye level (+ = down). */
   yOffset: number;
   /**
-   * Per-entity shader-variant id (M1 of MATERIALS.md). Defaults to 0
+   * Per-entity shader-variant id (M1 of materials plan — see git log). Defaults to 0
    * (= pack default). The WebGL backend writes this to the per-vertex
    * `a_variant` attribute so the sprite's frag program can dispatch
    * to the right override. The canvas2d backend ignores it.
@@ -167,7 +167,7 @@ export interface SceneRenderer {
 
   /**
    * Recompile the sprite-frag program against a per-entity variant
-   * set (M1 of MATERIALS.md). Called once per scene-load by `Game`
+   * set (M1 of materials plan — see git log). Called once per scene-load by `Game`
    * after pack scripts + initial entities have populated the world.
    * Optional — the canvas2d backend ignores it; the WebGL backend
    * fast-paths an empty variant set to a no-op (= pre-M1 byte-
@@ -184,7 +184,7 @@ export interface SceneRenderer {
 
   /**
    * Recompile the world-frag program against a per-cell variant set
-   * (M2 of MATERIALS.md). Walks every preset; for each unique
+   * (M2 of materials plan — see git log). Walks every preset; for each unique
    * `shader.worldHooks` path the engine emits a renamed `__vN`
    * function copy and a top-level dispatcher that switches on the
    * per-cell variant id from `u_sceneShaderVariants`.

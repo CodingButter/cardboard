@@ -30,7 +30,7 @@ import { DefaultSettingsScreen } from "./DefaultSettingsScreen";
  * `PlayerInput` component the same frame) lives in the pack that
  * defines `PlayerInput` — it subscribes to `settings:changed` /
  * `frame:before` and walks its own entities. See
- * `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — engine no longer reads
+ * the prefabs-editor-only plan §17 (shipped 2026-05-17, see git log) — engine no longer reads
  * any game-specific component.
  */
 export function installDefaultSettings(api: ModAPIImpl): void {

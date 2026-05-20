@@ -136,7 +136,7 @@ export interface Cell {
   /**
    * Preset id that produced this cell's wall, if the scene used
    * `idMap` resolution. `undefined` for legacy bare-int scenes and
-   * for open cells. M2 of MATERIALS.md uses this to map each cell
+   * for open cells. M2 of materials plan (see git log) uses this to map each cell
    * to its world-shader variant id; non-`idMap` scenes always render
    * with variant 0.
    */
@@ -152,7 +152,7 @@ export type SceneGrid = ReadonlyArray<ReadonlyArray<Cell>>;
 
 /**
  * Per-cell preset id triple captured during `idMap` resolution. M2 of
- * MATERIALS.md routes per-cell world-shader variants via these ids.
+ * materials plan (see git log) routes per-cell world-shader variants via these ids.
  * All three fields optional — open cells leave `wall` undefined, and
  * legacy scenes without `idMap` leave every field undefined.
  */
@@ -188,7 +188,7 @@ export interface SceneControllerJSON {
 
 /**
  * Entity record stamped into a scene by the editor (or hand-authored).
- * PREFABS_EDITOR_ONLY.md §4.1: every entity the engine ever sees ships
+ * Prefabs-editor-only plan §4.1 (see git log, shipped 2026-05-17): every entity the engine ever sees ships
  * pre-flattened in `scene.entities[]` (or gets spawned by a regular
  * pack script). The engine walks the array at scene-load, spawns a
  * fresh entity per record, looks each component up via
@@ -625,7 +625,7 @@ export class Scene {
   readonly controller: { components: Readonly<Record<string, unknown>> };
   /**
    * Per-scene entity records — pre-flattened component bundles the
-   * engine spawns at scene-load. PREFABS_EDITOR_ONLY.md §4.1. Empty
+   * engine spawns at scene-load. Prefabs-editor-only plan §4.1 (see git log). Empty
    * array when the scene JSON omits `entities`.
    */
   readonly entities: ReadonlyArray<SceneEntityJSON>;
@@ -638,7 +638,7 @@ export class Scene {
    */
   readonly lightmap: SceneLightmap;
   /**
-   * Scene-level shader-hook overrides (M3 of MATERIALS.md §9).
+   * Scene-level shader-hook overrides (M3 of materials plan §9 — see git log).
    * Layered on top of pack-level hooks to form variant 0 for THIS
    * scene; per-entity / per-preset variants (M1 + M2) build on top.
    * `undefined` (default) means the scene contributes no overrides
@@ -672,7 +672,7 @@ export class Scene {
     controllerComponents: Readonly<Record<string, unknown>> | undefined = undefined,
     /**
      * Per-scene entity records — pre-flattened component bundles the
-     * engine spawns at scene-load (`PREFABS_EDITOR_ONLY.md` §4.1).
+     * engine spawns at scene-load (prefabs-editor-only plan §4.1 — see git log).
      */
     entities: ReadonlyArray<SceneEntityJSON> = [],
   ) {
@@ -931,7 +931,7 @@ export class Scene {
     let walls = wallsRaw as WallCellInput[][];
     let floors = (floorsRaw ?? []) as FloorCellInput[][];
     let ceilings = (ceilingsRaw ?? []) as CeilingCellInput[][];
-    // Per-cell preset id grid — M2 of MATERIALS.md uses this to map
+    // Per-cell preset id grid — M2 of materials plan (see git log) uses this to map
     // each cell to its world-shader variant id. Sparse: only cells
     // resolved via `idMap` have entries; legacy scenes pass `undefined`.
     let cellPresets: (CellPresetIds | undefined)[][] | undefined;
@@ -1309,7 +1309,7 @@ export interface SceneJSON {
    */
   controller?: SceneControllerJSON;
   /**
-   * Per-scene entity records — `PREFABS_EDITOR_ONLY.md` §4.1. Each
+   * Per-scene entity records — prefabs-editor-only plan §4.1 (see git log). Each
    * entry is a fully-flattened component bundle the engine walks at
    * scene-load to spawn entities. Optional — scenes without an
    * `entities` array spawn nothing here, and pack scripts are free to
@@ -1331,8 +1331,8 @@ export interface SceneJSON {
    */
   lightmap?: SceneLightmapJSON;
   /**
-   * Optional scene-level shader-hook overrides (M3 of MATERIALS.md
-   * §9). Same shape as the `Shader` ECS component / pack-level
+   * Optional scene-level shader-hook overrides (M3 of materials plan
+   * §9 — see git log). Same shape as the `Shader` ECS component / pack-level
    * `manifest.shaders` — pack-relative paths to `.glsl` files
    * defining `hook_*` functions for any of the three roles.
    *

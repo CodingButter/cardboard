@@ -48,7 +48,7 @@ export interface ComponentMetadata {
  * touches directly**: `Position`, `Facing`, `Aim`, `Camera`, `Sprite`,
  * `Animation`, `Light`, `Shader`. Everything else (player input,
  * weapons, inventory, gameplay tags) is pack-declared per
- * `docs/plans/PREFABS_EDITOR_ONLY.md` §17 — the registry instantiates
+ * the prefabs-editor-only plan §17 (shipped 2026-05-17 — see git log) — the registry instantiates
  * those as opaque `Component<unknown>` at boot from
  * `manifest.components[]`.
  */

@@ -17,8 +17,8 @@ for future DSP"), [IMAGE_LAB.md](./IMAGE_LAB.md) (sibling — shared
 [EDITOR_REDESIGN.md](./EDITOR_REDESIGN.md) (visual palette + tab
 strip — Sound Lab joins the PrimaryTabs list, taking the count
 from 7 to 10 once Image Lab + UI Builder + Sound Lab all land),
-[MATERIALS.md](./MATERIALS.md) (tone / density reference for this
-plan doc), [PACK_CHAIN.md](./PACK_CHAIN.md) (recipe-id collision +
+the materials plan (shipped — tone / density reference for this
+plan doc; see git log), [PACK_CHAIN.md](./PACK_CHAIN.md) (recipe-id collision +
 last-wins override semantics, identical to `sounds`),
 [ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md) (bake-and-preview
 pattern precedent — `apps/editor/src/views/AnimationEditor.tsx`
@@ -145,7 +145,7 @@ audition.
 - **Hot-reload of recipes during a play session.** Editor
   rebakes + reseeds when the user edits a node; runtime packs
   do not watch IDB for recipe edits mid-frame. Same constraint
-  as pack-shader edits in [MATERIALS.md](./MATERIALS.md).
+  as pack-shader edits in the materials plan (shipped; see git log).
 
 ---
 
@@ -1532,9 +1532,8 @@ on the Store landing.
   current 7-tab strip to 8 + Image Lab + UI Builder = 10 when
   all land). §6.3 needs a follow-up edit to add "Sound Lab" to
   the canonical tab list.
-- [MATERIALS.md](./MATERIALS.md) — plan-doc tone + density
-  reference. Shipped doc; this plan adopts its decision-
-  oriented style.
+- The materials plan (shipped; see git log) — plan-doc tone +
+  density reference. This plan adopts its decision-oriented style.
 - [PACK_CHAIN.md](./PACK_CHAIN.md) — multi-pack id resolution
   (`manifest.soundRecipes` is last-wins on collision, identical
   to `sounds`). §11 Store surface lands SL7's community

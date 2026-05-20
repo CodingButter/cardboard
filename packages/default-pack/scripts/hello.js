@@ -37,7 +37,7 @@ export default (api) => {
     });
   });
 
-  // ── M1 of MATERIALS.md — per-entity shader smoke test ─────────────
+  // ── M1 of materials plan (see git log) — per-entity shader smoke test ─
   // When the pack ships a `materialsSmokeTest: true` flag in its
   // manifest, every other ammo pickup gets a `Shader` component
   // pointing at the green-tinted, alpha-pulsing `ghost-sprite.glsl`.

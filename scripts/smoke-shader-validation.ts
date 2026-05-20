@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Smoke test for M5 of the materials system —
- * `docs/plans/MATERIALS.md` §11.
+ * Smoke test for M5 of the materials system (materials plan §11,
+ * shipped 2026-05-16 — see git log).
  *
  * 1. Loads every `.glsl` in `packages/default-pack/shaders/` and
  *    validates each one against its expected role. The ship-checked

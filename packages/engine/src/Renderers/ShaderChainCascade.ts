@@ -1,6 +1,6 @@
 /**
- * Pack-chain shader cascade — Phase M4 of `docs/plans/MATERIALS.md` §10
- * (cross-ref `docs/plans/PACK_CHAIN.md` §5 and
+ * Pack-chain shader cascade — Phase M4 of materials plan §10 (shipped
+ * 2026-05-16, see git log; cross-ref `docs/plans/PACK_CHAIN.md` §5 and
  * `docs/plans/ENGINE_PACK_SHADERS.md` §10).
  *
  * P1 of PACK_CHAIN returns an ordered `AssetPack[]` (deps-first → root-

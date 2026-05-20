@@ -76,7 +76,7 @@ export async function assembleShaderSource(
   pack: AssetPack | undefined,
   engineBody: string,
   /**
-   * Optional scene-level overrides (M3 of MATERIALS.md §9). Already
+   * Optional scene-level overrides (M3 of materials plan §9 — see git log). Already
    * parsed by `collectSceneShaderLayer` — a `Map<hookName, fullBody>`
    * keyed exactly like pack-side `parseHookOverrides` output. These
    * are merged ON TOP of pack-level overrides before the prelude
@@ -116,7 +116,7 @@ export async function assembleShaderSource(
       // Mode 1 has no hook prelude — the pack's body owns its own
       // main() and there's nowhere to splice in scene-level hook
       // overrides. Match the per-entity Mode-1 incompatibility
-      // (MATERIALS.md §3.3) and log + drop.
+      // (materials plan §3.3 — see git log) and log + drop.
       console.warn(
         `[two_5_d] pack '${pack.manifest.name}' ships shaders.${role} (Mode 1) — scene.shaders.${hookKeyFor(role)} overrides are dropped for this scene (no hook call sites in pack main()).`,
       );
@@ -191,7 +191,7 @@ export async function assembleShaderSource(
 
 /**
  * Chain-aware variant of `assembleShaderSource` — Phase M4 of
- * `docs/plans/MATERIALS.md` §10. Resolves hook + Mode-1 cascade across
+ * materials plan §10 (shipped, see git log). Resolves hook + Mode-1 cascade across
  * an ordered pack chain (deps-first → root-last) before assembling.
  *
  * Behaviour matches the single-pack `assembleShaderSource` for:
@@ -311,7 +311,7 @@ function substitutePreludeOverrides(
 }
 
 /* ────────────────────────────────────────────────────────────────────
- * Per-entity sprite-variant assembly (M1 of MATERIALS.md).
+ * Per-entity sprite-variant assembly (M1 of materials plan — see git log).
  *
  * The pack-level path above produces ONE set of hook bodies for the
  * sprite-frag program. Per-entity shaders introduce N additional
@@ -427,7 +427,7 @@ function parseHookSignature(src: string): {
  * `engineBody` is the engine's authoritative `main()` for the sprite
  * frag — the caller passes `FRAG_SPRITE_SRC` from `WebGLRenderer.ts`.
  * Mode-1 (pack-shipped `spriteFrag`) is incompatible with per-entity
- * variants — see MATERIALS.md §3.3. If the pack ships Mode 1, the
+ * variants — see materials plan §3.3 in git log. If the pack ships Mode 1, the
  * variants are dropped and the call falls back to the pack body.
  */
 export async function assembleSpriteSource(
@@ -435,13 +435,13 @@ export async function assembleSpriteSource(
   engineBody: string,
   variants: ShaderVariantSet,
   /**
-   * Optional scene-level sprite hooks (M3 of MATERIALS.md). Layered
+   * Optional scene-level sprite hooks (M3 of materials plan — see git log). Layered
    * on top of pack hooks to form variant 0 for this scene. When
    * `undefined`/empty, behaviour is byte-identical to M1.
    */
   sceneSpriteOverrides?: ReadonlyMap<string, string>,
   /**
-   * Optional full pack chain (M4 of MATERIALS.md §10). When provided,
+   * Optional full pack chain (M4 of materials plan §10 — see git log). When provided,
    * variant 0's hooks are cascaded across every pack in the chain
    * (last-wins per hook name) — see `assembleShaderSourceFromChain`.
    * Mode 1 / Mode 3 + variant interaction is unchanged. When omitted
@@ -463,7 +463,7 @@ export async function assembleSpriteSource(
   if (mode1Winner || packShaders?.spriteFrag) {
     if (!variants.isEmpty()) {
       console.warn(
-        `[two_5_d] pack ships shaders.spriteFrag (Mode 1) — per-entity Shader.spriteHooks overrides are dropped for this pack. See MATERIALS.md §3.3.`,
+        `[two_5_d] pack ships shaders.spriteFrag (Mode 1) — per-entity Shader.spriteHooks overrides are dropped for this pack. See materials plan §3.3 in git log.`,
       );
     }
     if (chain && chain.length > 1) {
@@ -594,7 +594,7 @@ function parseHookSignatureToString(src: string): string {
 export { headerFor, helpersFor };
 
 /* ────────────────────────────────────────────────────────────────────
- * Per-cell world-variant assembly (M2 of MATERIALS.md §8).
+ * Per-cell world-variant assembly (M2 of materials plan §8 — see git log).
  *
  * Same dispatcher pattern as `assembleSpriteSource`, but the variant
  * id comes from a per-cell texture (`u_sceneShaderVariants`, RGBA32F
@@ -607,7 +607,7 @@ export { headerFor, helpersFor };
  * call to the matching `__vN` body.
  *
  * Scene-only hooks (fog, fallback, final-alpha, etc. — see
- * MATERIALS.md §8) DO NOT dispatch per-cell. They keep their pack +
+ * materials plan §8 — see git log) DO NOT dispatch per-cell. They keep their pack +
  * scene baseline (variant 0) and the variant texture is never read.
  * ────────────────────────────────────────────────────────────────── */
 
@@ -623,7 +623,7 @@ export { headerFor, helpersFor };
  *
  * Any other hook (e.g. `hook_modifyAlbedo(base, uv, tile, surface)`
  * where `uv` is `fract(worldPos)` not a position) routes to
- * variant 0 always. See MATERIALS.md §8 for the rationale.
+ * variant 0 always. See materials plan §8 in git log for the rationale.
  */
 const WORLD_CELL_AWARE_HOOKS = new Map<string, string>([
   // hookName → parameter to derive cellCoord from
@@ -673,7 +673,7 @@ int worldVariantAtWorld(vec2 worldPos) {
  *
  *   1. Resolve variant-0 source: pack-default world-frag with M3
  *      scene-level hooks layered on top (engine identity → pack hooks
- *      → scene hooks per MATERIALS.md §3.1).
+ *      → scene hooks per materials plan §3.1 — see git log).
  *   2. Inject the `u_sceneShaderVariants` sampler + variant-lookup
  *      helpers into the assembled header.
  *   3. For each cell-aware hook overridden by ANY variant:
@@ -682,7 +682,7 @@ int worldVariantAtWorld(vec2 worldPos) {
  *      c. Emit a top-level `hook_X(...)` dispatcher that switches on
  *         the variant id at the fragment's cell coord.
  *   4. Scene-only hooks overridden by variants are warned + dropped
- *      (per MATERIALS.md §8 — they belong on the scene tier, not the
+ *      (per materials plan §8 in git log — they belong on the scene tier, not the
  *      material tier).
  *
  * Mode-1 (pack ships `shaders.worldFrag`) is incompatible with
@@ -697,7 +697,7 @@ export async function assembleWorldSource(
   /** Optional scene-level world hooks (M3). Layers on top of pack. */
   sceneWorldOverrides?: ReadonlyMap<string, string>,
   /**
-   * Optional full pack chain (M4 of MATERIALS.md §10). When provided,
+   * Optional full pack chain (M4 of materials plan §10 — see git log). When provided,
    * variant 0's world hooks are cascaded across every pack in the
    * chain (last-wins per hook name). Per-cell variant dispatch (M2)
    * continues to scope by the preset's declaring pack. When omitted
@@ -712,7 +712,7 @@ export async function assembleWorldSource(
   if (mode1Winner || packShaders?.worldFrag) {
     if (!variants.isEmpty()) {
       console.warn(
-        `[two_5_d] pack ships shaders.worldFrag (Mode 1) — per-cell preset.shader.worldHooks overrides are dropped for this pack. See MATERIALS.md §3.3.`,
+        `[two_5_d] pack ships shaders.worldFrag (Mode 1) — per-cell preset.shader.worldHooks overrides are dropped for this pack. See materials plan §3.3 in git log.`,
       );
     }
     if (chain && chain.length > 1) {

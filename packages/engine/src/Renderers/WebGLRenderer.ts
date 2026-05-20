@@ -26,7 +26,7 @@ export interface WebGLRendererProps {
    * Pre-resolved shader source per role, as produced by
    * `WebGLRenderer.prefetchShaderSources(pack)` (single pack) or
    * `WebGLRenderer.prefetchShaderSourcesFromChain(chain)` (M4 of
-   * MATERIALS.md §10). When omitted, the renderer uses its built-in
+   * materials plan §10 — see git log). When omitted, the renderer uses its built-in
    * defaults — equivalent to passing the result of a prefetch on a
    * pack / chain with no `shaders` field. Phase S1 of
    * `ENGINE_PACK_SHADERS.md`; M4 widens the producer to a chain.
@@ -34,7 +34,7 @@ export interface WebGLRendererProps {
   shaderSources?: Partial<Record<ShaderRole, string>>;
   /**
    * Optional ordered pack chain (deps-first → root-last) — M4 of
-   * `docs/plans/MATERIALS.md` §10. When provided, the renderer reads
+   * materials plan §10 (see git log). When provided, the renderer reads
    * `manifest.shaders` from EVERY pack in the chain (post-pass
    * cascade, hook cascade, Mode 1 last-wins) instead of just the
    * root pack. Length-1 chains (or omission) keep the pre-M4 single-
@@ -130,7 +130,7 @@ void main() {
   v_layer = a_layer;
   v_camY = a_camY;
   v_worldPos = a_worldPos;
-  // Per-entity shader-variant id (M1 of MATERIALS.md). 0 = pack
+  // Per-entity shader-variant id (M1 of materials plan — see git log). 0 = pack
   // default; non-zero routes through the fragment dispatcher when
   // any entity in the scene carries a Shader component. The VS
   // unconditionally forwards this — the variant attribute is
@@ -154,7 +154,7 @@ const SPRITE_VERTEX_FLOATS = 13;
  *   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
  *    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
  *
- *  - `variantId` is M1 of MATERIALS.md — per-entity shader-variant
+ *  - `variantId` is M1 of materials plan (see git log) — per-entity shader-variant
  *    the fragment dispatcher switches on. Defaults to 0 when an
  *    entity has no `Shader` component.
  *  - `uvOffset` + `uvScale` are A1 of ANIMATIONS.md — the source-
@@ -726,7 +726,7 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly skyBottomLoc: WebGLUniformLocation;
 
   // ── World pass program ────────────────────────────────────────────
-  // Mutable because M2/M3 of MATERIALS.md may recompile it once per
+  // Mutable because M2/M3 of materials plan (see git log) may recompile it once per
   // scene load when presets carry `shader.worldHooks` or the scene
   // ships its own `shaders` field. `u` rebinds against the new
   // program. Outside scene-load this is effectively const.
@@ -758,7 +758,7 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly sceneTilesTex: WebGLTexture;
   private readonly sceneReflTex: WebGLTexture;
   /**
-   * Per-cell world-shader variant id (M2 of MATERIALS.md §8.2).
+   * Per-cell world-shader variant id (M2 of materials plan §8.2 — see git log).
    * RGBA32F SW×SH where channel R carries the variant id for the cell
    * at `(x, y)`. Variant 0 = pack/scene default; non-zero ids route
    * the world-frag dispatcher to that variant's hook bodies. Filled
@@ -818,7 +818,7 @@ export class WebGLRenderer implements SceneRenderer {
   private uploadedSceneH: number = 1;
 
   // ── Sprite pass state ──────────────────────────────────────────────────
-  // `spriteProgram` is mutable because M1 of MATERIALS.md may recompile
+  // `spriteProgram` is mutable because M1 of materials plan (see git log) may recompile
   // it once per scene load when entities carry `Shader` components.
   // `spriteUniforms` rebinds against the new program. Outside scene
   // load it's effectively const.
@@ -834,7 +834,7 @@ export class WebGLRenderer implements SceneRenderer {
   /**
    * Per-vertex layout (9 floats — see `drawSprites` for the matching
    * fill loop): `[posX, posY, u, v, layer, camY, worldX, worldY,
-   * variantId]`. M1 of MATERIALS.md grew this by one float — the
+   * variantId]`. M1 of materials plan (see git log) grew this by one float — the
    * `a_variant` attribute carrying the entity's shader-variant id.
    * Streams 0 when no entity has a `Shader` component (= today's
    * behaviour).
@@ -843,7 +843,7 @@ export class WebGLRenderer implements SceneRenderer {
     MAX_SPRITES_PER_FRAME * 6 * SPRITE_VERTEX_FLOATS,
   );
   // Mutable — re-resolved against `this.spriteProgram` whenever the
-  // sprite program is rebuilt (M1 of MATERIALS.md).
+  // sprite program is rebuilt (M1 of materials plan — see git log).
   private spriteUniforms: Record<string, WebGLUniformLocation | null>;
   /**
    * Tracks the active sprite-variant set so per-vertex
@@ -893,7 +893,7 @@ export class WebGLRenderer implements SceneRenderer {
   private readonly pack: AssetPack;
   /**
    * Full ordered pack chain (deps-first → root-last) when consumers
-   * opt into M4 (MATERIALS.md §10). Defaults to a length-1 array
+   * opt into M4 (materials plan §10 — see git log). Defaults to a length-1 array
    * holding just `pack` so chain-aware paths can treat both modes
    * uniformly without null checks. Single-pack callers see no
    * behaviour change.
@@ -960,7 +960,7 @@ export class WebGLRenderer implements SceneRenderer {
   }
 
   /**
-   * Chain-aware variant — M4 of `docs/plans/MATERIALS.md` §10.
+   * Chain-aware variant — M4 of materials plan §10 (see git log).
    *
    * Walks the ordered chain (deps-first → root-last) and resolves
    * every role's fragment source against the cascaded manifests:
@@ -1152,7 +1152,7 @@ export class WebGLRenderer implements SceneRenderer {
     //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
     //    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
     // (13 floats × 4 bytes = 52-byte stride). `variantId` is M1 of
-    // MATERIALS.md — per-entity shader-variant attribute, defaults to
+    // materials plan (see git log) — per-entity shader-variant attribute, defaults to
     // 0 when no Shader component is present. `uvOffset` + `uvScale`
     // are A1 of ANIMATIONS.md — the source-region rectangle within the
     // atlas layer. Default `(0,0)` + `(1,1)` for unanimated sprites
@@ -1646,7 +1646,7 @@ export class WebGLRenderer implements SceneRenderer {
       yOffset: number;
       worldX: number;
       worldY: number;
-      /** Per-entity shader-variant id, M1 of MATERIALS.md. 0 = pack default. */
+      /** Per-entity shader-variant id, M1 of materials plan (see git log). 0 = pack default. */
       variant: number;
       /** A1 of ANIMATIONS.md — atlas-layer source rect origin (0..1). */
       uvOffsetX: number;
@@ -1706,7 +1706,7 @@ export class WebGLRenderer implements SceneRenderer {
     // Build vertex data — 6 verts per quad, 13 floats per vert.
     //   [posX, posY, u, v, layer, camY, worldX, worldY, variantId,
     //    uvOffsetX, uvOffsetY, uvScaleX, uvScaleY]
-    // `variantId` is M1 of MATERIALS.md; `uvOffset` + `uvScale` are
+    // `variantId` is M1 of materials plan (see git log); `uvOffset` + `uvScale` are
     // A1 of ANIMATIONS.md (atlas region for the current frame +
     // angle).
     const data = this.spriteVertexData;
@@ -1800,7 +1800,7 @@ export class WebGLRenderer implements SceneRenderer {
    * or when the value doesn't match any collected variant.
    *
    * The CPU-side `SpriteRenderSystem` reads this to populate the
-   * per-vertex `a_variant` attribute. M1 of MATERIALS.md.
+   * per-vertex `a_variant` attribute. M1 of materials plan (see git log).
    */
   spriteVariantIdFor(data: { worldHooks?: string; spriteHooks?: string; skyHooks?: string } | undefined): number {
     if (!this.spriteVariants || this.spriteVariants.isEmpty()) return 0;
@@ -1809,7 +1809,7 @@ export class WebGLRenderer implements SceneRenderer {
 
   /**
    * Swap the sprite-frag program for one that includes a per-variant
-   * dispatcher. M1 of MATERIALS.md — called by `Game` after
+   * dispatcher. M1 of materials plan (see git log) — called by `Game` after
    * `runPackScripts` + `spawnInitialEntities` so the new program sees
    * every `Shader` component the scene needs.
    *
@@ -1873,7 +1873,7 @@ export class WebGLRenderer implements SceneRenderer {
   /**
    * Swap the world-frag program for one that includes a per-cell
    * variant dispatcher (M2) + scene-level hook overrides (M3) of
-   * MATERIALS.md. Called by `Game.collectShaderVariants` after the
+   * materials plan (see git log). Called by `Game.collectShaderVariants` after the
    * pack scripts + initial entities have populated the world.
    *
    * - `variants.isEmpty()` + no `sceneWorldOverrides` → no-op fast
@@ -2088,7 +2088,7 @@ export class WebGLRenderer implements SceneRenderer {
     // postPasses in chain order (deps-first → root-last). Single-
     // pack callers (chain length 1) hit the same code path as
     // pre-M4 via `PostPassChain.createFromChain`'s length-1 fast
-    // path. See MATERIALS.md §10 + ENGINE_PACK_SHADERS.md §10.3.
+    // path. See materials plan §10 (git log) + ENGINE_PACK_SHADERS.md §10.3.
     this.postPasses = await PostPassChain.createFromChain(
       this.gl,
       this.chain,
@@ -2349,7 +2349,7 @@ export class WebGLRenderer implements SceneRenderer {
       }
     }
 
-    // Per-cell world-shader variant id texture (M2 of MATERIALS.md
+    // Per-cell world-shader variant id texture (M2 of materials plan, see git log,
     // §8.2). Only emitted when `rebuildWorldProgram` registered a
     // variant set — otherwise the 1×1 zero seed (set in the
     // constructor) stays bound and the GLSL compiler has stripped

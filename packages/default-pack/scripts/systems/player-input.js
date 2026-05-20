@@ -51,7 +51,8 @@ export default (api) => {
   let wasJumpHeld = false;
 
   // Throttled `player:moved` (EVENTS.md §4.3) — pack-side after
-  // PREFABS_EDITOR_ONLY.md §17. Emit on cell-boundary cross OR every
+  // prefabs-editor-only plan §17 (shipped 2026-05-17, see git log).
+  // Emit on cell-boundary cross OR every
   // Nth frame, whichever first. The throttle constant matches the
   // engine's previous `PLAYER_MOVED_FRAME_THROTTLE`.
   const PLAYER_MOVED_FRAME_THROTTLE = 10;

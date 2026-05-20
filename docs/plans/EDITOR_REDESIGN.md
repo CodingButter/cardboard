@@ -13,8 +13,8 @@ qualifier, both docs apply.
 
 Cross-refs: [EDITOR.md](./EDITOR.md) (feature spec),
 [EDITOR_IFRAME.md](./EDITOR_IFRAME.md) (Playtest depends on I2
-telemetry), [MATERIALS.md](./MATERIALS.md) (visual reference for plan
-doc density + tone), [ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md)
+telemetry), the materials plan (shipped — visual reference for plan
+doc density + tone; see git log), [ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md)
 (phase-doc structure precedent),
 [PACK_CHAIN.md](./PACK_CHAIN.md) (manifest/dependency surface
 displayed in Project view + ProjectSettings tabs),
@@ -2111,8 +2111,9 @@ reads existing fields — no migration.
   I2 landing. The new message types (`engine-stats`,
   `world-stats`, `selection-change`) need to be added to
   EDITOR_IFRAME.md §6 as part of I2's implementation.
-- **[MATERIALS.md](./MATERIALS.md)** — visual reference for
-  what a quality plan doc looks like. Density + tone target.
+- **The materials plan (shipped; see git log)** — visual
+  reference for what a quality plan doc looks like. Density +
+  tone target.
 - **[ANIMATION_EDITOR.md](./ANIMATION_EDITOR.md)** — phase-doc
   structure precedent. The R-phase rollout mirrors AE's phase
   pattern.
@@ -2162,7 +2163,8 @@ parallel R4 agents, ~10d wall-clock minimum.
 
 After R5 ships, this doc graduates from "plan" to "historical
 record + reference for the shipped surface" — same status
-treatment as MATERIALS.md is in today (see its line 9 banner).
+treatment the materials plan had (since deleted after similarly
+shipping; see git log).
 
 ---
 

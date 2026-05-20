@@ -7,8 +7,8 @@ animation-aware path that drives most of the difference between
 "prop in a box" and "creature that turns to face you."
 
 Source-of-truth for implementation. Phases A1–A4 below. Cross-refs:
-[MATERIALS.md](./MATERIALS.md) (variant-assembly model + ECS-attached
-subsystem pattern this plan mirrors),
+the materials plan (shipped — variant-assembly model + ECS-attached
+subsystem pattern this plan mirrors; see git log),
 [ENGINE_PACK_SHADERS.md](./ENGINE_PACK_SHADERS.md) (sprite vertex
 format + sprite atlas this plan extends),
 [TILE_PRESETS.md](./TILE_PRESETS.md) (the `tileSheets` precedent for
@@ -121,7 +121,7 @@ Today's sprite path (as of 2026-05-16):
   layer. No UV slicing exists today.
 
 - **Vertex layout**: 9 floats per vertex (36 bytes), already extended
-  for MATERIALS.md M1's `a_variant`. The hot field for this plan is
+  for materials-plan M1's `a_variant` (shipped). The hot field for this plan is
   `a_uv` (vec2) — currently fixed at the corners of the layer; this
   plan changes that to a region within the layer.
 
@@ -719,7 +719,7 @@ follow in A2 once `api.events` exists. Once events exist,
 The sprite VBO's per-vertex layout grows by 4 floats — two vec2s for
 the atlas-region origin + size within the layer:
 
-| Field | Before (post-MATERIALS M1) | After |
+| Field | Before (post-materials M1) | After |
 |---|---|---|
 | `a_position` (vec2) | 0..7 | 0..7 |
 | `a_uv` (vec2) | 8..15 | 8..15 (now in 0..1 of the **region**, not the layer) |
@@ -1007,7 +1007,7 @@ pose) → `idle`. Each transition fires
 | Entity with `Facing` but `angles=1` sprite | Angle math skipped; renders the single angle. |
 | `Animation` component without matching sprite animations dict | Logs once; renders frame 0 of angle 0. |
 | Canvas2D renderer | Reads `uvOffset/uvScale`; defaults to full image when undefined. |
-| MATERIALS shaders (variant 0 ghost, etc.) | Composes — animation drives UV region, shader still runs per-pixel. No conflict. |
+| Materials-plan shaders (variant 0 ghost, etc.) | Composes — animation drives UV region, shader still runs per-pixel. No conflict. |
 | Default pack | `ammo_pack` stays unchanged. A1 ships ONE example animated sprite (door or 4-angle NPC) opt-in via a manifest flag (mirrors `_materialsSmokeTest_doc` pattern in `manifest.json`). |
 
 ### Zero-cost when unused

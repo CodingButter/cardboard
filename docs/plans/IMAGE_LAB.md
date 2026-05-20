@@ -15,7 +15,7 @@ SOUND_LAB.md cross-references rather than duplicates.
 
 Source-of-truth for implementation. Phases IL1–IL7 below. Cross-refs:
 [IDEAS.md](../IDEAS.md) (origin entry),
-[MATERIALS.md](./MATERIALS.md) (materials own shaders; recipes own
+the materials plan (shipped; materials own shaders, recipes own
 textures — they compose),
 [ANIMATIONS.md](./ANIMATIONS.md) §5 (animated recipes export to a
 spritesheet matching this convention),
@@ -111,7 +111,7 @@ ship presentable art.
   an "IL" corner badge. Right-click → "Edit recipe…" jumps to Image
   Lab. Re-saving a recipe invalidates every IDB-cached bake that
   references it, mirroring the lightmap-invalidation pattern.
-- **Composes with Materials.** [MATERIALS.md](./MATERIALS.md)
+- **Composes with Materials.** The materials plan (shipped)
   shaders sample regular textures; a procedural recipe IS a regular
   texture from the shader's point of view. Materials and recipes
   compose orthogonally — a wet-floor shader can sample a procedural
@@ -131,7 +131,7 @@ ship presentable art.
   only. The engine is a raycaster; sprite + tile + sky textures are
   the only consumers.
 - **Compute-shader / GPGPU paths.** WebGL2 fragment-shader output
-  only. Same constraint as MATERIALS.md.
+  only. Same constraint as the materials plan.
 - **Live re-evaluation per frame.** Recipes bake **once** at
   pack-load (animated: N times into a spritesheet). The engine
   doesn't run the recipe shader every frame — the *baked sprite*
@@ -161,7 +161,7 @@ As of 2026-05-16:
   declares an `image: "images/sprites/...png"` path; the AssetPack
   loader fetches the bytes; the WebGLRenderer uploads to
   `TEXTURE_2D_ARRAY`. There is no notion of a recipe asset, no
-  shader compiler beyond MATERIALS.md's hook system, no IDB-cached
+  shader compiler beyond the materials hook system, no IDB-cached
   rendered texture.
 - **Editor**: no Image Lab tab. The 10-tab canonical list in
   [EDITOR_REDESIGN.md](./EDITOR_REDESIGN.md) §6.3 includes "Image
@@ -176,8 +176,8 @@ As of 2026-05-16:
   Three.js + IDB sidecar). [LIGHTING_OVERHAUL.md](./
   LIGHTING_OVERHAUL.md) ships `apps/editor/src/lib/lightmapBaker.ts`
   + `apps/editor/src/workers/bake-lightmap.worker.ts` — the
-  worker-based bake pattern Image Lab mirrors. [MATERIALS.md](./
-  MATERIALS.md) ships the GLSL hook-parsing + variant-assembly
+  worker-based bake pattern Image Lab mirrors. The materials plan
+  (shipped) ships the GLSL hook-parsing + variant-assembly
   machinery the compiler reuses for op-to-GLSL emission.
 
 Net: no infrastructure exists. The engine doesn't know what a
@@ -429,7 +429,7 @@ Migration policy:
   default-value semantic change.
 - **Migrations are pure functions** `(recipeJson: vN) → vN+1`
   registered at `packages/engine/src/Procedural/migrations/`. Same
-  pattern as ANIMATIONS / MATERIALS' future schema evolution.
+  pattern as ANIMATIONS / materials-plan's future schema evolution.
 - **Editor auto-migrates on open.** When Image Lab opens a recipe
   authored against an older version, it applies the migration
   chain in-memory, surfaces a "Schema upgraded vN → vN+1" toast,
@@ -2063,12 +2063,11 @@ Numbered for cross-reference. Each block ≤ 80 words.
 
    **RESOLVED**: Hand-rolled integer hash in GLSL. `sin()`-based noise varies across GPU drivers and breaks pixel-identical determinism across machines.
 
-6. **Materials interaction.** [MATERIALS.md](./MATERIALS.md)
+6. **Materials interaction.** The materials plan (shipped)
    shaders apply hooks to entities. Procedural recipes generate
    textures. They compose: a material can sample a procedural
    texture via the standard sampler. No conflict, no special
-   plumbing. Worth a one-line note in MATERIALS.md (§14 cross-
-   ref) when IL2 lands.
+   plumbing.
 
 7. **Community recipe sharing.** [STORE.md](./STORE.md) currently
    covers full pack publishing. Recipe-only packs (a manifest
@@ -2124,9 +2123,8 @@ Numbered for cross-reference. Each block ≤ 80 words.
     baking. Useful for "instance-color" recipes that vary per
     spawn without re-baking. Schema-reserve `param.uniform:
     true` flag; not implemented in IL2-IL5. Captures interest in
-    bridging procedural recipes with the [MATERIALS.md](./
-    MATERIALS.md) per-variant uniform extension flagged in
-    MATERIALS § 14 Q1.
+    bridging procedural recipes with the materials-plan per-variant
+    uniform extension flagged in materials § 14 Q1 (see git log).
 
     **RESOLVED**: Reserve `uniforms?: Record<string, ShaderUniform>` field on the recipe schema now. Empty in MVP; populated when custom-shader support lands later.
 
@@ -2183,10 +2181,10 @@ Numbered for cross-reference. Each block ≤ 80 words.
 
 - [IDEAS.md](../IDEAS.md) — origin entry "Procedural assets (image
   + audio recipe DSL)" (2026-05-16).
-- [MATERIALS.md](./MATERIALS.md) — texture-sampling integration;
-  recipes are texture sources; materials are sampler-side. §14
-  Q1 (per-variant uniforms) may eventually expose recipe-
-  parameters as runtime uniforms.
+- The materials plan (shipped; see git log) — texture-sampling
+  integration; recipes are texture sources; materials are
+  sampler-side. §14 Q1 (per-variant uniforms) may eventually
+  expose recipe-parameters as runtime uniforms.
 - [ANIMATIONS.md](./ANIMATIONS.md) — animated recipes export to a
   spritesheet matching §5's atlas layout. §5 may benefit from a
   one-line note that procedural recipes are a frame source.

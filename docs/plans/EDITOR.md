@@ -8,9 +8,10 @@ renderer), backs all project data with IndexedDB via an
 
 Cross-refs: [PACK_CHAIN.md](./PACK_CHAIN.md) for the manifest fields
 the editor must surface, [ENGINE_PACK_SPLIT.md](./ENGINE_PACK_SPLIT.md)
-for the `AssetPack` interface contract the editor implements,
-[MONOREPO_PLAN.md](./MONOREPO_PLAN.md) for the workspace slot the
-editor lives in, [WALL_OVERHAUL.md](./WALL_OVERHAUL.md) and
+for the `AssetPack` interface contract the editor implements
+(the monorepo workspace layout that hosts `apps/editor` is
+self-documenting via `package.json` workspaces),
+[WALL_OVERHAUL.md](./WALL_OVERHAUL.md) and
 [LIGHTING_OVERHAUL.md](./LIGHTING_OVERHAUL.md) for the authoring
 primitives the editor has to expose.
 

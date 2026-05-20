@@ -6,8 +6,8 @@ truth for `api.audio.*`, the Web Audio backend that powers it, the
 and the live-settings volume controls that let players mix the
 game in real time.
 
-Cross-refs: [MATERIALS.md](./MATERIALS.md) for the ECS-attached
-subsystem pattern this borrows, [EDITOR.md](./EDITOR.md) §6 for
+Cross-refs: the materials plan (shipped; see git log) for the
+ECS-attached subsystem pattern this borrows, [EDITOR.md](./EDITOR.md) §6 for
 where audio authoring will eventually surface in the editor,
 [PACK_CHAIN.md](./PACK_CHAIN.md) for multi-pack sound id
 override semantics, [ENGINE_PACK_SPLIT.md](./ENGINE_PACK_SPLIT.md)

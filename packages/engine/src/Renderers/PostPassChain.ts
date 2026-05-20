@@ -152,8 +152,8 @@ export class PostPassChain {
   }
 
   /**
-   * Chain-aware variant — M4 of `docs/plans/MATERIALS.md` §10 (cross-
-   * ref ENGINE_PACK_SHADERS.md §10.3). Concatenates every pack's
+   * Chain-aware variant — M4 of materials plan §10 (shipped, see
+   * git log; cross-ref ENGINE_PACK_SHADERS.md §10.3). Concatenates every pack's
    * `shaders.postPasses` in chain order (deps-first → root-last);
    * cross-pack name collisions log a soft warning but BOTH passes
    * run — two CRT passes is a valid stylistic choice.

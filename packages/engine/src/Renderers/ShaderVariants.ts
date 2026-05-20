@@ -1,5 +1,5 @@
 /**
- * Per-entity shader-variant collection (M1 of MATERIALS.md).
+ * Per-entity shader-variant collection (M1 of materials plan — see git log).
  *
  * Walks the world at scene-load time, collects every unique `Shader`
  * component value used by sprite entities, assigns each a non-zero
@@ -148,7 +148,7 @@ export async function collectSpriteVariants(
 }
 
 /* ────────────────────────────────────────────────────────────────────
- * World variant collection (M2 of MATERIALS.md §8).
+ * World variant collection (M2 of materials plan §8 — see git log).
  *
  * Walks every resolved preset, dedupes by the preset's
  * `shader.worldHooks` path, and assigns each unique value a non-zero
@@ -160,7 +160,7 @@ export async function collectSpriteVariants(
  * fragment's cell variant at the cell-aware hook call sites.
  *
  * Scene-only world hooks (fog, fallback, final composite — see
- * MATERIALS.md §8) DO NOT dispatch per-cell; they always run variant
+ * materials plan §8 — see git log) DO NOT dispatch per-cell; they always run variant
  * 0. The scene-level layer (M3) merges into variant 0 so those hooks
  * pick up scene overrides correctly.
  * ────────────────────────────────────────────────────────────────── */
@@ -280,7 +280,7 @@ export async function collectWorldVariants(
 }
 
 /* ────────────────────────────────────────────────────────────────────
- * Scene-level shader merge (M3 of MATERIALS.md §9).
+ * Scene-level shader merge (M3 of materials plan §9 — see git log).
  *
  * Scene JSON's `shaders` field is merged on top of pack-level hooks
  * to form variant 0. The merge is per-hook-name (last-wins) and uses

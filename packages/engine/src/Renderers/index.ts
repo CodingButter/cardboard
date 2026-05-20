@@ -23,7 +23,7 @@ export {
   type SceneShaderLayer,
 } from "./ShaderVariants";
 
-// M4 — pack-chain shader cascade (MATERIALS.md §10).
+// M4 — pack-chain shader cascade (materials plan §10 — see git log).
 export {
   cascadeHooks,
   cascadePostPasses,

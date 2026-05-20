@@ -38,8 +38,8 @@ trees themselves live in packs),
 last-pack-wins on id collision; sub-trees can be overridden via
 the standard chain semantics),
 [STORE.md](./STORE.md) (UB6 — community UI sharing + reverse-deps),
-[MATERIALS.md](./MATERIALS.md) (parallel pattern — declarative
-hierarchy with a code escape hatch).
+the materials plan (shipped — parallel pattern: declarative
+hierarchy with a code escape hatch; see git log).
 
 Last revised: 2026-05-17.
 
@@ -1738,10 +1738,10 @@ Status: **resolved**.
   rows. Live mode (UB5) also reads from the existing telemetry
   channel; no new transport.
 
-- **[MATERIALS.md](./MATERIALS.md)** — parallel architectural
-  pattern: declarative hierarchy (Shader cascade) + code escape
-  hatch (a Preact component for UB / a raw hook file for
-  MATERIALS). The UI-Builder docs cite MATERIALS as the
+- **The materials plan (shipped; see git log)** — parallel
+  architectural pattern: declarative hierarchy (Shader cascade) +
+  code escape hatch (a Preact component for UB / a raw hook file
+  for materials). The UI-Builder docs cite materials as the
   precedent for "declarative-first with a code fallback" in
   engine surfaces.
 
