@@ -400,6 +400,8 @@ function previewMessage(msg: WireMessage): string {
       return `store=${msg.storeId}`;
     case "disconnect":
       return msg.reason ?? "no reason";
+    case "mountPanel":
+      return `${msg.panelKind} (${msg.label})`;
     case "ping":
     case "pong":
       return "";

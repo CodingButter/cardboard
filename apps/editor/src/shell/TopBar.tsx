@@ -18,6 +18,7 @@ import { UserAvatar } from "./UserAvatar";
 import { PaletteSearchInput } from "../components/palette/PaletteSearchInput";
 import { registerCommand } from "../state/useCommandStore";
 import { PairDeviceModal } from "../components/pairing/PairDeviceModal";
+import { TopBarDeviceChips } from "../components/pairing/TopBarDeviceChips";
 import { useDesktopPairingStore } from "../state/useDesktopPairingStore";
 import logoUrl from "../assets/logo.png" with { type: "file" };
 import type { SaveState } from "../components/ui/TopBar";
@@ -261,6 +262,13 @@ export function TopBar({
               Save
             </Button>
           </ShellActionTooltip>
+          {/* Paired-device drop targets. Renders nothing when no peer
+              is paired, so this is a no-op visually until the user
+              completes a pairing flow. Each chip is a drop target for
+              dockview panel-tab drags — drop on a chip → mountPanel
+              wire message to that device. */}
+          <TopBarDeviceChips />
+
           <ShellActionTooltip
             label={pairedCount > 0 ? `Pair Device (${pairedCount} connected)` : "Pair Device"}
             description="Show a QR code so a phone or tablet can pair with this editor and host panels."

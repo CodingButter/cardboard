@@ -87,6 +87,25 @@ export type WireMessage =
   | { kind: "storeWrite"; storeId: string; patch: unknown; origin: string }
   | { kind: "ping" }
   | { kind: "pong" }
+  /**
+   * Desktop → sidecar: "mount this panel on your surface."
+   *
+   * Lands when the user drags a dock panel tab onto a paired-device
+   * chip on the desktop's TopBar. The desktop has zero authority over
+   * the sidecar's layout — this is a SUGGESTION, not a command. Mobile
+   * tier should tab-stack inside its single group; tablet/desktop tier
+   * may honour `hint` for side-split placement. Sidecars that don't
+   * recognise this kind MUST silently ignore (forward-compat). The
+   * full sidecar handler lands in M2.
+   */
+  | {
+      kind: "mountPanel";
+      panelKind: SemanticPanelKind;
+      label: string;
+      asTab?: boolean;
+      hint?: "left" | "right" | "bottom";
+      state?: unknown;
+    }
   | { kind: "disconnect"; reason?: string };
 
 // ---------------------------------------------------------------------------

@@ -241,9 +241,55 @@ function handleInbound(remoteId: string, raw: unknown): void {
     case "pong":
     case "storeWrite":
     case "welcome":
+    case "mountPanel":
     case "disconnect":
       // D10b only acts on `hello`. D11+ lights up storeWrite + ping/pong.
+      // `mountPanel` is a DESKTOP-ORIGINATED message; if a sidecar
+      // echoes one back (it shouldn't) we no-op rather than throw.
       return;
+  }
+}
+
+/**
+ * Send a `mountPanel` wire message to a single paired peer.
+ *
+ * Used by the drag-to-device-chip UX in the TopBar: when the user drops
+ * a dockview panel tab on a paired-device chip, the chip calls this to
+ * tell the sidecar to mount that panel. Returns `true` if the message
+ * was put on the wire, `false` if no connection existed or send threw.
+ *
+ * D10b ships only the DESKTOP side of this — sidecars still need to
+ * grow a `mountPanel` handler before anything visible happens on the
+ * device. Forward-compat: sidecars that don't know the kind drop it
+ * silently per the pairingTypes contract.
+ */
+export function sendMountPanel(
+  remoteId: string,
+  payload: {
+    panelKind: string;
+    label: string;
+    asTab?: boolean;
+    hint?: "left" | "right" | "bottom";
+    state?: unknown;
+  },
+): boolean {
+  const entry = runtime?.peers.get(remoteId);
+  if (!entry) return false;
+  const msg: WireMessage = {
+    kind: "mountPanel",
+    panelKind: payload.panelKind,
+    label: payload.label,
+    asTab: payload.asTab,
+    hint: payload.hint,
+    state: payload.state,
+  };
+  try {
+    entry.conn.send(msg);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[desktopPairing] failed to send mountPanel:", err);
+    return false;
   }
 }
 

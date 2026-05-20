@@ -45,4 +45,27 @@ export type WireMessage =
   | { kind: "storeWrite"; storeId: string; patch: unknown; origin: string }
   | { kind: "ping" }
   | { kind: "pong" }
+  /**
+   * Desktop → sidecar: "mount this panel on your surface."
+   *
+   * Fired when the user drags a dock panel tab onto a paired-device
+   * chip on the desktop. The sidecar interprets the `panelKind` against
+   * its own registry. For multi-pane sidecars (`tablet` / `desktop`
+   * tier) an optional `hint` lets the desktop suggest layout
+   * placement; mobile sidecars ignore the hint and always tab-stack.
+   *
+   * `state` is a reserved best-effort snapshot for D11b's initial-state
+   * mirror — sidecars without that wiring should ignore it for now.
+   *
+   * Forward-compat: sidecars that don't recognise this kind MUST
+   * ignore it (the dispatch switch has a default-noop branch).
+   */
+  | {
+      kind: "mountPanel";
+      panelKind: SemanticPanelKind;
+      label: string;
+      asTab?: boolean;
+      hint?: "left" | "right" | "bottom";
+      state?: unknown;
+    }
   | { kind: "disconnect"; reason?: string };
