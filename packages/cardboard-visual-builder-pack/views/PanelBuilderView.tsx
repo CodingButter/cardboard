@@ -36,6 +36,8 @@ import React from "react";
 import {
   ArrowRightLeft,
   Boxes,
+  Download,
+  FilePlus,
   GitBranch,
   Hash,
   Heading1,
@@ -43,6 +45,8 @@ import {
   ListFilter,
   MessageSquare,
   MousePointerClick,
+  Redo2,
+  Save,
   SlidersHorizontal,
   Space,
   Square,
@@ -50,6 +54,7 @@ import {
   TextCursorInput,
   ToggleLeft,
   Type,
+  Undo2,
 } from "lucide-react";
 import {
   PanelRenderer,
@@ -74,9 +79,14 @@ import {
   getPanelBuilderStore,
   walkSpecNodes,
   findNodeById,
+  bumpDraftsRefresh,
   type PanelBuilderState,
   type PanelBuilderActions,
 } from "../state/usePanelBuilderStore";
+import {
+  saveDraft as saveDraftToIdb,
+  type PanelDraftRow,
+} from "../state/draftsStore";
 import { NodeInspector } from "../components/NodeInspector";
 
 const CANVAS_HOST_SPEC: PanelSpec = {
@@ -290,6 +300,201 @@ function findNodeIdFromTarget(
   return null;
 }
 
+/**
+ * Validate an unknown value as a `PanelSpec`. The check is structural —
+ * the renderer's `PanelRenderer` is itself defensive about bad nodes, so
+ * we only gate the obviously-broken cases (missing top-level fields).
+ */
+function isPanelSpec(value: unknown): value is PanelSpec {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    typeof v.category === "string" &&
+    typeof v.dockKind === "string" &&
+    !!v.root &&
+    typeof v.root === "object"
+  );
+}
+
+/** Export the current spec as `<name>.json` via a Blob download. */
+function downloadSpecAsJson(spec: PanelSpec, baseName: string): void {
+  const safeName = baseName.replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/-+/g, "-");
+  const fileName = `${safeName || "panel"}.json`;
+  const blob = new Blob([JSON.stringify(spec, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Canvas toolbar — Save / Export / Import / Undo / Redo. Lives above
+ * the canvas drop-target so the actions stay in reach while authoring.
+ */
+function CanvasToolbar(): React.JSX.Element {
+  const state = usePanelBuilderState();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const canUndo = state ? state.history.cursor > 0 : false;
+  const canRedo = state
+    ? state.history.cursor < state.history.entries.length - 1
+    : false;
+  const currentName = state?.currentDraftName ?? null;
+
+  const onSave = React.useCallback(async () => {
+    const actions = getActions();
+    if (!actions) return;
+    const defaultName = currentName || actions.spec.title || "Untitled";
+    const name = window.prompt("Save draft as:", defaultName);
+    if (!name) return;
+    try {
+      await saveDraftToIdb(name.trim(), actions.spec);
+      actions.setCurrentDraftName(name.trim());
+      bumpDraftsRefresh();
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message || "Failed to save draft");
+    }
+  }, [currentName]);
+
+  const onExport = React.useCallback(() => {
+    const actions = getActions();
+    if (!actions) return;
+    const baseName = currentName || actions.spec.title || actions.spec.id || "panel";
+    downloadSpecAsJson(actions.spec, baseName);
+  }, [currentName]);
+
+  const onImport = React.useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const onFileChange = React.useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as unknown;
+        if (!isPanelSpec(parsed)) {
+          setError(
+            `"${file.name}" doesn't look like a PanelSpec — missing id/title/category/dockKind/root.`,
+          );
+          return;
+        }
+        const name = file.name.replace(/\.json$/i, "");
+        try {
+          await saveDraftToIdb(name, parsed);
+          bumpDraftsRefresh();
+        } catch {
+          // Save fail is non-fatal — still load the spec in-memory.
+        }
+        const actions = getActions();
+        if (actions) actions.loadSpec(parsed, name);
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message || "Failed to import file");
+      }
+    },
+    [],
+  );
+
+  const onUndo = React.useCallback(() => {
+    getActions()?.undo();
+  }, []);
+  const onRedo = React.useCallback(() => {
+    getActions()?.redo();
+  }, []);
+
+  return (
+    <div
+      className="flex items-center gap-1 px-2 py-1 border-b border-zinc-800 bg-zinc-950"
+      data-testid="panel-builder-toolbar"
+    >
+      <span
+        className="text-[11px] text-zinc-300 truncate max-w-[14rem]"
+        title={currentName ?? "Unsaved draft"}
+      >
+        {currentName ?? <em className="text-zinc-500">Unsaved draft</em>}
+      </span>
+      <span className="flex-1" />
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={!canUndo}
+        title="Undo (Ctrl+Z)"
+        className="inline-flex items-center gap-1 text-[11px] text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        data-testid="panel-builder-undo"
+      >
+        <Undo2 size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={onRedo}
+        disabled={!canRedo}
+        title="Redo (Ctrl+Shift+Z)"
+        className="inline-flex items-center gap-1 text-[11px] text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        data-testid="panel-builder-redo"
+      >
+        <Redo2 size={12} />
+      </button>
+      <span className="w-px h-4 bg-zinc-800 mx-1" />
+      <button
+        type="button"
+        onClick={() => void onSave()}
+        title="Save draft to library"
+        className="inline-flex items-center gap-1 text-[11px] text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-800"
+        data-testid="panel-builder-save"
+      >
+        <Save size={12} /> Save
+      </button>
+      <button
+        type="button"
+        onClick={onExport}
+        title="Download current draft as .json"
+        className="inline-flex items-center gap-1 text-[11px] text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-800"
+        data-testid="panel-builder-export"
+      >
+        <Download size={12} /> Export
+      </button>
+      <button
+        type="button"
+        onClick={onImport}
+        title="Import a .json panel spec"
+        className="inline-flex items-center gap-1 text-[11px] text-zinc-300 px-1.5 py-0.5 rounded hover:bg-zinc-800"
+        data-testid="panel-builder-import"
+      >
+        <FilePlus size={12} /> Import
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={(e) => void onFileChange(e)}
+        className="hidden"
+        data-testid="panel-builder-file-input"
+      />
+      {error && (
+        <span
+          className="text-[10px] text-rose-300 ml-2 max-w-[18rem] truncate"
+          title={error}
+        >
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CanvasPane(): React.JSX.Element {
   const state = usePanelBuilderState();
   const [isOver, setIsOver] = React.useState(false);
@@ -304,7 +509,14 @@ function CanvasPane(): React.JSX.Element {
 
   const onDragOver = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
-      if (e.dataTransfer.types.includes(MIME.panelBuilderNode)) {
+      // Accept BOTH palette-tile drags AND `.json` file drops. The
+      // first lands a template node via the panel-builder store; the
+      // second loads a complete spec (used as the file-drop import
+      // surface — see VB4 §10).
+      if (
+        e.dataTransfer.types.includes(MIME.panelBuilderNode) ||
+        e.dataTransfer.types.includes("Files")
+      ) {
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         setIsOver(true);
@@ -318,16 +530,51 @@ function CanvasPane(): React.JSX.Element {
   const onDrop = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       setIsOver(false);
+      // Palette-tile drop (template insert) ----------------------------
       const raw = e.dataTransfer.getData(MIME.panelBuilderNode);
-      if (!raw) return;
-      const payload = decode(raw);
-      if (!payload || payload.kind !== "panelBuilderNode") return;
+      if (raw) {
+        const payload = decode(raw);
+        if (!payload || payload.kind !== "panelBuilderNode") return;
+        e.preventDefault();
+        const template = payload.meta?.template as NodeSpec | undefined;
+        if (!template) return;
+        const actions = getActions();
+        if (!actions) return;
+        actions.appendNode(template);
+        return;
+      }
+      // `.json` file drop (import) ------------------------------------
+      const files = Array.from(e.dataTransfer.files);
+      const jsonFile = files.find(
+        (f) =>
+          f.type === "application/json" ||
+          f.name.toLowerCase().endsWith(".json"),
+      );
+      if (!jsonFile) return;
       e.preventDefault();
-      const template = payload.meta?.template as NodeSpec | undefined;
-      if (!template) return;
-      const actions = getActions();
-      if (!actions) return;
-      actions.appendNode(template);
+      void (async () => {
+        try {
+          const text = await jsonFile.text();
+          const parsed = JSON.parse(text) as unknown;
+          if (!isPanelSpec(parsed)) {
+            console.warn(
+              `[panelBuilder] dropped "${jsonFile.name}" doesn't look like a PanelSpec`,
+            );
+            return;
+          }
+          const name = jsonFile.name.replace(/\.json$/i, "");
+          try {
+            await saveDraftToIdb(name, parsed);
+            bumpDraftsRefresh();
+          } catch {
+            // Save fail is non-fatal — still load the spec in-memory.
+          }
+          const actions = getActions();
+          if (actions) actions.loadSpec(parsed, name);
+        } catch (err) {
+          console.warn("[panelBuilder] file import failed:", err);
+        }
+      })();
     },
     [],
   );
@@ -398,6 +645,7 @@ function CanvasPane(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full">
+      <CanvasToolbar />
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pt-2 pb-1">
         Canvas
       </div>

@@ -24,12 +24,15 @@
 import type { EditorPackContext } from "../../../apps/editor/src/packs/editorPackLoader";
 import type { NodeSpec } from "../../../apps/editor/src/panel-renderer/types";
 import React from "react";
-import { LayoutPanelTop } from "lucide-react";
+import { LayoutPanelTop, Library } from "lucide-react";
 import { PanelBuilderView } from "../views/PanelBuilderView";
+import { PanelLibraryPanel } from "../components/PanelLibraryPanel";
 import {
+  bumpDraftsRefresh,
   initPanelBuilderStore,
   teardownPanelBuilderStore,
 } from "../state/usePanelBuilderStore";
+import { saveDraft as saveDraftToIdb } from "../state/draftsStore";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // ── Create the pack's Zustand store ──────────────────────────────
@@ -70,6 +73,62 @@ export default function setup(ctx: EditorPackContext): () => void {
     },
   });
 
+  // VB4 — Undo / Redo / Save commands. Each registers a keybinding so
+  // the host's shell keydown handler dispatches them globally without
+  // the canvas needing focus. Commands live-unregister cleanly when
+  // the pack is disabled (see Extensions tab); the returned
+  // unregistrars are collected into `disposers` below.
+  const unregUndo = ctx.registerCommand({
+    id: "panelBuilder.undo",
+    title: "Panel Builder: Undo",
+    category: "Panel Builder",
+    keybinding: "Ctrl+Z",
+    // origin-only: the history stack lives on each window's local
+    // store, and undo is a per-window concept. Broadcasting would
+    // double-undo in popped-out builder windows.
+    scope: "origin-only",
+    run: () => {
+      // Only act when the Panel Builder tab is the active surface —
+      // a global Ctrl+Z must not stomp other tabs' undo paths. The
+      // shell's keybinding dispatcher already runs commands ONLY
+      // when their keybinding matches, and `panelBuilder.undo` only
+      // exists while this pack is loaded, but we still guard against
+      // overlapping bindings with a focus check inside text inputs.
+      if (isFocusInsideEditableField()) return;
+      store.getState().undo();
+    },
+  });
+  const unregRedo = ctx.registerCommand({
+    id: "panelBuilder.redo",
+    title: "Panel Builder: Redo",
+    category: "Panel Builder",
+    keybinding: "Ctrl+Shift+Z",
+    scope: "origin-only",
+    run: () => {
+      if (isFocusInsideEditableField()) return;
+      store.getState().redo();
+    },
+  });
+  const unregSave = ctx.registerCommand({
+    id: "panelBuilder.save-draft",
+    title: "Panel Builder: Save draft",
+    category: "Panel Builder",
+    scope: "origin-only",
+    run: async () => {
+      const state = store.getState();
+      const defaultName = state.currentDraftName || state.spec.title || "Untitled";
+      const name = window.prompt("Save draft as:", defaultName);
+      if (!name) return;
+      try {
+        await saveDraftToIdb(name.trim(), state.spec);
+        state.setCurrentDraftName(name.trim());
+        bumpDraftsRefresh();
+      } catch (e) {
+        console.warn("[panel-builder.save-draft] failed:", e);
+      }
+    },
+  });
+
   // ── Tab + view ──────────────────────────────────────────────────
   const disposers: Array<() => void> = [
     ctx.registerView("panel-builder", PanelBuilderView),
@@ -81,12 +140,52 @@ export default function setup(ctx: EditorPackContext): () => void {
       description:
         "JSON Visual Builder — drag-and-drop authoring for editor-panel JSON specs.",
     }),
+    // VB4 — Panel Library dock panel. Registered as a regular
+    // DockPanelDef so the user can add it to any view's layout
+    // through the DocksModal. The Library re-fetches its IDB list
+    // whenever `draftsRefreshTick` increments.
+    //
+    // The Library component takes no IDockviewPanelProps — same
+    // shape as e.g. NotesPanel in the core editor pack. The cast
+    // matches that pattern.
+    ctx.registerPanel({
+      id: "panel-builder-library",
+      title: "Panel Library",
+      category: "Panel Builder",
+      component: PanelLibraryPanel as React.FunctionComponent,
+      icon: <Library size={14} />,
+      description:
+        "Saved JSON Visual Builder drafts. Click a row to load. Drop a .json file to import.",
+    }),
     unregAddPlaceholder,
     unregReset,
+    unregUndo,
+    unregRedo,
+    unregSave,
   ];
 
   return () => {
     for (const dispose of disposers) dispose();
     teardownPanelBuilderStore();
   };
+}
+
+/**
+ * True when keyboard focus is inside an input / textarea / select /
+ * contenteditable — used to gate the global undo/redo keybindings so a
+ * user typing in an inspector field doesn't trigger an undo on every
+ * Ctrl+Z press. The keybinding dispatcher runs `run()` regardless of
+ * focus; the guard inside `run` is the cheapest place to keep that
+ * behaviour scoped.
+ */
+function isFocusInsideEditableField(): boolean {
+  const active = typeof document !== "undefined" ? document.activeElement : null;
+  if (!(active instanceof HTMLElement)) return false;
+  const tag = active.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    active.isContentEditable
+  );
 }

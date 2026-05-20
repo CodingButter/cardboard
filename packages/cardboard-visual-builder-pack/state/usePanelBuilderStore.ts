@@ -32,7 +32,22 @@
  *     selected.
  *   • `resetDraft()` — reset to a fresh empty draft.
  *
- * VB4+ extends with undo/redo, save/load. Out of scope here.
+ * VB4 extends with undo/redo and named-draft save/load via a
+ * sidecar IDB (`state/draftsStore.ts`). The history stack lives ON
+ * the store: every mutation (appendNode/updateNode/deleteNode/
+ * replaceRoot/resetDraft) pushes a snapshot of the PRE-mutation spec
+ * onto `history.entries`, capped at 100 entries. `undo` walks the
+ * cursor backwards, `redo` walks it forwards. A new mutation while
+ * cursor < entries.length truncates the redo branch — standard
+ * "new edit destroys redo" semantics.
+ *
+ * Note on capture-side: we record the PRE-state at the time of the
+ * mutation so undo restores it; redo plays the POST-state which is
+ * captured alongside as the next entry. This is the classic
+ * "every entry is a full snapshot" approach the editor's own
+ * useHistoryStore uses (cf. `apps/editor/src/state/useHistoryStore.ts`).
+ * Snapshot serialisation is O(n) per mutation; typical drafts have
+ * <50 nodes so the cost is negligible.
  */
 
 import type { NodeSpec, PanelSpec, LayoutNode } from "../../../apps/editor/src/panel-renderer/types";
@@ -71,6 +86,31 @@ export interface PanelBuilderState {
   /** Currently selected node id (spec-tree path) or null when nothing
    *  is selected. Used by the canvas selection overlay + inspector. */
   selectedNodeId: string | null;
+  /** Undo/redo history. Each entry is a snapshot of the spec at a
+   *  given point. `cursor` is the index of the CURRENT spec; `undo`
+   *  decrements + reloads the previous entry, `redo` increments +
+   *  reloads the next. Capacity-capped at 100 to bound memory. */
+  history: PanelBuilderHistory;
+  /** Name of the most-recently-saved draft this builder session
+   *  represents — populated by Save and Load. Drives the toolbar
+   *  title + the default name on subsequent Save clicks. */
+  currentDraftName: string | null;
+  /** Monotonic counter — bumped by `bumpDraftsRefresh()` whenever the
+   *  drafts IDB is mutated (Save / Delete / Import). The Library
+   *  panel subscribes to this tick to re-fetch its list. Living on
+   *  the panelBuilder store means the tick crosses cross-window via
+   *  the same persistence/broadcast layer all dynamic stores get. */
+  draftsRefreshTick: number;
+}
+
+export interface PanelBuilderHistory {
+  /** Snapshots of `spec` ordered oldest → newest. `entries[cursor]` is
+   *  the live spec at any point in time. */
+  entries: PanelSpec[];
+  /** Position of the live spec within `entries`. */
+  cursor: number;
+  /** Maximum stack depth. New pushes past this drop the oldest entry. */
+  capacity: number;
 }
 
 /** Actions exposed on the same hook as the state. */
@@ -96,6 +136,22 @@ export interface PanelBuilderActions extends Record<string, unknown> {
    *  selection if the removed node was selected. No-op when `id` is
    *  `"root"` (the root is not deletable — pack delete instead). */
   deleteNode: (id: string) => void;
+  /** Walk the history cursor backwards, restoring the previous
+   *  snapshot. No-op when there's nothing to undo. */
+  undo: () => void;
+  /** Walk the history cursor forwards, restoring the next snapshot.
+   *  No-op when there's nothing to redo. */
+  redo: () => void;
+  /** Load a full PanelSpec into the builder (used by Library load +
+   *  Import). Resets history with the loaded spec as the new
+   *  baseline. The optional `draftName` populates `currentDraftName`
+   *  so subsequent Saves overwrite by default. */
+  loadSpec: (spec: PanelSpec, draftName?: string | null) => void;
+  /** Set the current draft name (used after Save names a draft). */
+  setCurrentDraftName: (name: string | null) => void;
+  /** Increment `draftsRefreshTick` — call after writing/deleting in
+   *  the drafts IDB so the Library panel re-fetches. */
+  bumpDraftsRefresh: () => void;
 }
 
 export type PanelBuilderStore = UseBoundStore<
@@ -276,6 +332,46 @@ function rebuild(
 }
 
 // ---------------------------------------------------------------------------
+// History helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum entries in the history stack. New pushes past this cap drop
+ * the oldest entry; the cursor is rebased so the live snapshot stays
+ * addressable. Mirrors `apps/editor/src/state/useHistoryStore.ts:91`.
+ */
+export const HISTORY_CAPACITY = 100;
+
+/**
+ * Push a new snapshot onto the history stack with "new edit destroys
+ * redo" semantics: any redo-branch entries past the cursor are
+ * discarded. Returns the next history shape; caller folds it into the
+ * surrounding `set(...)`.
+ */
+export function pushHistory(
+  history: PanelBuilderHistory,
+  nextSpec: PanelSpec,
+): PanelBuilderHistory {
+  // Truncate to the cursor inclusive (entries up to and including the
+  // current one), then append the new snapshot.
+  const trimmed = history.entries.slice(0, history.cursor + 1);
+  const appended = [...trimmed, nextSpec];
+  if (appended.length > history.capacity) {
+    const overflow = appended.length - history.capacity;
+    return {
+      ...history,
+      entries: appended.slice(overflow),
+      cursor: appended.length - overflow - 1,
+    };
+  }
+  return {
+    ...history,
+    entries: appended,
+    cursor: appended.length - 1,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Lazy-init singleton
 // ---------------------------------------------------------------------------
 
@@ -303,6 +399,13 @@ export function initPanelBuilderStore(
       root: initialSpec.root,
       draftId: makeDraftId(),
       selectedNodeId: null,
+      history: {
+        entries: [initialSpec],
+        cursor: 0,
+        capacity: HISTORY_CAPACITY,
+      },
+      currentDraftName: null,
+      draftsRefreshTick: 0,
     },
     (set, get) => ({
       appendNode: (node: NodeSpec): void => {
@@ -326,7 +429,11 @@ export function initPanelBuilderStore(
           children: [...rootLayout.children, node],
         };
         const nextSpec: PanelSpec = { ...current, root: nextRoot };
-        set({ spec: nextSpec, root: nextRoot } as Partial<PanelBuilderState>);
+        set({
+          spec: nextSpec,
+          root: nextRoot,
+          history: pushHistory(get().history, nextSpec),
+        } as Partial<PanelBuilderState>);
       },
       replaceRoot: (root: NodeSpec): void => {
         const current = get().spec;
@@ -336,6 +443,7 @@ export function initPanelBuilderStore(
           root,
           // A replaceRoot may invalidate the current selection — drop it.
           selectedNodeId: null,
+          history: pushHistory(get().history, nextSpec),
         } as Partial<PanelBuilderState>);
       },
       resetDraft: (): void => {
@@ -345,6 +453,12 @@ export function initPanelBuilderStore(
           root: nextSpec.root,
           draftId: makeDraftId(),
           selectedNodeId: null,
+          history: {
+            entries: [nextSpec],
+            cursor: 0,
+            capacity: HISTORY_CAPACITY,
+          },
+          currentDraftName: null,
         } as Partial<PanelBuilderState>);
       },
       selectNode: (id: string | null): void => {
@@ -366,7 +480,11 @@ export function initPanelBuilderStore(
         });
         if (newRoot == null) return;
         const nextSpec: PanelSpec = { ...current, root: newRoot };
-        set({ spec: nextSpec, root: newRoot } as Partial<PanelBuilderState>);
+        set({
+          spec: nextSpec,
+          root: newRoot,
+          history: pushHistory(get().history, nextSpec),
+        } as Partial<PanelBuilderState>);
       },
       deleteNode: (id: string): void => {
         if (id === "root") return; // refuse — see semantics in interface.
@@ -387,6 +505,54 @@ export function initPanelBuilderStore(
           spec: nextSpec,
           root: newRoot,
           selectedNodeId: nextSelectedId,
+          history: pushHistory(get().history, nextSpec),
+        } as Partial<PanelBuilderState>);
+      },
+      undo: (): void => {
+        const { history } = get();
+        if (history.cursor <= 0) return;
+        const nextCursor = history.cursor - 1;
+        const snapshot = history.entries[nextCursor]!;
+        set({
+          spec: snapshot,
+          root: snapshot.root,
+          // Clear selection — undo could have removed the selected node.
+          selectedNodeId: null,
+          history: { ...history, cursor: nextCursor },
+        } as Partial<PanelBuilderState>);
+      },
+      redo: (): void => {
+        const { history } = get();
+        if (history.cursor >= history.entries.length - 1) return;
+        const nextCursor = history.cursor + 1;
+        const snapshot = history.entries[nextCursor]!;
+        set({
+          spec: snapshot,
+          root: snapshot.root,
+          selectedNodeId: null,
+          history: { ...history, cursor: nextCursor },
+        } as Partial<PanelBuilderState>);
+      },
+      loadSpec: (spec: PanelSpec, draftName: string | null = null): void => {
+        set({
+          spec,
+          root: spec.root,
+          draftId: makeDraftId(),
+          selectedNodeId: null,
+          history: {
+            entries: [spec],
+            cursor: 0,
+            capacity: HISTORY_CAPACITY,
+          },
+          currentDraftName: draftName,
+        } as Partial<PanelBuilderState>);
+      },
+      setCurrentDraftName: (name: string | null): void => {
+        set({ currentDraftName: name } as Partial<PanelBuilderState>);
+      },
+      bumpDraftsRefresh: (): void => {
+        set({
+          draftsRefreshTick: get().draftsRefreshTick + 1,
         } as Partial<PanelBuilderState>);
       },
     }),
@@ -418,6 +584,27 @@ export function getPanelBuilderStore(): PanelBuilderStore | null {
 export function teardownPanelBuilderStore(): void {
   storeSingleton = null;
 }
+
+/**
+ * Imperative helper: bump the drafts-refresh counter on the store.
+ * Use after a save / delete / import to trigger Library panel
+ * re-fetches. Cheaper than threading the action through every call
+ * site that touches the drafts IDB.
+ */
+export function bumpDraftsRefresh(): void {
+  const store = getPanelBuilderStore();
+  if (!store) return;
+  (store.getState() as PanelBuilderState & PanelBuilderActions).bumpDraftsRefresh();
+}
+
+/**
+ * NOTE: the React `useDraftsRefreshTick` hook lives in
+ * `state/usePanelBuilderHooks.ts` to keep this file React-free — the
+ * pack's test file (run via `bun test` from the repo root) imports
+ * pure helpers from here and the pack's package.json doesn't declare
+ * `react` as a dep. View / panel components import the hook directly
+ * from `./usePanelBuilderHooks`.
+ */
 
 // ---------------------------------------------------------------------------
 // Helpers
