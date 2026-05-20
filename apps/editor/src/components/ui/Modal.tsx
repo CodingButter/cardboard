@@ -83,8 +83,12 @@ export function Modal({
 
   if (!open) return null;
   return (
+    // z-[1000] sits above dockview's sash/drop overlays (z-index: 999 in
+    // dockview-core's stylesheet). With z-50, hovering through the
+    // backdrop activated dockview's yellow drag-handle on the layout
+    // underneath. Don't lower this without verifying dockview's stack.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={dismissOnBackdrop ? onClose : undefined}
       role="presentation"
     >
