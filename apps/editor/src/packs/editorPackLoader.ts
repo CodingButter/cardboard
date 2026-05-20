@@ -79,6 +79,7 @@ import {
   PackContextProvider,
   type RendererPackContextSlice,
 } from "./PackContextProvider";
+import { removePanelFromAllDockApis } from "./activeDockApis";
 
 /**
  * Callback registered via `ctx.onPanelMount(panelId, cb)`. The loader
@@ -346,8 +347,19 @@ interface PackLoadState {
  * panels + scripts, and return the contributed `DockPanelDef[]`.
  * Returns an empty list and logs a warning when the pack 404s, fails
  * to decode, or isn't scoped to the editor.
+ *
+ * Side effects:
+ *   - Stashes the JSON-spec defs in `loadedPackJsonDefs[packId]` so
+ *     `unloadEditorPack` knows which panel ids to call removePanel on.
+ *   - Calls `rebuildLiveDefs()` so subscribers re-render with the new
+ *     panels included.
+ *
+ * Idempotent on already-loaded packs — returns the previously
+ * captured defs without re-fetching.
  */
 async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
+  const existing = loadedPackJsonDefs.get(packId);
+  if (existing) return existing;
   const url = `${EDITOR_PACKS_BASE}/${packId}.apg`;
   let pack: ZipAssetPack;
   try {
@@ -650,6 +662,12 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     await runEditorPackScript(pack, packId, scriptPath, scriptCtx, state);
   }
 
+  // Stash the JSON-spec defs so unloadEditorPack can find them later +
+  // every subscriber to useLiveDefsStore re-renders. This is the
+  // mechanism that lets DocksModal update without a reload.
+  loadedPackJsonDefs.set(packId, defs);
+  rebuildLiveDefs();
+
   return defs;
 }
 
@@ -757,11 +775,94 @@ async function runEditorPackScript(
 /**
  * Per-pack cleanup ring. Populated by `runEditorPackScript` when a
  * script's default export returns a cleanup function OR when a script
- * created dynamic stores. A future Extensions-tab disable handler
- * (deferred) will call {@link disposeEditorPackScripts} with the pack
- * id to unwind every registration.
+ * created dynamic stores. The Extensions-tab disable handler calls
+ * {@link disposeEditorPackScripts} with the pack id to unwind every
+ * registration.
  */
 const packScriptCleanups = new Map<string, EditorPackScriptCleanup[]>();
+
+/**
+ * Per-pack JSON-spec DockPanelDefs. Populated by `loadOneEditorPack`
+ * once a pack's `editorPanels[]` have been parsed + wrapped. Stored
+ * here (rather than only as a flat list inside `loadEditorPacks()`'s
+ * resolved promise) so the Extensions-tab live-disable path can:
+ *
+ *   1. Look up which panel ids the pack contributed,
+ *   2. Call `api.removePanel(id)` on every mounted DockShell,
+ *   3. Drop the pack's entry from this map so the live-defs selector
+ *      stops surfacing them.
+ *
+ * Pre-live-unregister, these defs lived ONLY inside the promise's
+ * resolved array + the `useEditorPackPanels` hook's local state — a
+ * pack-disable couldn't reach them without a reload.
+ */
+const loadedPackJsonDefs = new Map<string, DockPanelDef[]>();
+
+/**
+ * Module-level "live defs" Zustand store. Holds two derived bits:
+ *
+ *   - `defs`: a flat list of every JSON-spec DockPanelDef across every
+ *     currently-loaded pack. Re-derived from `loadedPackJsonDefs` on
+ *     every mutation.
+ *   - `version`: monotonically increasing counter — bumps on every
+ *     load/unload so `useEditorPacksLoaded` can flip back to false
+ *     during a re-enable, then back to true once the load completes.
+ *
+ * `useEditorPackPanels` subscribes to this store INSTEAD of using
+ * local React state, so a toggle in the Extensions tab re-renders
+ * every consumer (DocksModal, MapView, PrefabsView) automatically.
+ */
+interface LiveDefsStoreState {
+  defs: DockPanelDef[];
+  /** Set of pack ids whose initial-load (or re-enable load) is currently in flight. */
+  loadingPackIds: ReadonlySet<string>;
+  /** Set of pack ids that have completed at least one load this session. */
+  loadedPackIds: ReadonlySet<string>;
+}
+
+const useLiveDefsStore = create<LiveDefsStoreState>(() => ({
+  defs: [],
+  loadingPackIds: new Set<string>(),
+  loadedPackIds: new Set<string>(),
+}));
+
+/** Recompute the flat `defs` list from `loadedPackJsonDefs` and push
+ *  it into the store. Cheap — maps run at most once per toggle. */
+function rebuildLiveDefs(): void {
+  const flat: DockPanelDef[] = [];
+  for (const list of loadedPackJsonDefs.values()) {
+    flat.push(...list);
+  }
+  useLiveDefsStore.setState({ defs: flat });
+}
+
+function markPackLoading(packId: string): void {
+  useLiveDefsStore.setState((s) => {
+    const next = new Set(s.loadingPackIds);
+    next.add(packId);
+    return { loadingPackIds: next };
+  });
+}
+
+function markPackLoaded(packId: string): void {
+  useLiveDefsStore.setState((s) => {
+    const nextLoading = new Set(s.loadingPackIds);
+    nextLoading.delete(packId);
+    const nextLoaded = new Set(s.loadedPackIds);
+    nextLoaded.add(packId);
+    return { loadingPackIds: nextLoading, loadedPackIds: nextLoaded };
+  });
+}
+
+function markPackUnloaded(packId: string): void {
+  useLiveDefsStore.setState((s) => {
+    const nextLoaded = new Set(s.loadedPackIds);
+    nextLoaded.delete(packId);
+    const nextLoading = new Set(s.loadingPackIds);
+    nextLoading.delete(packId);
+    return { loadedPackIds: nextLoaded, loadingPackIds: nextLoading };
+  });
+}
 
 /** Run every cleanup callback collected for a given pack id and clear
  *  the entry. Safe to call when the pack has no cleanups (no-op). */
@@ -782,7 +883,7 @@ export function disposeEditorPackScripts(packId: string): void {
 }
 
 /**
- * Module-level promise cache. Multiple call sites (e.g.
+ * Per-pack in-flight load promise. Multiple call sites (e.g.
  * `useEditorPackPanels` AND `useEditorPacksLoaded`) hit
  * `loadEditorPacks()` in parallel during a single editor mount; the
  * cached promise lets them share the same in-flight load so pack
@@ -790,17 +891,130 @@ export function disposeEditorPackScripts(packId: string): void {
  * would both call `loadOneEditorPack()` which runs the pack's setup
  * script, which calls `registerCommand(...)` etc. — duplicate
  * registrations log "command id … already registered" warnings AND
- * leave dangling cleanups. P3 batch A added the second consumer
- * (`useEditorPacksLoaded`); previously this was a single-consumer
- * call.
+ * leave dangling cleanups.
+ *
+ * Keyed by pack id so a per-pack toggle on the Extensions tab can
+ * re-load THAT pack without disturbing the rest. A unified "load all
+ * enabled" promise still exists below (`loadEditorPacksPromise`),
+ * built on top of this map.
+ */
+const inFlightPackLoads = new Map<string, Promise<DockPanelDef[]>>();
+
+/**
+ * Load a SINGLE editor pack by id. Idempotent — calling twice for the
+ * same id while the first load is in flight returns the same promise.
+ * Calling after the load completes returns the cached defs without
+ * re-fetching.
+ *
+ * Used by the Extensions-tab live-enable path AND internally by
+ * `loadEditorPacks()` (which fans this out to every enabled id).
+ */
+export function loadEditorPack(packId: string): Promise<DockPanelDef[]> {
+  const inFlight = inFlightPackLoads.get(packId);
+  if (inFlight) return inFlight;
+  markPackLoading(packId);
+  const promise = (async () => {
+    try {
+      const defs = await loadOneEditorPack(packId);
+      return defs;
+    } finally {
+      markPackLoaded(packId);
+    }
+  })();
+  inFlightPackLoads.set(packId, promise);
+  return promise;
+}
+
+/**
+ * Unload a single editor pack by id. The full live-disable path:
+ *
+ *   1. Walk EVERY mounted DockShell (via `activeDockApis`) and call
+ *      `api.removePanel(panelId)` for every panel id this pack
+ *      contributed — JSON-spec defs AND TSX-via-registerPanel defs.
+ *      Mid-edit panel state (e.g. unsaved CellInspector edits in a
+ *      panel from the disabled pack) is dropped — same as a reload.
+ *   2. Run `disposeEditorPackScripts(packId)` — fires every cleanup
+ *      callback the pack registered. This rips down commands, stores,
+ *      tabs, views, layouts, and TSX panel registrations.
+ *   3. Drop the pack's JSON-spec defs from `loadedPackJsonDefs` so
+ *      `useEditorPackPanels()` re-renders without the entries.
+ *   4. Drop the in-flight promise so a future re-enable starts fresh.
+ *
+ * Safe to call when the pack is already unloaded (no-op).
+ */
+export function unloadEditorPack(packId: string): void {
+  const jsonDefs = loadedPackJsonDefs.get(packId);
+  const tsxDefs = useDockPanelRegistryStore.getState().panels;
+  // Collect every panel id contributed by this pack. JSON ids are easy
+  // — they're in `jsonDefs`. TSX ids are looked up by walking the
+  // global panel registry; we can't distinguish "this pack's panels"
+  // from "another pack's panels" by id alone, so we conservatively
+  // call removePanel for both. Dockview's removePanel on a non-mounted
+  // panel id is silently dropped (guarded in removePanelFromAllDockApis).
+  const idsToRemove = new Set<string>();
+  if (jsonDefs) {
+    for (const def of jsonDefs) idsToRemove.add(def.id);
+  }
+  // TSX-registered panel ids that disappear when we run cleanups —
+  // we walk the registry BEFORE running cleanups so we have the snapshot.
+  // After cleanups run, those ids will be gone from the registry.
+  const tsxIdsBefore = new Set(Object.keys(tsxDefs));
+
+  // 1. Remove any currently-mounted instances from every DockShell.
+  for (const id of idsToRemove) {
+    removePanelFromAllDockApis(id);
+  }
+
+  // 2. Fire script cleanups — this rips out TSX panels, stores, tabs,
+  //    views, layouts, commands, and runs the script's own returned
+  //    cleanup. After this, anything that disappeared from the panel
+  //    registry was a TSX contribution from THIS pack.
+  disposeEditorPackScripts(packId);
+
+  // 2a. Now compute the TSX-panel ids that disappeared and remove
+  //     their mounted instances too. This covers the case where a
+  //     pack contributes panels via `ctx.registerPanel(...)` rather
+  //     than `editorPanels[]`.
+  const tsxIdsAfter = new Set(
+    Object.keys(useDockPanelRegistryStore.getState().panels),
+  );
+  for (const id of tsxIdsBefore) {
+    if (!tsxIdsAfter.has(id)) {
+      removePanelFromAllDockApis(id);
+    }
+  }
+
+  // 3. Drop the JSON defs cache + rebuild the live defs list.
+  loadedPackJsonDefs.delete(packId);
+  rebuildLiveDefs();
+
+  // 4. Drop in-flight promise + mark unloaded.
+  inFlightPackLoads.delete(packId);
+  markPackUnloaded(packId);
+
+  // 5. Invalidate the unified loadEditorPacks() promise so the next
+  //    call sees the current enabled set rather than the snapshot
+  //    captured at first call.
+  loadEditorPacksPromise = null;
+}
+
+/**
+ * Unified "load every enabled pack" promise. Cached at module level
+ * so the first batch of `useEditorPackPanels` / `useEditorPacksLoaded`
+ * callers on an editor mount share one in-flight load.
+ *
+ * Reset to null whenever a pack is enabled/disabled — the next caller
+ * builds a fresh promise that walks `getEnabledEditorPackIds()` again
+ * (post-toggle).
  */
 let loadEditorPacksPromise: Promise<DockPanelDef[]> | null = null;
 
 /**
- * Load every editor pack the editor knows about and collect their
- * contributed `DockPanelDef`s. Designed to be called ONCE at editor
- * startup; subsequent calls within the same session return the
- * already-resolved promise (see the module-level cache above).
+ * Load every enabled editor pack and collect their contributed
+ * `DockPanelDef`s. Designed to be called once per editor mount;
+ * subsequent calls within the same session return the cached promise
+ * unless a pack toggle has invalidated it (see `unloadEditorPack` /
+ * the toggle handler in ExtensionsTab).
  *
  * Errors during load (404, decode fail, missing scope, invalid spec)
  * are logged to the console and the offending file/pack is skipped.
@@ -813,7 +1027,7 @@ export async function loadEditorPacks(): Promise<DockPanelDef[]> {
     const enabledIds = getEnabledEditorPackIds();
     const defs: DockPanelDef[] = [];
     for (const packId of enabledIds) {
-      const packDefs = await loadOneEditorPack(packId);
+      const packDefs = await loadEditorPack(packId);
       defs.push(...packDefs);
     }
     return defs;
@@ -822,40 +1036,33 @@ export async function loadEditorPacks(): Promise<DockPanelDef[]> {
 }
 
 /**
- * React hook: kick off `loadEditorPacks()` once on mount and return
- * EVERY pack-contributed DockPanelDef.
+ * React hook: subscribe to the LIVE editor-pack panel registry.
  *
  * Two contribution streams merge here:
  *   1. JSON `editorPanels[]` specs → the loader builds DockPanelDefs
- *      out of each spec via `buildDockPanelDef`. Async — populated
- *      once `loadEditorPacks()` resolves.
+ *      out of each spec via `buildDockPanelDef`. Stored in
+ *      `loadedPackJsonDefs` and exposed via `useLiveDefsStore`.
  *   2. TSX `ctx.registerPanel(def)` calls → the loader writes them
  *      into `useDockPanelRegistryStore` while running pack scripts.
- *      Sync from the store's perspective once the script runs.
  *
- * Both lists are concatenated. JSON defs come first so a TSX panel
- * registered later in the same pack wins on id collision (last-write
- * for the registry is also last-write here). If a third-party pack's
- * later contribution wants to override a core panel, it just
- * registers a panel with the same id and gets it.
+ * Both lists are reactive — a toggle in the Extensions tab calls
+ * `unloadEditorPack` / `loadEditorPack`, which mutate the underlying
+ * stores; THIS hook re-renders immediately without a reload. The
+ * mount-time effect kicks off the initial `loadEditorPacks()` call
+ * for the first render of the editor.
+ *
+ * JSON defs come first so a TSX panel registered later in the same
+ * pack wins on id collision (last-write for the registry is also
+ * last-write here).
  */
 export function useEditorPackPanels(): DockPanelDef[] {
-  const [jsonDefs, setJsonDefs] = React.useState<DockPanelDef[]>([]);
+  // Mount-time kickoff — idempotent thanks to `loadEditorPacksPromise`.
   React.useEffect(() => {
-    let cancelled = false;
-    void loadEditorPacks().then((loaded) => {
-      if (cancelled) return;
-      setJsonDefs(loaded);
-    });
-    return () => {
-      cancelled = true;
-    };
+    void loadEditorPacks();
   }, []);
+  const jsonDefs = useLiveDefsStore((s) => s.defs);
   const tsxDefs = useRegisteredPackPanels();
   return React.useMemo(() => {
-    // Build an id-keyed map so a TSX def with the same id as a JSON
-    // def wins (matches the pack-chain "last contributor wins"
-    // semantics). Iteration order: JSON first, then TSX overrides.
     const byId = new Map<string, DockPanelDef>();
     for (const def of jsonDefs) byId.set(def.id, def);
     for (const def of tsxDefs) byId.set(def.id, def);
@@ -864,39 +1071,35 @@ export function useEditorPackPanels(): DockPanelDef[] {
 }
 
 /**
- * React hook: returns `true` once the first `loadEditorPacks()` call
- * after mount has resolved. Used by view shells whose default layouts
- * reference panels CONTRIBUTED by a pack — gating the dock mount on
- * this flag prevents dockview's deserializer from throwing "Only
- * React.memo / ForwardRef / functional components are accepted as
- * components" when the saved/default layout names a panel id whose
- * component is still in-flight.
+ * React hook: returns `true` once every currently-enabled editor pack
+ * has completed loading. Flips back to `false` when a pack is being
+ * enabled live (the new pack's load is in flight); flips back to true
+ * once the in-flight set drains.
  *
- * Trade-off: the view shell renders an empty splash for the duration
- * of the pack-load (typically <100ms for cached `.apg`s). Acceptable
- * because:
- *   1. The shell is a `cardboard-core-editor` consumer post-Phase-4;
- *      every Scene panel that lives in the default layout is pack-
- *      contributed, so there's no "shell-only" content that could
- *      meaningfully render in this window.
- *   2. The pack-load is idempotent + cached at the module level
- *      (`loadEditorPacks()` resolves a single shared promise), so a
- *      remount doesn't pay the cost twice.
- *
- * Returns `false` synchronously on first mount; flips to `true` after
- * the load resolves.
+ * Used by view shells whose default layouts reference panels
+ * CONTRIBUTED by a pack — gating the dock mount on this flag prevents
+ * dockview's deserializer from throwing "Only React.memo / ForwardRef
+ * / functional components are accepted as components" when the
+ * saved/default layout names a panel id whose component is still
+ * in-flight.
  */
 export function useEditorPacksLoaded(): boolean {
-  const [loaded, setLoaded] = React.useState<boolean>(false);
+  const [initialResolved, setInitialResolved] = React.useState<boolean>(false);
   React.useEffect(() => {
     let cancelled = false;
     void loadEditorPacks().then(() => {
       if (cancelled) return;
-      setLoaded(true);
+      setInitialResolved(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
-  return loaded;
+  // After the initial load resolves, treat the flag as "no packs are
+  // currently loading". A live re-enable kicks `loadingPackIds` back
+  // above zero, flipping the flag false; once the new pack finishes,
+  // it flips true again. The set is from useLiveDefsStore so callers
+  // re-render on each transition.
+  const loadingPackIds = useLiveDefsStore((s) => s.loadingPackIds);
+  return initialResolved && loadingPackIds.size === 0;
 }

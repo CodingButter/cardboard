@@ -13,6 +13,10 @@ import {
   type DockPanelHeaderOrnaments,
 } from "./DockPanelHeader";
 import { assetUrl } from "../../lib/assetUrl";
+import {
+  registerActiveDockApi,
+  unregisterActiveDockApi,
+} from "../../packs/activeDockApis";
 
 /**
  * DockShell — the editor's React wrapper around `<DockviewReact/>`.
@@ -442,6 +446,11 @@ export function DockShell({
     (event: DockviewReadyEvent) => {
       const api = event.api;
       apiRef.current = api;
+      // Register with the global active-DockShell registry so the
+      // editor-pack loader's live-unregister path can find every
+      // mounted DockShell and call `removePanel(packPanelId)` when
+      // a pack is toggled OFF in the Extensions tab.
+      registerActiveDockApi(api);
 
       // ── Headerless / locked panel support ────────────────────────
       //
@@ -902,6 +911,7 @@ export function DockShell({
         window.removeEventListener("dragend", onDragEnd, true);
         for (const c of groupCleanups.values()) c();
         groupCleanups.clear();
+        unregisterActiveDockApi(api);
       };
     },
     [defaultLayout, initial, onLayoutChange, panels, save, storageKey, apiRef],

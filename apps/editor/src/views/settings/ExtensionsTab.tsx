@@ -8,6 +8,10 @@ import {
   type EditorPackEntry,
 } from "../../state/useEditorPacksStore";
 import { registerCommand } from "../../state/useCommandStore";
+import {
+  loadEditorPack,
+  unloadEditorPack,
+} from "../../packs/editorPackLoader";
 
 /**
  * ExtensionsTab — Editor Settings → Extensions.
@@ -57,31 +61,54 @@ export function ExtensionsTab() {
   const packs = useEditorPacksStore((s) => s.packs);
   const setEnabled = useEditorPacksStore((s) => s.setEnabled);
 
-  // Snapshot the enabled subset at mount so we can detect drift later
-  // ("any toggle since load"). Compute once via lazy useState init so
-  // it survives re-renders without re-snapshotting. The snapshot is a
-  // JSON-stringified id→bool map so deep equality is just `===`.
-  const initialSnapshot = React.useMemo(() => {
-    const snapshot: Record<string, boolean> = {};
-    for (const entry of Object.values(packs)) {
-      snapshot[entry.id] = entry.enabled;
-    }
-    return JSON.stringify(snapshot);
-    // We intentionally exclude `packs` from deps — this is a
-    // ONCE-on-mount snapshot. Subsequent edits should differ from
-    // this baseline.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Track pack ids whose toggle COULD NOT be applied live (e.g. the
+  // loader threw, or the user hit a known-non-live pack). Today every
+  // pack supports live toggle, but we expose the slot here so a future
+  // pack that needs a reload (e.g. one that monkey-patches host
+  // singletons) can mark itself by pushing into this set.
+  const [reloadRequiredFor, setReloadRequiredFor] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set());
 
-  const currentSnapshot = React.useMemo(() => {
-    const snapshot: Record<string, boolean> = {};
-    for (const entry of Object.values(packs)) {
-      snapshot[entry.id] = entry.enabled;
-    }
-    return JSON.stringify(snapshot);
-  }, [packs]);
+  // Apply a toggle LIVE. Calls the loader's load/unload entry points
+  // so panels / commands / stores / tabs / views / layouts come and go
+  // without a reload. On failure, mark the pack as reload-required so
+  // the banner appears.
+  const applyToggleLive = React.useCallback(
+    async (packId: string, nextEnabled: boolean) => {
+      try {
+        if (nextEnabled) {
+          await loadEditorPack(packId);
+        } else {
+          unloadEditorPack(packId);
+        }
+        // Success — clear any prior reload-required marker for this id.
+        setReloadRequiredFor((prev) => {
+          if (!prev.has(packId)) return prev;
+          const next = new Set(prev);
+          next.delete(packId);
+          return next;
+        });
+      } catch (err) {
+        console.warn(
+          `[ExtensionsTab] live toggle for ${packId} failed; reload required`,
+          err,
+        );
+        setReloadRequiredFor((prev) => {
+          if (prev.has(packId)) return prev;
+          const next = new Set(prev);
+          next.add(packId);
+          return next;
+        });
+      }
+    },
+    [],
+  );
 
-  const dirty = currentSnapshot !== initialSnapshot;
+  // The banner now appears ONLY when one or more packs couldn't apply
+  // live. Successful live toggles leave no banner — the user gets
+  // immediate visual feedback in the DocksModal instead.
+  const dirty = reloadRequiredFor.size > 0;
 
   // Stable list, insertion-order. Object.values + Object.keys both
   // iterate in insertion order on modern engines — same guarantee the
@@ -120,14 +147,16 @@ export function ExtensionsTab() {
           title: `Extensions: Toggle ${displayName}`,
           category: "View",
           keywords: ["extensions", "pack", "toggle", entry.id],
-          description: `Enable or disable the ${displayName} editor pack. Takes effect on reload.`,
+          description: `Enable or disable the ${displayName} editor pack. Applies live.`,
           run: () => {
             // Read live state at run-time — the closure's `entry`
             // may be stale by the time the palette invokes us.
             const live =
               useEditorPacksStore.getState().packs[entry.id];
             if (!live) return;
-            setEnabled(entry.id, !live.enabled);
+            const next = !live.enabled;
+            setEnabled(entry.id, next);
+            void applyToggleLive(entry.id, next);
           },
         }),
       );
@@ -135,7 +164,7 @@ export function ExtensionsTab() {
     return () => {
       for (const u of unregs) u();
     };
-  }, [entries, setEnabled]);
+  }, [entries, setEnabled, applyToggleLive]);
 
   return (
     <div className="space-y-4">
@@ -154,7 +183,9 @@ export function ExtensionsTab() {
           <div className="flex items-center gap-2 text-xs text-amber-200">
             <RefreshCw size={12} className="shrink-0" />
             <span>
-              Reload the editor to apply extension changes.
+              {reloadRequiredFor.size === 1
+                ? `Reload required for ${[...reloadRequiredFor][0]}.`
+                : `Reload required for ${reloadRequiredFor.size} packs.`}
             </span>
           </div>
           <Tooltip
@@ -169,8 +200,8 @@ export function ExtensionsTab() {
                   <div>
                     <div className="font-semibold">Reload editor</div>
                     <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px]">
-                      Reloads the page so the toggled extensions are
-                      picked up by the editor pack loader.
+                      One or more packs couldn't apply live. Reload to
+                      pick them up cleanly.
                     </div>
                   </div>
                 ),
@@ -212,7 +243,10 @@ export function ExtensionsTab() {
             <ExtensionRow
               key={entry.id}
               entry={entry}
-              onToggle={(next) => setEnabled(entry.id, next)}
+              onToggle={(next) => {
+                setEnabled(entry.id, next);
+                void applyToggleLive(entry.id, next);
+              }}
             />
           ))}
         </ul>
@@ -279,9 +313,8 @@ function ExtensionRow({ entry, onToggle }: ExtensionRowProps) {
                   {entry.enabled ? "Disable" : "Enable"} {displayName}
                 </div>
                 <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px]">
-                  Toggling this extension takes effect after the
-                  editor reloads. Disabled extensions are skipped at
-                  startup.
+                  Toggles apply live — panels, commands, and tabs come
+                  and go without a reload.
                 </div>
               </div>
             ),
