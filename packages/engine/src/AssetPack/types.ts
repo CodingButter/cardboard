@@ -514,10 +514,12 @@ export interface PackManifest {
    * hash-deduped Blob URL. The loader exposes the resolved module to
    * pack scripts through `ctx.importLibrary(name)`.
    *
-   * Pack-builder copies + bundles the library from `node_modules/<name>/<entry>`
-   * at build time, computes SHA-256 of the bytes, and writes the hash
-   * into this manifest entry (replacing any `"PLACEHOLDER"` value the
-   * author wrote). See `docs/plans/PERFORMANCE_PROFILER.md` §4 and
+   * Pack-builder resolves `entry` (an npm import specifier such as
+   * `"chart.js/auto"`) against the pack's `node_modules`, runs Bun's
+   * bundler to produce a single self-contained ESM file, computes
+   * SHA-256 of the bytes, and writes the hash into this manifest
+   * entry (replacing any `"PLACEHOLDER"` value the author wrote).
+   * See `docs/plans/PERFORMANCE_PROFILER.md` §4 and
    * `docs/plans/EDITOR_ENGINE.md` §5.
    *
    * Ignored on the runtime engine side — the runtime engine has no
@@ -529,6 +531,16 @@ export interface PackManifest {
     name: string;
     /** Pinned npm version (informational; SRI hash is the auth gate). */
     version: string;
+    /**
+     * npm import specifier handed directly to Bun's bundler at pack-
+     * build time (e.g. `"chart.js/auto"`). Resolves against the pack's
+     * own `node_modules`. Optional in legacy manifests — pack-builder
+     * falls back to a small built-in convenience map keyed by `name`
+     * when `entry` is omitted, but third-party packs SHOULD set it
+     * explicitly so the pack-builder never depends on a centrally-
+     * maintained allowlist.
+     */
+    entry?: string;
     /** Path inside the pack, relative to the pack root. */
     path: string;
     /** SRI-style content hash of the file bytes (e.g. "sha256-<base64>"). */

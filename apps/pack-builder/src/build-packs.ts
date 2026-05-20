@@ -730,9 +730,10 @@ async function buildPack(
   // ── Pack-bundled library step ────────────────────────────────────
   // `manifest.libraries[]` declares npm modules the pack ships inside
   // its `.apg` (e.g. chart.js). For each entry, the builder resolves
-  // the canonical entry path from `LIBRARY_ENTRIES`, runs Bun's
-  // bundler to emit a single self-contained ESM file, computes the
-  // SHA-256 of the bytes, and:
+  // the canonical entry path FIRST from the manifest entry's own
+  // `entry` field, falling back to the `LIBRARY_ENTRIES` convenience
+  // map keyed by `lib.name`, runs Bun's bundler to emit a single
+  // self-contained ESM file, computes the SHA-256 of the bytes, and:
   //   1) writes the bundled bytes into the in-memory `bundledLibraryBytes`
   //      map (keyed by the manifest's `lib.path`) — emitted by the zip
   //      walk loop below; any on-disk file at the same path is
@@ -750,18 +751,27 @@ async function buildPack(
       libraries?: Array<{
         name: string;
         version: string;
+        entry?: string;
         path: string;
         hash: string;
       }>;
     }).libraries;
     if (Array.isArray(libs) && libs.length > 0) {
       for (const lib of libs) {
-        const entrySpec = LIBRARY_ENTRIES[lib.name];
+        // Authoritative source: the manifest entry's own `entry` field.
+        // Falls back to the LIBRARY_ENTRIES convenience map keyed by
+        // name for the small set of common packages we ship a default
+        // for (today: chart.js → "chart.js/auto"). Third-party packs
+        // SHOULD set `entry` explicitly — the fallback exists to keep
+        // legacy manifests working, NOT as a gatekeeper.
+        const entrySpec = lib.entry ?? LIBRARY_ENTRIES[lib.name];
         if (!entrySpec) {
           throw new Error(
-            `pack "${dirName}" declares library "${lib.name}" but no entry mapping ` +
-              `is registered. Add an entry to apps/pack-builder/src/library-entries.ts ` +
-              `or remove the library from manifest.libraries[].`,
+            `pack "${dirName}" declares library "${lib.name}" but does not set ` +
+              `\`entry\` and no convenience default is registered. Add an \`entry\` ` +
+              `field to the manifest's libraries[] entry (an npm import specifier ` +
+              `such as "${lib.name}" or "${lib.name}/dist/..."), or remove the ` +
+              `library from manifest.libraries[].`,
           );
         }
         // Resolve the entry spec from the pack's own node_modules. We

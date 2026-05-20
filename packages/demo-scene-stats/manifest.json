@@ -8,6 +8,7 @@
     {
       "name": "chart.js",
       "version": "4.4.0",
+      "entry": "chart.js/auto",
       "path": "libraries/chart.js-4.4.0.js",
       "hash": "PLACEHOLDER"
     }

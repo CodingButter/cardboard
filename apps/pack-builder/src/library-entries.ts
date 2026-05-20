@@ -1,34 +1,31 @@
 /**
- * Allowlist mapping pack-bundled `libraries[]` names → canonical
- * `node_modules/<name>/<entry>` paths the pack-builder will bundle
- * + ship inside the `.apg`.
+ * Convenience fallback map: pack-bundled `libraries[].name` → default
+ * npm import specifier handed to Bun's bundler when the manifest entry
+ * does not declare its own `entry` field.
  *
- * Adding a new library is one line in `LIBRARY_ENTRIES` below. The
- * entry resolves to whatever `node_modules/<name>/<entry>` exists at
- * pack-build time. Bun's bundler is invoked with that file as the
- * entry point and `--format=esm --target=browser --packages=bundle`,
- * producing a single self-contained ESM file the editor's loader can
- * `import()` via a Blob URL.
+ * Originally this map was an allowlist — every library name had to be
+ * pre-registered here before pack-builder would bundle it. That made
+ * the central registry a dogfooding gatekeeper: a third-party pack
+ * could not bundle a NEW npm library without a PR to this file.
  *
- * Why an allowlist rather than free-form: pack-bundled libraries
- * become part of the marketplace surface — a typo in a manifest's
- * `libraries[].name` would otherwise silently bundle the wrong thing.
- * Forcing the name through this map keeps the build deterministic
- * and gives the implementation a single place to add a library's
- * canonical entry path (some libraries ship multiple ESM entries —
- * e.g. `chart.js` has `dist/chart.js` (low-level) and `auto/auto.js`
- * (pre-registered controllers); we pick `auto` here so packs don't
- * have to call `Chart.register(...registerables)` themselves).
+ * The closed-registry behaviour has been removed (see the audit note in
+ * `docs/audits/`). `PackManifest.libraries[].entry` (engine
+ * `AssetPack/types.ts:527`) is now the authoritative source — packs
+ * declare their own entry-point. This map remains only as a convenience
+ * shorthand for the most common packages so existing manifests (and
+ * trivial single-line manifests) keep working without an explicit
+ * `entry` value.
+ *
+ * Adding entries here is OPTIONAL — third-party packs should set
+ * `entry` in their manifest directly. The pack-builder consults this
+ * map only as a fallback when `entry` is missing.
  */
 export const LIBRARY_ENTRIES: Record<string, string> = {
-  // Chart.js — use the `auto` subpath ESM entry so controllers /
-  // scales / elements are pre-registered (saves the pack author from
-  // having to call `Chart.register(...registerables)`). The packaged
-  // file pulls in `@kurkle/color`; Bun's bundler resolves that
-  // transitively at bundle time so the emitted .js is fully
-  // self-contained.
-  //
-  // Resolved via the chart.js `package.json#exports` map (the `auto`
-  // entry there resolves to `auto/auto.js`).
+  // Chart.js — `auto` subpath ESM entry so controllers / scales /
+  // elements are pre-registered (saves the pack author from having to
+  // call `Chart.register(...registerables)`). Resolved via the
+  // chart.js `package.json#exports` map (the `auto` entry there
+  // resolves to `auto/auto.js`). Kept as a convenience because chart.js
+  // is the library used by the two reference editor demo packs.
   "chart.js": "chart.js/auto",
 };
