@@ -81,6 +81,29 @@ the apg pack-chain we already shipped. We didn't design a
 marketplace; we stumbled into one because pack-chain is the universal
 extension point.
 
+### One store, three categories
+
+The community pack store already exists in design (see
+`docs/plans/PACK_CHAIN.md`). Editor extension packs don't need a
+separate distribution mechanism — they slot in as one more
+category alongside the existing two:
+
+| Category | What it does | When it loads |
+|---|---|---|
+| **Game packs** | Playable games. Standalone, runnable. | Always (production + dev). |
+| **Mod packs** | Extend existing game packs. Chain after the base game pack. | Always (production + dev). |
+| **Editor packs** | Extend the editor itself. May also include runtime contributions per dual-scope. | Dev-mode only — tree-shaken from production exports. |
+
+Same install flow, same chain loader, same manifest format, same
+search/discovery UI. The store doesn't need a separate code path —
+editor packs are just a TAG on the listing. Users browse by tag /
+category, install one click, and the pack-chain handles the rest.
+
+This is the moment the platform play snaps into focus: pack-chain
+isn't just for content, isn't just for mods, isn't just for editor
+extensions. It's the **universal contribution mechanism** for the
+entire Cardboard ecosystem.
+
 ### Two scopes per pack: runtime + editor
 
 A single pack manifest can declare contributions to BOTH the
