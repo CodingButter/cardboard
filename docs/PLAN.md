@@ -109,34 +109,34 @@ auto-register as sprite atlas entries.
 
 ## 4. ModAPI surface (current)
 
-Pack scripts default-export `(api) => { ... }`:
+Pack scripts default-export `(api) => { ... }`. The block below is a
+high-level index of the shipped surface — keep it in sync with
+`packages/engine/src/ModAPI/types.ts`.
 
 ```ts
 // World + scene + config
 api.world: World
-api.scene: { size, isWall, canPlayerPass, maxHeadroom, ... }
-api.config: GameConfig
-api.pack.manifest: PackManifest
+api.scene: Scene                         // mutable — engine swaps on scene load
+api.config: GameConfig                   // live binding — reads see merged baseline+pack overlay
+api.pack: AssetPack                      // .manifest, audio defs, etc.
 
 // Components + ECS
-api.components: { Position, Facing, Movement, PlayerInput, Aim,
-                  Camera, MinimapMarker, Weapon, Inventory, Pickup,
-                  Sprite, Light, ... }
+api.components: BuiltInComponents        // proxy over the full ComponentRegistry —
+                                         // pack-declared shapes merged in via PackComponents
 api.Vec2
+api.Component                            // base class, advanced use
 api.defineComponent<T>(name): Component<T>
-api.getComponent(name): Component | undefined
+api.getComponent(name): Component<unknown> | undefined
 
-// Systems + prefabs
+// Systems
 api.registerSystem(fn): () => void
-api.registerRendererSystem(fn, phase): void   // phase = before-world|after-world|after-sprites|hud
-api.registerPrefab(name, factory): void
-api.spawn(name, opts?): Entity
+api.registerRendererSystem(fn, phase): () => void  // phase = before-world|after-world|after-sprites|hud
 api.onWorldReady(fn): void
 
 // Input
-api.input.keyboard            // KeyboardInputAPI — raw key state
-api.input.mouse               // MouseInputAPI — raw button/position
-api.input.isBindingPressed(action): boolean
+api.input.keyboard                       // KeyboardInputAPI — isKeyPressed / isAnyKeyPressed
+api.input.mouse                          // MouseInputAPI — buttons / consumeMovement / consumeWheel / position
+api.input.isBindingPressed(codes: readonly KeyCode[]): boolean
 
 // Modal coordination
 api.modals.setOpen(name, open): void
@@ -147,6 +147,7 @@ api.modals.anyOther(name): boolean
 // Pack-side UI (R3 follow-up)
 api.ui.registerModal(name, Component, propsFn?): void
 api.ui.unregisterModal(name): void
+api.ui.has(name): boolean                // types.ts:154 — used for override-by-re-register detection
 
 // Audio (Au1)
 api.audio.play(soundId, opts?): AudioHandle
@@ -154,33 +155,59 @@ api.audio.playLoop(soundId, opts?): AudioHandle
 api.audio.playReplace(soundId, opts?): AudioHandle
 api.audio.stop(handle): void
 api.audio.stopAll(group?): void
+api.audio.isReady(): boolean
+api.audio.groupVolume.{ get(group), set(group, v) }
 
-// Animation (A1)
-api.anim.play(entity, animName, opts?): void
-api.anim.pause(entity): void
+// Animation (A1) — types.ts:286-303
+api.anim.play(entity, animName): void    // no opts arg in A1
+api.anim.stop(entity): void              // pauses; frame state preserved
 api.anim.resume(entity): void
-api.anim.stop(entity): void
-api.anim.onComplete(entity, fn): void
+api.anim.isPlaying(entity, animName?): boolean
+// NOTE: onComplete is A2 work — rides api.events once that surface
+//       lands. Not exposed in A1 (types.ts:283-285 comment).
 
 // Events (Ev1) — 25 canonical engine topics + pack-defined
 api.events.on(name, fn): EventSubscription
 api.events.once(name, fn): EventSubscription
-api.events.off(name, fn): void
+api.events.off(name, fn): void                     // also overloaded: off(subscription)
 api.events.emit(name, payload?): void
+
+// Console (CONSOLE.md MVP — types.ts:671) — recording surface;
+// command registration / parser / policy gating land in C1–C4.
+api.console.log/info/warn/error(...args): void
+api.console.clear(): void
+api.console.getEntries(opts?): readonly ConsoleEntry[]
+api.console.subscribe(fn): () => void
+
+// Engine telemetry (types.ts:556-559) — Q5 of EDITOR_REDESIGN §12
+api.debug.stats(): { fps, frameMs, drawCalls, entityCount }
 
 // Entity lookup (R2)
 api.world.findByName(name): Entity | undefined
 
-// Declarative prefabs (commit d8fcbe7)
-api.registerDeclarativePrefab(name, decl): void   // static component list + optional initScript
+// Data-first surface (WORLD_STATE.md §3 + §9 — types.ts:727-766)
+api.sceneController: SceneControllerView | undefined
+                                         // synthetic per-scene controller entity (id + live components)
+api.singleton<T>(componentName): T       // get-or-create world-singleton entity carrying that component;
+                                         // persists across scene swaps
+api.serialize(entityId): SerializedEntity
+api.deserialize(json, opts?): Entity     // opts.targetId writes onto an existing entity (multiplayer delta)
 
-// Inventory + items
-api.inventory.{ BAG_SIZE, HOTBAR_SIZE, EQUIP_SLOTS, defaultStackMax,
-                emptyEquipment, seedInventory, addItem, removeItem,
-                countItem, getActiveItem, quickTransfer }
+// Phased system scheduler (WORLD_STATE.md §7.2 + §11 — types.ts:679-689)
+api.systemScheduler                      // engine drives the phases; pack scripts rarely touch directly
+api.runSchedulerPhase(phase, dt): void   // engine invokes per frame
+
+// Procedural image (IL2 — types.ts via `api.procedural`)
+api.procedural                           // recipe load / has / ids — see Image Lab plan
+
+// Procedural audio (SL2 — types.ts:459-481)
+api.proceduralAudio.load(recipeId): Promise<AudioBuffer | null>
+api.proceduralAudio.playInstrument(recipeId, opts?): { dispose() } | null
+api.proceduralAudio.has(recipeId): boolean
+api.proceduralAudio.ids(): readonly string[]
 
 // Item-image cache
-api.itemImages.get(itemId, variant?)   // "icon" | "held" | "world"
+api.itemImages.get(itemId, variant?)     // "icon" | "held" | "world"
 
 // Settings (live config + persistence + import/export)
 api.settings.{ load, save, export, import }
@@ -190,10 +217,26 @@ api.bindings.label(code): string
 api.raycast.castRayToWall(origin, dir): WallHit | null
 ```
 
-Pending (not yet implemented): `api.network` (multiplayer M1),
-`api.console` (CONSOLE plan — not yet written; agent #199).
+**Spawning entities** happens through the bare ECS — there is no
+runtime prefab API. Pack scripts call `api.world.spawn() +
+api.world.add(e, api.components.X, value)` directly (see the
+`spawnImp` example in `types.ts:36-56`). Prefabs are editor-only
+authoring assets — scenes ship pre-flattened in `scene.entities[]`
+and the engine instantiates them via the bare-ECS path. Inventory
+helpers (`BAG_SIZE`, `addItem`, etc.) live pack-side in
+`packages/default-pack/scripts/setup/`, not on `ModAPI`.
+
+Pending (not yet implemented): `api.network` (multiplayer M1).
 `api.registerShader` lives in manifest (not ModAPI) — Mode 1 + Mode
 3 ship via `manifest.shaders.{role}Frag` and `.{role}Hooks`.
+
+> **Canonical surface** lives in `packages/engine/src/ModAPI/types.ts`
+> and the auto-generated reference at
+> `apps/docs/content/docs/api/interfaces/ModAPI.mdx`. This section is a
+> high-level index of what exists; for full signatures + JSDoc
+> descriptions, use the TypeDoc reference. Drift between this list and
+> `types.ts` should be reported as a bug — the type file is
+> authoritative.
 
 ---
 

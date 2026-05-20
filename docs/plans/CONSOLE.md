@@ -1090,12 +1090,16 @@ narrows the bug from "ammo system" to "consume path in gun-render.js."
 ```js
 api.console.register("spawn_zombie_horde", ([count]) => {
   for (let i = 0; i < count; i++)
-    api.spawn("zombie", playerX + Math.cos(i)*5, playerY + Math.sin(i)*5);
+    spawnZombie(api, playerX + Math.cos(i)*5, playerY + Math.sin(i)*5);
   return { ok: true, level: "info", text: `spawned ${count} zombies` };
 }, {
   help: "Spawn N zombies in a circle around the player.",
   args: [{ name: "count", kind: "number" }],
 });
+// spawnZombie is a pack-local helper that calls api.world.spawn() +
+// api.world.add(...) for each component on the zombie entity.
+// <!-- historical: prior text used `api.spawn("zombie", x, y)` — runtime
+//      prefab API removed 2026-05-17; spawn via the bare ECS. -->
 ```
 
 ```

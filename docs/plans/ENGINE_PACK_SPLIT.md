@@ -91,23 +91,26 @@ move to the default pack.
 Pack scripts gain new methods to register engine-side things:
 
 ```ts
-api.defineComponent(name, schema)        // already supported
-api.registerPrefab(name, factory)        // already supported
+api.defineComponent(name, schema)         // already supported
 api.registerSystem(fn)                    // already supported
 api.registerRendererSystem(fn, "before-world" | "after-sprites" | ...)
-api.registerShader(name, src)            // NEW — pack-shipped shaders
-api.overrideShader(name, src)            // NEW — replace engine default
 api.findByName(name)                      // NEW — entity lookup
 api.onWorldReady(fn)                      // NEW — fires after scene entities spawn
+// Shader registration ships via manifest.shaders (manifest.shaders.{role}Frag /
+// .{role}Hooks), not a ModAPI call — see ENGINE_PACK_SHADERS.md.
+// <!-- historical: api.registerPrefab / api.registerDeclarativePrefab removed 2026-05-17
+//      — prefabs became editor-only authoring assets, scenes ship pre-flattened in
+//      scene.entities[] and pack scripts spawn via api.world.spawn() + api.world.add(...). -->
 ```
 
 Pack scripts get an explicit lifecycle:
 
 1. **Register phase** — synchronous setup. `defineComponent`,
-   `registerPrefab`, `registerSystem`, `registerShader`,
-   `overrideShader`. No entities spawned yet.
+   `registerSystem`, plus manifest-side shader declarations. No
+   entities spawned yet.
 2. **Scene-load phase** — engine instantiates `scene.entities[]`
-   using registered prefabs.
+   directly via the bare-ECS path (`api.world.spawn()` +
+   `api.world.add(...)` for each component on each record).
 3. **World-ready phase** — `onWorldReady(fn)` callbacks fire. Now
    safe to `findByName` and attach extra components, spawn dynamic
    things.

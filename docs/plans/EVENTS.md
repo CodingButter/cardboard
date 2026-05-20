@@ -94,7 +94,11 @@ idea.
 ```js
 api.events.on("scene:loaded", ({ name }) => spawnWave(1));
 api.events.on("modal:opened", ({ name }) => audio.play("rustle"));
-api.events.on("player:died", () => api.spawn("gravestone"));
+api.events.on("player:died", () => spawnGravestone(api));
+// where spawnGravestone is a pack-local helper that calls
+// api.world.spawn() + api.world.add(...).
+// <!-- historical: prior text used `api.spawn("gravestone")` — runtime prefab
+//      API removed 2026-05-17; spawn via the bare ECS. -->
 ```
 
 Three lines, three behaviours that today need bespoke edge-
@@ -516,8 +520,11 @@ Today this needs a shared ECS component or `globalThis` shim.
 ```js
 api.events.on("scene:loaded", ({ name }) => {
   if (name !== "level1.json") return;
-  for (let i = 0; i < 5; i++) api.spawn("imp", 3 + i, 7);
+  for (let i = 0; i < 5; i++) spawnImp(api, 3 + i, 7);
 });
+// where spawnImp is a pack-local helper that calls api.world.spawn() +
+// api.world.add(...). <!-- historical: prior text used `api.spawn("imp", x, y)`
+// — runtime prefab API removed 2026-05-17; spawn via the bare ECS. -->
 ```
 
 Today `onWorldReady` fires once per scene-load for the active

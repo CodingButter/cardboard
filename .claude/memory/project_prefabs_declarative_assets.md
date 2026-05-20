@@ -1,62 +1,58 @@
 ---
 name: project-prefabs-declarative-assets
-description: Prefabs are declarative JSON assets, not editor-only and not code-registered. Each prefab is its own JSON file, declared in the pack manifest like any other asset. The modAPI exposes READ + spawn operations, not registration.
+description: Prefabs are editor-only authoring assets. The engine has zero runtime prefab API — scenes ship pre-flattened in scene.entities[] and pack scripts spawn via the bare ECS (api.world.spawn() + api.world.add(...)).
 metadata:
   type: project
 ---
 
-Prefabs are a **runtime concept**, not an editor-only one. They exist
-to support gameplay primitives like entity spawners, projectile
-factories, loot tables — any "instantiate one of these" pattern.
+Prefabs are an **editor-only** concept. The engine knows nothing
+about them at runtime — scenes ship every entity pre-flattened in
+`scene.entities[]`, and `Game.spawnSceneEntities` instantiates each
+record via the bare ECS path (`world.spawn()` + `world.add(e, C,
+value)` for each component on the record). The editor is the
+canonical authoring surface; prefab definitions live in the pack
+manifest and the editor's IDB-backed `EditorAssetPack` writes them
+through the pack's asset pipeline.
 
-**Shape:** each prefab is a self-contained JSON object in its own file
-(e.g. `prefabs/goblin.json`), with the prefab's components, default
-field values, sprites, scripts attached, etc. The pack manifest lists
-prefab assets alongside textures, sounds, scripts, etc.
+**What's actually on the runtime ModAPI** (verified against
+`packages/engine/src/ModAPI/types.ts` 2026-05-20):
 
-**Why declarative, not code-registered:**
+- No `api.prefabs.{list, get, spawn}` — the field doesn't exist.
+- No `api.registerPrefab(name, factory)` — removed.
+- No `api.registerDeclarativePrefab(name, decl)` — removed.
+- No `api.spawn(name, opts?)` — removed.
 
-- **Mod-friendly.** Authors can ship a prefab by dropping in a JSON;
-  no script required.
-- **Editor-authorable.** The editor's prefab browser writes/edits these
-  JSONs through `EditorProjectStore` → IDB. See
-  [[project-idb-source-of-truth]].
-- **Pack export gets them for free.** A prefab is an asset; the existing
-  pack export pipeline bundles it.
-- **Hot-reload during play.** Change JSON → IDB write → runtime
-  invalidation → live update.
-- **One mental model.** Scripts, textures, sounds, prefabs all flow
-  through the same asset surface (manifest entry → IDB row →
-  `IdbAssetPack` read).
+Pack scripts that need to spawn entities call the bare ECS:
 
-**modAPI surface (what's correct):**
+```js
+const e = api.world.spawn();
+api.world.add(e, api.components.Position, new api.Vec2(x, y));
+api.world.add(e, api.components.Sprite, { imageId: "imp" });
+```
 
-- `api.prefabs.list(): PrefabRef[]`
-- `api.prefabs.get(id): PrefabDef | null`
-- `api.prefabs.spawn(id, position, overrides?): EntityId`
+…wrapped in a pack-local helper if the call repeats. The
+`scene.entities[]` array is the authoritative spawn list — the
+editor's prefab browser flattens prefab references into entity
+records at pack-export time so the runtime never sees a prefab id.
 
-**What's NOT correct:** a runtime `registerPrefab(def)` function. If
-that appears in the modAPI (e.g. surfaced by `gen:api` from `packages/
-engine/src/ModAPI/`), it's either:
+**Editor SDK is a different layer.** The editor app has its own
+`prefabConverter.ts` for migrating legacy pack-script
+`registerPrefab` calls into the editor-asset format. That tool is
+editor-side TypeScript, not part of the runtime modAPI — pack
+scripts at runtime have no way to call into it.
 
-1. **Vestigial** — left over from a script-first design. Should be
-   removed.
-2. **A dynamic-prefab escape hatch** — runtime-only prefabs minted from
-   script code, never persisted. Has a real use case (procedural
-   content) but blurs the declarative line. Default position: don't
-   ship it unless a concrete script use case demands it; if it stays,
-   rename to something like `api.entities.createTemplate()` so the
-   "prefab = declarative asset" naming convention is preserved.
+**Cross-references:**
 
-**Wave-3 DnD plan alignment:**
+- Runtime ModAPI: `packages/engine/src/ModAPI/types.ts`
+- Auto-generated TypeDoc: `apps/docs/content/docs/api/interfaces/ModAPI.mdx`
+- Prefabs-editor-only plan: see the prefabs-editor-only phases (PE1–PE3),
+  shipped 2026-05-17 — referenced in `docs/PLAN.md` §7 phase table.
+- Entity spawn example: `types.ts:36-56` (the `spawnImp` JSDoc example).
 
-The cross-window DnD plan at `docs/plans/CROSS_WINDOW_DND.md` already
-treats `prefab` as a `SemanticAssetKind`. The integration matrix has
-the prefab browser as a drag source and the scene tree as a drop
-target (drop → instantiate). The `useAssetStore` resolves prefab refs
-from IDB on drop. So this design is fully consistent with what just got
-architected — no rework needed on the DnD side.
+## Updated 2026-05-20 — original prediction was wrong; verified against types.ts.
 
-**Doc audit task ([[#8]]) is the next checkpoint:** confirm what
-`registerPrefab` actually does in the current modAPI source, decide
-remove vs rename, and clean the docs.
+The earlier version of this memory predicted a runtime `api.prefabs.{
+list, get, spawn }` surface. That surface never landed. Engine has
+zero runtime prefab API — verified by reading
+`packages/engine/src/ModAPI/types.ts` end-to-end. The "prefab" word
+in pack tooling means "editor authoring asset" exclusively.

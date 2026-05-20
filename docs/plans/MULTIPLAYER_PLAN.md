@@ -91,7 +91,12 @@ A multiplayer pack lands as one boot script that registers:
 // packages/multiplayer-pack/scripts/boot.js
 export default (api) => {
   api.defineComponent("NetworkOwner", {});   // who controls this entity
-  api.registerPrefab("remote_player", remotePlayerFactory);
+
+  // Remote-player spawning goes through the bare ECS — the pack
+  // exposes a helper that calls api.world.spawn() + api.world.add(...).
+  // <!-- historical: previously read `api.registerPrefab("remote_player", ...)`;
+  //      runtime prefab API was removed 2026-05-17 (prefabs are editor-only
+  //      authoring assets now). Spawn via api.world.spawn() instead. -->
 
   // The net layer is just a system.
   api.registerSystem(netSyncSystem);

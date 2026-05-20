@@ -864,29 +864,34 @@ fit:
 Total rows used: 25. Modder authors the sheet at 1024×1024 (cells
 beyond row 24 are blank — the engine doesn't care).
 
-**Manifest:** see §4.2. **Prefab:**
+**Manifest:** see §4.2. **Spawn helper** (pack-local — there is no
+runtime prefab API; spawn via the bare ECS):
 
 ```js
-api.registerPrefab("zombie", (x, y, facing) => {
+function spawnZombie(api, x, y, facing) {
   const e = api.world.spawn();
-  api.world
-    .add(e, api.components.Position, new api.Vec2(x, y))
-    .add(e, api.components.Facing, facing ?? 0)
-    .add(e, api.components.Sprite, {
-      imageId: "zombie", worldHeight: 1.0, yOffset: 0,
-    })
-    .add(e, api.components.Animation, {
-      current: "idle", frame: 0, elapsed: 0,
-    });
+  api.world.add(e, api.components.Position, new api.Vec2(x, y));
+  api.world.add(e, api.components.Facing, facing ?? 0);
+  api.world.add(e, api.components.Sprite, {
+    imageId: "zombie", worldHeight: 1.0, yOffset: 0,
+  });
+  api.world.add(e, api.components.Animation, {
+    current: "idle", frame: 0, elapsed: 0,
+  });
   return e;
-});
+}
+// <!-- historical: this block originally used `api.registerPrefab("zombie", ...)`;
+//      runtime prefab API was removed 2026-05-17 (prefabs are editor-only authoring
+//      assets now). Pack scripts spawn via the bare ECS. -->
 ```
 
 **Behavior:** the AI system calls `api.anim.play(zombie, "walk")`
 when the player enters detection range; `play("attack")` when in
 melee. On the attack animation's `animation:completed` (subscribed
-via `api.anim.onComplete` in A1, or `api.events` in A2), the mod
-emits a damage event. On HP zero, `play("die")`. Because die's
+via `api.events` once A2 lands — `api.anim.onComplete` is explicitly
+deferred to A2 per the comment in `packages/engine/src/ModAPI/types.ts`
+lines 283-285), the mod emits a damage event. On HP zero, `play("die")`.
+Because die's
 `angles: 1` override, the corpse always renders the same row
 regardless of camera position — appropriate, since a corpse on the
 floor doesn't have a "front."
@@ -1076,7 +1081,7 @@ scope; capture the requirements here so EDITOR.md can absorb them.
 
 | Phase | Scope | Where it lives | State |
 |---|---|---|---|
-| **A1** | **Core animation + multi-angle + backward compat.** New manifest fields (`frameWidth`, `cols`, `angles`, `animations`, …). New `Animation` ECS component. New `AnimationSystem` (engine). New `api.anim` ModAPI surface (with internal-map `onComplete`). Renderer per-vertex `a_uvOffset`/`a_uvScale`. Angle-selection algorithm in `Libs/SpriteAtlas.ts` (snap only). Sprite atlas layer dimensions raised to 1024×1024 (config). Default-pack ships ONE example animated sprite (recommend a 4-angle merchant or a 1-angle door) gated by a `_animationsSmokeTest` manifest flag. Canvas2D backend honors UV region (sliced `drawImage`). | engine/src/Components/Animation.ts, engine/src/Systems/AnimationSystem.ts, engine/src/Libs/SpriteAtlas.ts, engine/src/AssetPack/types.ts, engine/src/Renderers/{WebGLRenderer,TwoDRenderer,SceneRenderer}.ts, engine/src/ModAPI/{types,...}, default-pack/manifest.json, default-pack/images/sprites/* | ✅ Shipped (commit `ab9dbee`). |
+| **A1** | **Core animation + multi-angle + backward compat.** New manifest fields (`frameWidth`, `cols`, `angles`, `animations`, …). New `Animation` ECS component. New `AnimationSystem` (engine). New `api.anim` ModAPI surface — `play(entity, animName)` / `stop` / `resume` / `isPlaying` (no `onComplete` in A1 — explicitly deferred to A2 per `types.ts:283-285`). Renderer per-vertex `a_uvOffset`/`a_uvScale`. Angle-selection algorithm in `Libs/SpriteAtlas.ts` (snap only). Sprite atlas layer dimensions raised to 1024×1024 (config). Default-pack ships ONE example animated sprite (recommend a 4-angle merchant or a 1-angle door) gated by a `_animationsSmokeTest` manifest flag. Canvas2D backend honors UV region (sliced `drawImage`). | engine/src/Components/Animation.ts, engine/src/Systems/AnimationSystem.ts, engine/src/Libs/SpriteAtlas.ts, engine/src/AssetPack/types.ts, engine/src/Renderers/{WebGLRenderer,TwoDRenderer,SceneRenderer}.ts, engine/src/ModAPI/{types,...}, default-pack/manifest.json, default-pack/images/sprites/* | ✅ Shipped (commit `ab9dbee`). |
 | **A2** | **Mirror + 5-angle + crossfade + events.** `mirror: true` support (atlas halving + per-vertex flip-sign on uvScale.x). 5-angle layout (implicit mirror). `interpolation: "crossfade"` (renders two cells with alpha mix). Uses `api.events` (Ev1 shipped) for `animation:started`/`completed`/`looped`/`cancelled`. `api.anim.onComplete` becomes a thin wrapper. | engine/src/Libs/SpriteAtlas.ts (mirror + 5-angle remap), AnimationSystem (event emission), api.events integration | Designed. Ready to start — `api.events` (Ev1) shipped (commit `52d8e27`). |
 | **A3** | **Editor authoring UX.** Spritesheet importer, frame-picker, animation timeline scrubber, per-angle preview. Live-mode editor renders the sprite with animations playing. Updates EDITOR.md with an "Animations panel" section. | apps/editor/src/panels/Animation*, apps/editor/src/import/Spritesheet*, EDITOR.md edits | Designed. Depends on EDITOR baseline (E1–E3). |
 | **A4** | **Hierarchical / blended animations.** Upper-body + lower-body clip composition (sprite ships pre-composed atlases — engine plays two `Animation` components on one entity, renderer composites via additional sprite quads). Speculative — defer until a real game needs it. | engine/src/Components/Animation.ts (multi-slot), AnimationSystem (multi-slot iteration), renderer (multi-quad emission) | Speculative. Not started. |
