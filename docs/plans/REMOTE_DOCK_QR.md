@@ -1,5 +1,25 @@
 # Remote Dock via QR + PeerJS — Plan
 
+## 0. Status — what's actually landed (2026-05-20)
+
+The first slice of this plan is live on main. Recap of the
+commits that mapped to phases below:
+
+| Phase | Commit | What shipped |
+|---|---|---|
+| D8 forward-compat hooks | landed alongside Wave 3.3+ | `DockPanelDef.mountable`, transport-abstraction JSDoc, origin tracking convention |
+| D9 SideCar PWA shell | sidecar route + cold-launch wired earlier in May | In-app QR scanner via `qr-scanner`, paste-URL fallback, recent-sessions list shell |
+| D10 PeerJS wiring | sidecar + `desktopPairingSingleton.ts` shipped earlier in May | `new Peer()` on desktop pop-out, `peer.connect(id)` on sidecar, data channel open |
+| D12b card polish | `40af88d` (2026-05-20) | **Device-chip drag target** — drag a panel header onto the per-device chip in the left rail; drop routes via the WebRTC control channel. Pair-modal polish landed in the same commit. |
+| `mountPanel` WireMessage | shipped (kind defined in `desktopPairingSingleton.ts`) | Desktop emits `{ kind: "mountPanel", panelKind, label, state }`. **Sidecar handler still TODO — this is M2 work.** |
+
+What's open as of this snapshot:
+
+- **Sidecar `mountPanel` receiver** — the wire message is defined and the desktop side sends it; the sidecar PWA still needs to consume it and mount the requested panel kind. The drop UX otherwise works end-to-end.
+- **Touch-friendly panel variants (D11)** — unblocked, not started.
+- **Recent-sessions reconnect (D12)** — UI shell exists, the reconnect wiring is partial.
+- **Initial IDB mirror on pair (D11b)** — not started; required before `gamePreview` runs on sidecar.
+
 ## 1. Overview
 
 The editor's dockview popout system today supports popping a panel
@@ -436,16 +456,132 @@ For history/cell-paint streams, more nuanced conflict resolution
 (vector clocks, CRDTs) is a future concern — out of scope for the
 first pass.
 
+### 6.5 Supabase Realtime as a second transport (task #11)
+
+PeerJS is the default and only shipping transport. Supabase Realtime
+is a SECOND transport that coexists behind the same
+`desktopPairingSingleton.ts` abstraction — not a replacement. Both
+satisfy the same "open a channel, send WireMessages, receive
+WireMessages" contract. The user opts into one when initiating
+pairing; the rest of the editor doesn't know the difference.
+
+**Tradeoff matrix**
+
+| Concern | PeerJS (WebRTC) | Supabase Realtime |
+|---|---|---|
+| Topology | P2P direct after STUN/TURN handshake | Server-mediated via Postgres LISTEN/NOTIFY |
+| Server cost | Zero (rides on PeerJS Cloud signaling, free tier) | Free up to 200 concurrent + 2M msg/mo; paid past that |
+| Server you must run | None (or self-host PeerServer at $5/mo VPS) | Supabase project (free tier OK for most cases) |
+| Latency | Best case ~20-50 ms LAN, ~80-200 ms WAN — direct UDP | ~100-300 ms steady-state; one server round-trip per message |
+| NAT/firewall behavior | Fails on symmetric NAT (~5%); needs TURN fallback | Always works — plain WSS to Supabase, traverses any firewall that allows HTTPS |
+| Message persistence | None — channels are ephemeral, no replay if peer offline | Optional persistence via Postgres tables + Realtime broadcast; can replay missed messages |
+| Async / offline pairing | Impossible — both peers must be live at same time | Trivial — desktop writes intent row, sidecar reads it whenever it next connects |
+| Message size limits | ~16 KB per data-channel chunk; chunker required for assets | ~256 KB per Realtime message; assets go through Storage bucket instead of the channel |
+| Setup complexity | Two `new Peer()` calls, QR contains peer id | Supabase URL + anon key in the QR (or pre-baked); auth via short-lived JWT |
+| End-to-end privacy | Application data never touches PeerJS Cloud (only SDP + ICE go through) | Application data flows through Supabase; encrypt client-side if it must stay private |
+| Bundle cost | `peerjs` ~30 KB | `@supabase/supabase-js` ~50 KB (or just `@supabase/realtime-js` ~25 KB) |
+
+**Where each one wins**
+
+PeerJS is the right default for:
+- Desktop ↔ phone on the same Wi-Fi — direct WebRTC is fastest
+  by an order of magnitude.
+- Live game preview on a sidecar (`gamePreview` panel kind) — input
+  latency matters; UDP wins.
+- Couch-dev / drawing-tablet handoff — same-LAN, P2P is free
+  and low-latency.
+- Privacy-sensitive packs — application data never leaves the
+  two devices.
+
+Supabase Realtime is the right default for:
+- Corporate Wi-Fi / hotel networks / cell-carrier CGNAT — symmetric
+  NAT cripples WebRTC without TURN, but Realtime is just WSS.
+- Async pairing / "leave a panel waiting for me to pick it up later"
+  on the phone — write the intent to a Postgres row, sidecar reads
+  it whenever it connects.
+- Multi-device broadcast — Realtime is a hub-and-spoke channel
+  natively; PeerJS would need an explicit mesh or SFU.
+- Cross-network multiplayer pack (M-series in `MULTIPLAYER_PLAN.md`)
+  — when game state must survive a player rejoining 5 minutes later,
+  Postgres persistence is the right substrate.
+- "Send this layout to my work laptop" — different network, no
+  same-LAN assumption.
+
+**Decision: don't pick, support both**
+
+The transport-abstraction interface from §6.1 already lets us slot
+a second implementation in. Concretely:
+
+```ts
+// src/sidecar/transport/types.ts
+interface PairingTransport {
+  readonly kind: "peerjs" | "supabase";
+  open(initOpts: TransportInitOpts): Promise<TransportSession>;
+  // ... same shape, different impl
+}
+```
+
+The QR URL gains an optional `transport` param:
+
+```
+?peer=abc-xyz&kind=minimap&transport=peerjs   (default if omitted)
+?room=foo-bar&kind=minimap&transport=supabase&sb=<project-url>
+```
+
+`desktopPairingSingleton.ts` instantiates the right transport from
+the URL/init params; the rest of the system reads only the
+WireMessage stream. No call site outside the singleton knows or
+cares which transport is in use.
+
+**Implementation order**
+
+- **D10b (existing)** — PeerJS asset-bus bridge. Unchanged.
+- **NEW: D10c — Transport interface lift.** Refactor
+  `desktopPairingSingleton.ts` so its current PeerJS path implements
+  a named `PairingTransport` interface; add a `transport: "peerjs"`
+  field to the QR URL and the persisted session record. Pure
+  refactor — no behavior change, no second transport added yet.
+- **NEW: D10d — Supabase Realtime transport.** Provision a Supabase
+  project; add `@supabase/realtime-js` as a dep; implement
+  `SupabaseTransport` against the interface from D10c. Add the
+  toggle to the desktop pop-out modal: "Use Supabase Realtime
+  (works through any firewall, requires Supabase project)".
+- **D14 (TURN fallback)** becomes optional rather than mandatory —
+  users on symmetric NATs can switch to Supabase instead of needing
+  TURN.
+- **NEW: D14b — Async pairing via Supabase row.** When `transport
+  === "supabase"`, the desktop can write an "open this panel for me
+  on the next sidecar connection" row to a Postgres table; the
+  sidecar reads it on connect. Falls out for free from Supabase's
+  persistence, can't be done with PeerJS at all.
+
+**What this does NOT do**
+
+- Replace PeerJS. Same-LAN P2P remains the default and the fastest
+  path. Users who never paired across networks shouldn't pay the
+  bundle/latency cost.
+- Unify the transports into a single "smart" picker. The user
+  chooses at pair time; mid-session migration between transports
+  is out of scope (would require live SDP swap or message replay
+  through a different channel — complex, low value).
+- Replace the IDB-mirror strategy. Asset content still flows
+  through whichever transport is open; Supabase Storage is the
+  blob-transfer escape hatch when the message-size limit bites.
+
 ## 7. Libraries
 
 | Concern | Library | Bundle | Note |
 |---|---|---|---|
-| WebRTC handshake | `peerjs` | ~30 KB | Two-line API on each side |
+| WebRTC handshake (default) | `peerjs` | ~30 KB | Two-line API on each side |
+| Server-mediated transport (alt) | `@supabase/realtime-js` | ~25 KB | Loaded only when user picks the Supabase transport |
 | QR generation (desktop) | `qrcode` | ~20 KB | SVG output, scales cleanly |
 | QR scanning (phone) | `qr-scanner` | ~25 KB | Uses `BarcodeDetector` where available |
 | PWA install prompt | native `beforeinstallprompt` | 0 | Browser-provided event |
 
-All four are browser-safe, tree-shakable, no native deps.
+All five are browser-safe, tree-shakable, no native deps. The
+Supabase client is dynamic-imported only when `transport=supabase`
+is requested, so users on the default PeerJS path don't pay its
+bundle cost.
 
 ## 8. Phased plan
 
@@ -611,18 +747,25 @@ No new architectural primitives. Slots in naturally.
 
 ## 10. Out of scope (for this plan)
 
-- Asynchronous pairing (devices not online at the same time) — would
-  reintroduce a backend (Supabase) for persistent signaling.
-  Different plan if/when it matters.
+- Asynchronous pairing on the PeerJS transport — peers must be live
+  at the same time. (Async IS in scope for the Supabase transport
+  per §6.5 / D14b.)
 - Native mobile apps. Web is the strategy.
-- Pairing more than 2 peers in one session. WebRTC mesh networks are
-  doable but get complex past 4-5 peers. Use SFU (Selective Forwarding
-  Unit) infrastructure if/when needed.
+- Pairing more than 2 peers on the PeerJS transport. WebRTC mesh
+  networks are doable but get complex past 4-5 peers. (Multi-peer
+  IS in scope for the Supabase transport — Realtime channels are
+  hub-and-spoke natively.) Use an SFU (Selective Forwarding Unit) if
+  the mesh ever needs to scale past a handful of devices.
+- Live mid-session transport switching (PeerJS ↔ Supabase). The
+  user picks at pair time; switching requires re-pairing.
 
 ## 11. Related plans + memories
 
 - `docs/plans/CROSS_WINDOW_DND.md` — the foundation. The DnD
   transport extends naturally.
+- `docs/plans/MULTIPLAYER_PLAN.md` — networked multiplayer pack.
+  Shares the Supabase Realtime substrate proposed in §6.5; the
+  remote-dock and multiplayer transports converge over time.
 - `.claude/memory/project_remote_dock_via_qr.md` — the design
   conversation that produced this plan.
 - `.claude/memory/project_idb_source_of_truth.md` — IDB is the
