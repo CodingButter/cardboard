@@ -69,7 +69,10 @@ export function isValuePlaceholder(
 
 export interface LayoutNode {
   type: "Layout";
-  direction: "row" | "column";
+  /** "row" / "column" → flex; "grid" → CSS grid with `auto-fill` columns
+   *  sized via `columnsMinPx`/`columnsMaxPx` (status: matches the
+   *  ToolPalette tile grid `repeat(auto-fill, minmax(54px, 64px))`). */
+  direction: "row" | "column" | "grid";
   /** Tailwind-style gap in 0.25rem units; defaults to 2 (8px). */
   gap?: number;
   /** Optional padding in 0.25rem units; defaults to 0 (no padding). */
@@ -91,6 +94,21 @@ export interface LayoutNode {
   /** Minimum width per child in pixels. Currently used together with
    *  `childFlex: "1"` to set `min-w: <px>` on each child wrapper. */
   childMinWidthPx?: number;
+  /** Grid only: min column width in px (the `minmax(min, max)` lower
+   *  bound). Defaults to 54 — matches the ToolPalette tile floor. */
+  columnsMinPx?: number;
+  /** Grid only: max column width in px (the `minmax(min, max)` upper
+   *  bound). Defaults to 64 — matches the ToolPalette tile ceiling. */
+  columnsMaxPx?: number;
+  /** Per-child explicit height in pixels. Used by the ToolPalette tile
+   *  grid so each tile is the same square-ish 60px regardless of icon
+   *  size variability. */
+  childHeightPx?: number;
+  /** Optional inline className passthrough — escape hatch for one-off
+   *  utility classes the spec author needs (e.g. `min-h-0
+   *  overflow-y-auto` for a scrolling root container). Use sparingly;
+   *  prefer adding a typed prop when the use-case is reusable. */
+  className?: string;
   children: NodeSpec[];
 }
 
@@ -171,8 +189,14 @@ export interface SpacerNode {
 
 export interface ConditionalNode {
   type: "Conditional";
-  /** Show children when this binding's resolved value is truthy. */
+  /** Show children when this binding's resolved value is truthy — or,
+   *  when `equals` is also set, when it strictly equals that value. */
   when: StorePath;
+  /** Optional equality comparand. When set, the children render iff
+   *  `resolve(when) === equals`. When omitted, behaviour is the
+   *  classic truthy check. Lets Phase 1 panels gate on enum-style
+   *  store fields (e.g. `tool.activeTool === "select"`). */
+  equals?: string | number | boolean;
   children: NodeSpec[];
 }
 
@@ -220,6 +244,60 @@ export interface IconNode {
 }
 
 /**
+ * ToggleButton — a button whose visual "pressed" state mirrors a store
+ * binding compared to an expected value. Click fires a script-ref via
+ * the command registry, same contract as `Button`.
+ *
+ * Added to support the ToolPalette migration where each tile button is
+ * highlighted iff `tool.activeTool` equals the tile's tool id, and each
+ * sub-tool chip is highlighted iff `tool.activeSubTool[parent]` equals
+ * the chip's sub-tool id. Phase 0's `Button` had no notion of pressed
+ * state; this node fills that gap without bloating Button.
+ *
+ *   shape "tile" — icon-above-label square (60px) used by main tools.
+ *   shape "chip" — text-only rounded-pill used by sub-tools.
+ */
+export interface ToggleButtonNode {
+  type: "ToggleButton";
+  /** Binding read to determine pressed state. */
+  bind: StorePath;
+  /** Pressed iff the bound value strictly equals `activeValue`. */
+  activeValue: string | number | boolean;
+  /** Tile label. Shown beneath the icon in "tile" shape; or as the
+   *  only content in "chip" shape. */
+  text: string;
+  /** Optional icon name from `ICON_REGISTRY` — used by "tile" shape. */
+  icon?: string;
+  /** Icon size in pixels. Defaults to 18 to match the ToolPalette tile. */
+  iconSize?: number;
+  /** Click action. */
+  onClick: ScriptRef;
+  /** Visual shape. Defaults to "tile". */
+  shape?: "tile" | "chip";
+  /** Accessibility label. Defaults to `text`. */
+  ariaLabel?: string;
+}
+
+/**
+ * ScrollRow — wraps children in a horizontally-scrolling row with the
+ * shell's `<ScrollRow>` primitive (hover-area edge fades, hidden native
+ * scrollbar, ResizeObserver-driven affordance). Added so the
+ * ToolPalette's sub-tool chip strip can keep its overflow UX in JSON.
+ *
+ * The wrapper itself does NOT impose layout on its children — pair it
+ * with a child `Layout` to express the inner flex/gap rules.
+ */
+export interface ScrollRowNode {
+  type: "ScrollRow";
+  /** Optional className on the inner viewport (e.g. `flex items-center
+   *  gap-1`). Mirrors the shell `ScrollRow.contentClassName`. */
+  contentClassName?: string;
+  /** Optional className on the outer wrapper. */
+  className?: string;
+  children: NodeSpec[];
+}
+
+/**
  * Discriminated union of every node type the Phase 0 renderer
  * understands. Adding a new node type is a four-step process:
  *   1. Add the interface above.
@@ -239,7 +317,9 @@ export type NodeSpec =
   | SpacerNode
   | ConditionalNode
   | TooltipNode
-  | IconNode;
+  | IconNode
+  | ToggleButtonNode
+  | ScrollRowNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire

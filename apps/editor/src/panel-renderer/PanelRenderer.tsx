@@ -27,8 +27,20 @@
  */
 
 import React from "react";
-import { Crosshair, MousePointer2, Layers, Square } from "lucide-react";
+import {
+  Brush,
+  Crosshair,
+  Eraser,
+  Hammer,
+  Layers,
+  MousePointer2,
+  PaintBucket,
+  Pipette,
+  PlusSquare,
+  Square,
+} from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { ScrollRow } from "../components/ui/ScrollRow";
 import { TextInput } from "../components/ui/TextInput";
 import { Tooltip } from "../components/ui/Tooltip";
 import { cn } from "../lib/cn";
@@ -49,11 +61,13 @@ import type {
   LayoutNode,
   NodeSpec,
   PanelSpec,
+  ScrollRowNode,
   SpacerNode,
   StorePath,
   TextFormat,
   TextNode,
   TextVariant,
+  ToggleButtonNode,
   TooltipNode,
 } from "./types";
 
@@ -73,6 +87,14 @@ const ICON_REGISTRY: Record<
   MousePointer2,
   Layers,
   Square,
+  // Added for the ToolPalette migration — every icon referenced by
+  // MOCK_TOOLS plus the panel's manifest icon (Hammer).
+  Brush,
+  Eraser,
+  Pipette,
+  PaintBucket,
+  PlusSquare,
+  Hammer,
 };
 
 // ---------------------------------------------------------------------------
@@ -280,6 +302,14 @@ function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
   // can express `px-2 py-1.5`-style styling without an escape hatch.
   const padX = node.paddingX ?? padding;
   const padY = node.paddingY ?? padding;
+  const isGrid = node.direction === "grid";
+  // Grid mode → `display: grid` with `auto-fill` columns sized via
+  // `columnsMinPx`/`columnsMaxPx`. This is the ToolPalette tile
+  // pattern: `repeat(auto-fill, minmax(54px, 64px))`. Defaults match
+  // ToolPalette so a JSON author can opt-in by passing direction:
+  // "grid" alone.
+  const colMin = node.columnsMinPx ?? 54;
+  const colMax = node.columnsMaxPx ?? 64;
   const style: React.CSSProperties = {
     gap: `${gap * 4}px`,
     ...(padX > 0 ? { paddingLeft: `${padX * 4}px`, paddingRight: `${padX * 4}px` } : {}),
@@ -287,20 +317,34 @@ function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
     ...(node.align ? { alignItems: ALIGN_CSS[node.align] } : {}),
     ...(node.justify ? { justifyContent: JUSTIFY_CSS[node.justify] } : {}),
     ...(node.textAlign ? { textAlign: node.textAlign } : {}),
+    ...(isGrid
+      ? {
+          gridTemplateColumns: `repeat(auto-fill, minmax(${colMin}px, ${colMax}px))`,
+        }
+      : {}),
   };
   const childStyle: React.CSSProperties | undefined =
     node.childFlex === "1"
       ? {
           flex: "1 1 0",
           minWidth: node.childMinWidthPx ? `${node.childMinWidthPx}px` : 0,
+          ...(node.childHeightPx ? { height: `${node.childHeightPx}px` } : {}),
         }
+      : node.childHeightPx
+      ? { height: `${node.childHeightPx}px` }
       : undefined;
+  // Direction → display + axis class. `grid` uses CSS grid; row/column
+  // stay on the flex shorthand. `flex flex-row` / `flex flex-col` are
+  // literal class strings the Tailwind scanner picks up; `grid` is a
+  // literal too.
+  const dirClass = isGrid
+    ? "grid"
+    : node.direction === "row"
+    ? "flex flex-row"
+    : "flex flex-col";
   return (
     <div
-      className={cn(
-        "flex",
-        node.direction === "row" ? "flex-row" : "flex-col",
-      )}
+      className={cn(dirClass, node.className)}
       style={style}
     >
       {node.children.map((child, i) =>
@@ -451,13 +495,106 @@ function ConditionalRenderer({
   node: ConditionalNode;
 }): React.JSX.Element | null {
   const { value } = useStoreBinding(node.when);
-  if (!value) return null;
+  // Two-mode gate: truthy (default) or strict-equality (when `equals`
+  // is set). The equality branch lets ToolPalette gate the sub-tool
+  // strip on `tool.activeTool === "select"` without a custom
+  // when-expression DSL.
+  const shouldRender =
+    node.equals === undefined ? Boolean(value) : value === node.equals;
+  if (!shouldRender) return null;
   return (
     <>
       {node.children.map((child, i) => (
         <NodeRenderer key={i} node={child} />
       ))}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToggleButton — pressed-state aware tile / chip.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pressed-state styling lookup. Shape "tile" matches the ToolPalette
+ * 60px square tile (icon above uppercase label); "chip" matches the
+ * sub-tool rounded-pill chip. Both reuse the canonical amber active /
+ * border-strong inactive colour pair so a global retune still works.
+ */
+function toggleButtonClass(
+  shape: ToggleButtonNode["shape"],
+  active: boolean,
+): string {
+  const shared =
+    "border transition-colors " +
+    (active
+      ? "bg-amber-500 border-amber-500 text-zinc-950"
+      : "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)");
+  if (shape === "chip") {
+    return cn(
+      "shrink-0 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide",
+      shared,
+    );
+  }
+  // tile (default)
+  return cn(
+    "w-full h-full rounded flex flex-col items-center justify-center gap-1",
+    shared,
+  );
+}
+
+function ToggleButtonRenderer({
+  node,
+}: {
+  node: ToggleButtonNode;
+}): React.JSX.Element {
+  const { value } = useStoreBinding(node.bind);
+  const active = value === node.activeValue;
+  const shape = node.shape ?? "tile";
+  const onClick = React.useCallback(() => {
+    void invokeScript(node.onClick);
+  }, [node.onClick]);
+  const Icon = node.icon ? ICON_REGISTRY[node.icon] : undefined;
+  return (
+    <button
+      type="button"
+      aria-label={node.ariaLabel ?? node.text}
+      aria-pressed={active}
+      onClick={onClick}
+      className={toggleButtonClass(shape, active)}
+    >
+      {shape === "tile" ? (
+        <>
+          {Icon ? <Icon size={node.iconSize ?? 18} /> : null}
+          <span className="text-[9px] uppercase tracking-wide leading-none">
+            {node.text}
+          </span>
+        </>
+      ) : (
+        node.text
+      )}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ScrollRow — hover-area horizontal scroll affordance.
+// ---------------------------------------------------------------------------
+
+function ScrollRowRenderer({
+  node,
+}: {
+  node: ScrollRowNode;
+}): React.JSX.Element {
+  return (
+    <ScrollRow
+      className={node.className}
+      contentClassName={node.contentClassName}
+    >
+      {node.children.map((child, i) => (
+        <NodeRenderer key={i} node={child} />
+      ))}
+    </ScrollRow>
   );
 }
 
@@ -490,6 +627,10 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <TooltipRenderer node={node} />;
     case "Icon":
       return <IconRenderer node={node} />;
+    case "ToggleButton":
+      return <ToggleButtonRenderer node={node} />;
+    case "ScrollRow":
+      return <ScrollRowRenderer node={node} />;
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.

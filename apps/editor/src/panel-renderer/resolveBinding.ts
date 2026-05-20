@@ -36,6 +36,7 @@ import {
   type SelectionState,
 } from "../state/useSelectionStore";
 import { useLayerStore, type LayerState } from "../state/useLayerStore";
+import { useToolStore, type ToolState } from "../state/useToolStore";
 
 /**
  * Tagged union of every store the resolver can read from. Adding a
@@ -44,7 +45,7 @@ import { useLayerStore, type LayerState } from "../state/useLayerStore";
  *   2. Adding an entry to STORE_REGISTRY below.
  *   3. Optionally adding write paths to WRITERS.
  */
-export type KnownStoreName = "scene" | "selection" | "layer";
+export type KnownStoreName = "scene" | "selection" | "layer" | "tool";
 
 /** Strip the optional `$store.` / `store.` prefix. */
 function stripStorePrefix(raw: string): string {
@@ -152,6 +153,12 @@ export const STORE_REGISTRY: Record<
   // SelectionInfo panel needs `store.layer.activeId` for the active-
   // layer name readout.
   layer: useLayerStore as unknown as UseBoundStore<StoreApi<unknown>>,
+  // Read-only: ToolPalette panel binds against `store.tool.activeTool`
+  // + `store.tool.activeSubTool[parent]` for tile/chip pressed state.
+  // Writes route through the existing `scene.tool.select.<id>` /
+  // `scene.tool.subTool.select.<parent>.<id>` commands registered by
+  // the ToolPalette panel host, NOT through the resolver.
+  tool: useToolStore as unknown as UseBoundStore<StoreApi<unknown>>,
 };
 
 function isKnownStore(name: string): name is KnownStoreName {
@@ -285,8 +292,10 @@ export function resolveBinding(path: string): ResolvedBinding {
  */
 export function getStoreHook(
   storeName: KnownStoreName,
-): UseBoundStore<StoreApi<SceneState | SelectionState | LayerState>> {
+): UseBoundStore<
+  StoreApi<SceneState | SelectionState | LayerState | ToolState>
+> {
   return STORE_REGISTRY[storeName] as UseBoundStore<
-    StoreApi<SceneState | SelectionState | LayerState>
+    StoreApi<SceneState | SelectionState | LayerState | ToolState>
   >;
 }

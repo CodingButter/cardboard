@@ -27,9 +27,11 @@ import { invokeScript, getInvokeContext } from "./invokeScript";
 import { useSceneStore } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
 import { useLayerStore } from "../state/useLayerStore";
+import { useToolStore } from "../state/useToolStore";
 import { useCommandStore } from "../state/useCommandStore";
 import demoSpec from "./test-fixtures/demo-selection-info.json";
 import selectionInfoSpec from "./specs/selection-info.json";
+import toolPaletteSpec from "./specs/tool-palette.json";
 import type { NodeSpec, PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,11 @@ function resetStores() {
     customLayers: [],
   });
   useCommandStore.setState({ commands: {}, recent: [] });
+  useToolStore.setState({
+    activeTool: "select",
+    activeSubTool: {},
+    activeMode: "map",
+  });
 }
 
 beforeEach(() => {
@@ -487,5 +494,227 @@ describe("New node-types — structural validation", () => {
     expect(node.format).toBe("position");
     expect(node.variant).toBe("value");
     expect(node.truncate).toBe(true);
+  });
+
+  test("ToggleButton accepts bind + activeValue + script onClick", () => {
+    const node: NodeSpec = {
+      type: "ToggleButton",
+      bind: "store.tool.activeTool",
+      activeValue: "select",
+      text: "Select",
+      icon: "MousePointer2",
+      iconSize: 18,
+      shape: "tile",
+      onClick: { script: "scene.tool.select.select" },
+    };
+    expect(node.type).toBe("ToggleButton");
+    expect(node.shape).toBe("tile");
+    expect(node.activeValue).toBe("select");
+  });
+
+  test("ScrollRow accepts contentClassName + child NodeSpecs", () => {
+    const node: NodeSpec = {
+      type: "ScrollRow",
+      contentClassName: "flex items-center gap-1",
+      children: [
+        { type: "Text", text: "Chip A" },
+        { type: "Text", text: "Chip B" },
+      ],
+    };
+    expect(node.type).toBe("ScrollRow");
+    expect(node.children.length).toBe(2);
+  });
+
+  test("Layout accepts direction grid + column min/max + childHeightPx", () => {
+    const node: NodeSpec = {
+      type: "Layout",
+      direction: "grid",
+      gap: 1,
+      columnsMinPx: 54,
+      columnsMaxPx: 64,
+      childHeightPx: 60,
+      childFlex: "1",
+      children: [{ type: "Text", text: "A" }],
+    };
+    expect(node.direction).toBe("grid");
+    expect(node.columnsMinPx).toBe(54);
+    expect(node.childHeightPx).toBe(60);
+  });
+
+  test("Conditional accepts equals comparand for strict-equality gating", () => {
+    const node: NodeSpec = {
+      type: "Conditional",
+      when: "store.tool.activeTool",
+      equals: "select",
+      children: [{ type: "Text", text: "shown only when select" }],
+    };
+    expect(node.equals).toBe("select");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useToolStore binding — Phase 1b store extension (ToolPalette migration)
+// ---------------------------------------------------------------------------
+
+describe("resolveBinding — tool store", () => {
+  test("reads activeTool from the tool store", () => {
+    const b = resolveBinding("store.tool.activeTool");
+    expect(b.storeName).toBe("tool");
+    expect(b.get()).toBe("select");
+    useToolStore.getState().setActiveTool("paint");
+    expect(b.get()).toBe("paint");
+  });
+
+  test("reads activeSubTool record through a static dotted path", () => {
+    // The TS-side resolver doesn't need a dynamic indexer for this —
+    // `activeSubTool` is a Record<string,string>, so `select` is a
+    // plain key. This exercises the static-traversal happy path
+    // through a nested record.
+    const b = resolveBinding("store.tool.activeSubTool.select");
+    expect(b.get()).toBeUndefined();
+    useToolStore.getState().setActiveSubTool("select", "select-polygon");
+    expect(b.get()).toBe("select-polygon");
+  });
+
+  test("tool store has no writers (read-only — writes go through commands)", () => {
+    const b = resolveBinding("store.tool.activeTool");
+    expect(b.set("paint")).toBe(false);
+    // The store action is the canonical write path — invoke it directly
+    // and confirm the binding reflects the change.
+    useToolStore.getState().setActiveTool("paint");
+    expect(b.get()).toBe("paint");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ToolPalette JSON spec — Phase 1b migration target
+// ---------------------------------------------------------------------------
+
+describe("ToolPalette JSON spec", () => {
+  test("loads as a PanelSpec with id 'tool-palette'", () => {
+    const spec = toolPaletteSpec as PanelSpec;
+    expect(spec.id).toBe("tool-palette");
+    expect(spec.title).toBe("Tools");
+    expect(spec.dockKind).toBe("dockable-window");
+    expect(spec.root.type).toBe("Layout");
+  });
+
+  test("includes one ToggleButton tile per MOCK_TOOLS entry (6)", () => {
+    const spec = toolPaletteSpec as PanelSpec;
+    let tileCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton" && obj.shape === "tile") tileCount++;
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(tileCount).toBe(6);
+  });
+
+  test("sub-tool strip is gated on tool.activeTool === 'select'", () => {
+    const spec = toolPaletteSpec as PanelSpec;
+    // Find a Conditional node with equals: "select".
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Conditional" &&
+        obj.when === "store.tool.activeTool" &&
+        obj.equals === "select"
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("every script-ref onClick points at a known scene.tool.* command id", () => {
+    const spec = toolPaletteSpec as PanelSpec;
+    const scripts: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton") {
+        const oc = obj.onClick as { script?: unknown } | undefined;
+        if (oc && typeof oc.script === "string") scripts.push(oc.script);
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const s of scripts) {
+      // Either a top-level tool selector OR a sub-tool selector.
+      expect(
+        s.startsWith("scene.tool.select.") ||
+          s.startsWith("scene.tool.subTool.select."),
+      ).toBe(true);
+    }
+  });
+
+  test("every binding path in the spec resolves without throwing", () => {
+    const spec = toolPaletteSpec as PanelSpec;
+    const paths: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if ((k === "bind" || k === "when") && typeof v === "string") {
+          paths.push(v);
+        }
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => resolveBinding(p).get()).not.toThrow();
+    }
+  });
+
+  test("clicking the Paint tile via the command registry changes activeTool", async () => {
+    // Mirrors the TSX shell — register the per-tool selector command.
+    useCommandStore.getState().register({
+      id: "scene.tool.select.paint",
+      title: "Select Tool: Paint",
+      run: () => {
+        useToolStore.getState().setActiveTool("paint");
+      },
+    });
+    expect(useToolStore.getState().activeTool).toBe("select");
+    await invokeScript({ script: "scene.tool.select.paint" });
+    expect(useToolStore.getState().activeTool).toBe("paint");
+  });
+
+  test("clicking a sub-tool chip activates parent tool + sub-tool", async () => {
+    useCommandStore.getState().register({
+      id: "scene.tool.subTool.select.select.select-polygon",
+      title: "Sub-Tool: Select Polygon",
+      run: () => {
+        const store = useToolStore.getState();
+        store.setActiveTool("select");
+        store.setActiveSubTool("select", "select-polygon");
+      },
+    });
+    useToolStore.setState({ activeTool: "paint", activeSubTool: {} });
+    await invokeScript({
+      script: "scene.tool.subTool.select.select.select-polygon",
+    });
+    const s = useToolStore.getState();
+    expect(s.activeTool).toBe("select");
+    expect(s.activeSubTool.select).toBe("select-polygon");
   });
 });
