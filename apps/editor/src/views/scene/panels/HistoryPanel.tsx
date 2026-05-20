@@ -8,6 +8,7 @@ import {
   MousePointer2,
   PlusSquare,
   Redo2,
+  Settings,
   Trash2,
   Undo2,
   X,
@@ -17,10 +18,10 @@ import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import {
-  MOCK_HISTORY,
-  type HistoryEntryRow,
+  useHistoryStore,
+  type HistoryEntry,
   type HistoryEntryType,
-} from "../scene-fixtures";
+} from "../../../state/useHistoryStore";
 
 /**
  * HistoryPanel — undo/redo stack visualization.
@@ -30,28 +31,25 @@ import {
  * "above" the cursor (in stack order — i.e. after it in time) are
  * shown dimmed because they've been undone; entries below remain
  * applied. Clicking any entry jumps the cursor to a position just
- * after that entry — a stub for the real EditorProjectStore undo
- * history that will replace MOCK_HISTORY in a later wave.
+ * after that entry.
+ *
+ * Backed by `useHistoryStore` — entries + cursor are the source of
+ * truth. The store's `partialize` handles persistence (capped at the
+ * last MAX_ENTRIES) so the panel no longer touches localStorage.
  *
  * Opt-in panel — not part of the default Scene/Map.png layout — but a
- * real panel with command-registry, persistence, and a responsive
- * narrow-width mode that hides timestamps.
- *
- * Persistence contract (page-scope localStorage):
- *   - `cardboard.scene.history.cursorPos`  number, default
- *     MOCK_HISTORY.length (i.e. all-applied / cursor at end).
+ * real panel with command-registry and a responsive narrow-width
+ * mode that hides timestamps.
  *
  * Command-registry contract: undo / redo / markAllApplied / clear
  * AND a dynamic per-entry `scene.history.jump.<entryId>` command for
  * every history row. The jump-command titles include the row label
  * so the palette presents "Jump to: Paint Brick (14 cells)".
  *
- *   - `scene.history.markAllApplied` — moves the cursor to MAX so
- *     every entry reads as applied. Confirms before running. This is
- *     the action exposed by the toolbar's "Mark All Applied" button.
- *   - `scene.history.clear` — true history-clear stub. Registered but
- *     not yet wired up to a real flow; logs a placeholder until the
- *     real EditorProjectStore lands in a later wave.
+ *   - `scene.history.markAllApplied` — moves the cursor to entries.length
+ *     so every entry reads as applied. Confirms before running.
+ *   - `scene.history.clear` — drops every entry from the log.
+ *     Destructive; confirms before running.
  */
 
 // ---------------------------------------------------------------------------
@@ -65,52 +63,8 @@ const TYPE_ICON: Record<HistoryEntryType, LucideIcon> = {
   delete: Trash2,
   edit: Edit3,
   select: MousePointer2,
+  settings: Settings,
 };
-
-// ---------------------------------------------------------------------------
-// localStorage helpers — mirror the LayersPanel / ToolPalettePanel
-// shape so the next wave can swap a single readLS/writeLS pair out for
-// the real store without a deeper refactor.
-
-const LS_CURSOR_POS = "cardboard.scene.history.cursorPos";
-
-function readLS(key: string): string | null {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLS(key: string, value: string): void {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Cursor utilities. `cursorPos` is the count of applied entries — 0
-// means everything undone, MOCK_HISTORY.length means everything
-// applied. Entries with index < cursorPos are "applied" (rendered at
-// full opacity); index >= cursorPos are "undone" (dimmed).
-
-const MAX_CURSOR = MOCK_HISTORY.length;
-
-function clampCursor(n: number): number {
-  if (!Number.isFinite(n)) return MAX_CURSOR;
-  return Math.max(0, Math.min(MAX_CURSOR, Math.round(n)));
-}
-
-function readInitialCursor(): number {
-  const raw = readLS(LS_CURSOR_POS);
-  if (raw === null) return MAX_CURSOR;
-  const parsed = Number.parseInt(raw, 10);
-  return clampCursor(parsed);
-}
 
 function formatTimestamp(ts: number): string {
   try {
@@ -136,8 +90,14 @@ const COMPACT_WIDTH_PX = 140;
 
 export function HistoryPanel(): React.JSX.Element {
   // ---- State -------------------------------------------------------------
+  //
+  // Two separate subscriptions — cursor changes (undo / redo / jump)
+  // commonly happen without an `entries` identity change, so splitting
+  // the selectors keeps re-renders minimal.
 
-  const [cursor, setCursor] = React.useState<number>(readInitialCursor);
+  const entries = useHistoryStore((s) => s.entries);
+  const cursor = useHistoryStore((s) => s.cursor);
+  const maxCursor = entries.length;
 
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const [compact, setCompact] = React.useState(false);
@@ -153,41 +113,44 @@ export function HistoryPanel(): React.JSX.Element {
     return () => ro.disconnect();
   }, []);
 
-  // ---- Persistence ------------------------------------------------------
-
-  React.useEffect(() => {
-    writeLS(LS_CURSOR_POS, String(cursor));
-  }, [cursor]);
-
   // ---- Handlers ---------------------------------------------------------
+  //
+  // The store's undo / redo move the cursor AND return the entry that
+  // should be applied. The panel only manages the visualisation, so we
+  // discard the return value here — the dispatcher layer (or eventual
+  // historyDispatcher per the store's docstring) is responsible for
+  // replaying the inverse / forward payloads.
 
   const handleUndo = React.useCallback(() => {
-    setCursor((prev) => clampCursor(prev - 1));
+    useHistoryStore.getState().undo();
   }, []);
 
   const handleRedo = React.useCallback(() => {
-    setCursor((prev) => clampCursor(prev + 1));
+    useHistoryStore.getState().redo();
   }, []);
 
   const handleMarkAllApplied = React.useCallback(() => {
     if (typeof window === "undefined") {
-      setCursor(MAX_CURSOR);
+      useHistoryStore.getState().markAllApplied();
       return;
     }
     const ok = window.confirm(
       "Mark every history entry as applied? The cursor will move to the end of history.",
     );
     if (!ok) return;
-    setCursor(MAX_CURSOR);
+    useHistoryStore.getState().markAllApplied();
   }, []);
 
-  // Stub for a true "clear history" flow. Registered as
-  // `scene.history.clear` so the destructive ID is reserved for the
-  // eventual real-clear behavior (drops entries entirely). Today this
-  // just logs — wiring lands with EditorProjectStore.
   const handleClear = React.useCallback(() => {
-    // eslint-disable-next-line no-console
-    console.log("[history] clear (stub)");
+    if (typeof window === "undefined") {
+      useHistoryStore.getState().clear();
+      return;
+    }
+    const ok = window.confirm(
+      "Clear all history? This drops every entry from the log and cannot be undone.",
+    );
+    if (!ok) return;
+    useHistoryStore.getState().clear();
   }, []);
 
   // Jump sets the cursor to the position just AFTER the entry at
@@ -195,7 +158,7 @@ export function HistoryPanel(): React.JSX.Element {
   // matches the typical timeline UX where clicking an entry "rolls"
   // the project to that state.
   const handleJump = React.useCallback((idx: number) => {
-    setCursor(clampCursor(idx + 1));
+    useHistoryStore.getState().jumpTo(idx + 1);
   }, []);
 
   // ---- Command-registry refs --------------------------------------------
@@ -217,8 +180,7 @@ export function HistoryPanel(): React.JSX.Element {
   }, [handleUndo, handleRedo, handleMarkAllApplied, handleClear, handleJump]);
 
   // Static commands: undo / redo / markAllApplied / clear. Empty-deps
-  // register-once. `scene.history.clear` is reserved for the eventual
-  // true history-clear flow and is wired to a logging stub today.
+  // register-once.
   React.useEffect(() => {
     const unregs: Array<() => void> = [
       registerCommand({
@@ -255,7 +217,7 @@ export function HistoryPanel(): React.JSX.Element {
         category: "History",
         keywords: ["clear", "delete", "history", "reset", "purge"],
         description:
-          "Drop every history entry. Destructive and irreversible — not yet wired up.",
+          "Drop every history entry. Destructive and irreversible — confirms before running.",
         icon: <X size={14} />,
         run: () => clearRef.current(),
       }),
@@ -265,19 +227,19 @@ export function HistoryPanel(): React.JSX.Element {
     };
   }, []);
 
-  // Dynamic per-entry jump commands. MOCK_HISTORY is a module-level
-  // constant today so empty deps mirror BrushPanel's MOCK_BRUSHES
-  // treatment — identity is stable per module load.
+  // Dynamic per-entry jump commands. Re-register when `entries`
+  // identity changes — push / clear / jumpTo (the latter doesn't
+  // change the entries array but its identity stays stable). Mirrors
+  // LayersPanel's dynamic-command pattern.
   React.useEffect(() => {
     const unregs: Array<() => void> = [];
-    (MOCK_HISTORY as readonly HistoryEntryRow[]).forEach((entry, idx) => {
+    entries.forEach((entry, idx) => {
       unregs.push(
         registerCommand({
           id: `scene.history.jump.${entry.id}`,
           title: `Jump to: ${entry.label}`,
           category: "History",
           keywords: ["history", "jump", "goto", entry.type, entry.label],
-          description: entry.description,
           run: () => jumpRef.current(idx),
         }),
       );
@@ -285,26 +247,32 @@ export function HistoryPanel(): React.JSX.Element {
     return () => {
       for (const u of unregs) u();
     };
-  }, []);
+  }, [entries]);
 
   // ---- Render -----------------------------------------------------------
   //
-  // The list renders most-recent at the TOP, so we iterate the fixture
+  // The list renders most-recent at the TOP, so we iterate the entries
   // in reverse. The horizontal cursor line is inserted as its own row
-  // at the position dictated by `cursor` — when `cursor === MAX`, the
-  // line is at the very bottom (everything applied); when `cursor === 0`
-  // the line is at the very top (everything undone).
+  // at the position dictated by `cursor` — when `cursor === maxCursor`,
+  // the line is at the very bottom (everything applied); when
+  // `cursor === 0` the line is at the very top (everything undone).
   //
   // Entries whose original index >= cursor are "undone" (above the
   // line in time) and get reduced opacity.
 
   const reversed = React.useMemo(() => {
-    const out: Array<{ entry: HistoryEntryRow; originalIdx: number }> = [];
-    (MOCK_HISTORY as readonly HistoryEntryRow[]).forEach((entry, idx) => {
+    const out: Array<{ entry: HistoryEntry; originalIdx: number }> = [];
+    entries.forEach((entry, idx) => {
       out.unshift({ entry, originalIdx: idx });
     });
     return out;
-  }, []);
+  }, [entries]);
+
+  // Edge case: when there are zero entries, cursor === maxCursor === 0
+  // and BOTH the "above-everything" and "below-everything" cursor
+  // lines would render — collapse to a single line.
+  const showTopLine = cursor >= maxCursor;
+  const showBottomLine = cursor === 0 && maxCursor > 0;
 
   return (
     <div
@@ -326,7 +294,7 @@ export function HistoryPanel(): React.JSX.Element {
         <ToolbarButton
           label="Redo"
           description="Step cursor forward one entry."
-          disabled={cursor >= MAX_CURSOR}
+          disabled={cursor >= maxCursor}
           onClick={handleRedo}
           icon={Redo2}
         />
@@ -350,9 +318,9 @@ export function HistoryPanel(): React.JSX.Element {
         >
           <span
             className="text-[10px] tabular-nums text-(--color-fg-muted) px-1 select-none"
-            aria-label={`Cursor at ${cursor} of ${MAX_CURSOR}`}
+            aria-label={`Cursor at ${cursor} of ${maxCursor}`}
           >
-            {cursor} / {MAX_CURSOR}
+            {cursor} / {maxCursor}
           </span>
         </Tooltip>
         <ToolbarButton
@@ -370,9 +338,9 @@ export function HistoryPanel(): React.JSX.Element {
         {/* If cursor is at MAX, every entry is applied; the cursor
             line sits ABOVE the first reversed row (which is the most
             recent applied action). */}
-        {cursor >= MAX_CURSOR ? <CursorLine /> : null}
+        {showTopLine ? <CursorLine /> : null}
 
-        {reversed.map(({ entry, originalIdx }, _reversedIdx) => {
+        {reversed.map(({ entry, originalIdx }) => {
           const isApplied = originalIdx < cursor;
           // The most-recently-applied entry — the cursor's anchor —
           // gets an active indicator (amber accent + font weight bump).
@@ -381,8 +349,6 @@ export function HistoryPanel(): React.JSX.Element {
           // when that entry is the last APPLIED one — i.e. when
           // originalIdx === cursor - 1.
           const lineAfterThis = isActive;
-          // Special case: cursor === 0 — line above EVERYTHING.
-          // Handled below the map.
           return (
             <React.Fragment key={entry.id}>
               <HistoryEntryView
@@ -397,7 +363,7 @@ export function HistoryPanel(): React.JSX.Element {
           );
         })}
 
-        {cursor === 0 ? <CursorLine /> : null}
+        {showBottomLine ? <CursorLine /> : null}
       </div>
     </div>
   );
@@ -488,7 +454,7 @@ function CursorLine(): React.JSX.Element {
 // in the progressive tooltip stage 2 body.
 
 interface HistoryEntryViewProps {
-  entry: HistoryEntryRow;
+  entry: HistoryEntry;
   isApplied: boolean;
   isActive: boolean;
   compact: boolean;
@@ -515,11 +481,6 @@ function HistoryEntryView({
           content: (
             <div>
               <div className="font-semibold">{entry.label}</div>
-              {entry.description ? (
-                <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[240px] whitespace-normal">
-                  {entry.description}
-                </div>
-              ) : null}
               <div className="text-[10px] text-(--color-fg-muted) mt-1">
                 {entry.type} · {ts}
               </div>
