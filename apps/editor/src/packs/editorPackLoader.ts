@@ -56,6 +56,10 @@ import {
 } from "../state/useEditorPacksStore";
 import { registerCommand } from "../state/useCommandStore";
 import { useSelectionStore } from "../state/useSelectionStore";
+import {
+  useDockPanelRegistryStore,
+  useRegisteredPackPanels,
+} from "../state/useDockPanelRegistryStore";
 import { registerDynamicStore } from "../panel-renderer/resolveBinding";
 import { resolveLibrary } from "./libraryCache";
 import {
@@ -170,6 +174,21 @@ export interface EditorPackContext extends RendererPackContextSlice {
    */
   share: (key: string, value: unknown) => void;
   /**
+   * Register a TSX-backed dock panel. The def matches `DockPanelDef`
+   * exactly (id/title/category/component + optional icon/surface/
+   * headerless) so a pack can ship a panel with the same fidelity the
+   * shell's hand-written panels have. Returns an unregister function;
+   * pack scripts typically aggregate every unregister into their
+   * setup-fn cleanup so a future Extensions-tab disable rip every
+   * contribution out without a reload.
+   *
+   * Mirrors `registerCommand`'s shape — the panel registry is the
+   * dock-panel equivalent of the command registry, and a third-party
+   * pack can ship TSX panels through this API with no special access.
+   * See `docs/plans/CORE_EDITOR_PACK.md` §9.1 + §10 P2.
+   */
+  registerPanel: (def: DockPanelDef) => () => void;
+  /**
    * Read a value stashed via `share`. Returns `undefined` if no
    * sibling script wrote the key yet. Scripts can poll, or order
    * declarations in `manifest.scripts[]` so the consumer runs
@@ -252,6 +271,14 @@ interface PackLoadState {
   sharedSlots: Map<string, unknown>;
   /** Unregister fns for dynamic stores the pack created. */
   storeUnregistrars: Array<() => void>;
+  /**
+   * Unregister fns for TSX panels the pack contributed via
+   * `ctx.registerPanel(...)`. Stashed alongside `storeUnregistrars`
+   * so a future Extensions-tab disable handler can call them via
+   * `disposeEditorPackScripts` and drop the panels out of the
+   * DocksModal without a reload.
+   */
+  panelUnregistrars: Array<() => void>;
   /** Mount counter per panel — defensive for future split-mount work. */
   mountCounters: Map<string, number>;
 }
@@ -315,6 +342,7 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     libModuleByName: new Map(),
     sharedSlots: new Map(),
     storeUnregistrars: [],
+    panelUnregistrars: [],
     mountCounters: new Map(),
   };
 
@@ -503,6 +531,15 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
       state.sharedSlots.set(key, value);
     },
     consume: (key) => state.sharedSlots.get(key),
+    registerPanel: (def) => {
+      const unregister = useDockPanelRegistryStore.getState().register(def);
+      state.panelUnregistrars.push(unregister);
+      return () => {
+        const idx = state.panelUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.panelUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
   };
 
   for (const scriptPath of scriptPaths) {
@@ -572,6 +609,19 @@ async function runEditorPackScript(
       const moved = state.storeUnregistrars.splice(0);
       cleanups.push(...moved);
     }
+    // Same treatment for panel unregistrars contributed via
+    // `ctx.registerPanel(...)`. Each unregister drops the panel out
+    // of `useDockPanelRegistryStore` so `useEditorPackPanels()`
+    // re-renders without the entry.
+    if (state.panelUnregistrars.length > 0) {
+      let cleanups = packScriptCleanups.get(packId);
+      if (!cleanups) {
+        cleanups = [];
+        packScriptCleanups.set(packId, cleanups);
+      }
+      const moved = state.panelUnregistrars.splice(0);
+      cleanups.push(...moved);
+    }
     console.debug(
       `[editorPackLoader] ${packId}/${scriptPath}: loaded`,
     );
@@ -635,20 +685,42 @@ export async function loadEditorPacks(): Promise<DockPanelDef[]> {
 
 /**
  * React hook: kick off `loadEditorPacks()` once on mount and return
- * the resolved DockPanelDef list. Returns an empty array until the
- * load completes, then re-renders with the loaded defs.
+ * EVERY pack-contributed DockPanelDef.
+ *
+ * Two contribution streams merge here:
+ *   1. JSON `editorPanels[]` specs → the loader builds DockPanelDefs
+ *      out of each spec via `buildDockPanelDef`. Async — populated
+ *      once `loadEditorPacks()` resolves.
+ *   2. TSX `ctx.registerPanel(def)` calls → the loader writes them
+ *      into `useDockPanelRegistryStore` while running pack scripts.
+ *      Sync from the store's perspective once the script runs.
+ *
+ * Both lists are concatenated. JSON defs come first so a TSX panel
+ * registered later in the same pack wins on id collision (last-write
+ * for the registry is also last-write here). If a third-party pack's
+ * later contribution wants to override a core panel, it just
+ * registers a panel with the same id and gets it.
  */
 export function useEditorPackPanels(): DockPanelDef[] {
-  const [defs, setDefs] = React.useState<DockPanelDef[]>([]);
+  const [jsonDefs, setJsonDefs] = React.useState<DockPanelDef[]>([]);
   React.useEffect(() => {
     let cancelled = false;
     void loadEditorPacks().then((loaded) => {
       if (cancelled) return;
-      setDefs(loaded);
+      setJsonDefs(loaded);
     });
     return () => {
       cancelled = true;
     };
   }, []);
-  return defs;
+  const tsxDefs = useRegisteredPackPanels();
+  return React.useMemo(() => {
+    // Build an id-keyed map so a TSX def with the same id as a JSON
+    // def wins (matches the pack-chain "last contributor wins"
+    // semantics). Iteration order: JSON first, then TSX overrides.
+    const byId = new Map<string, DockPanelDef>();
+    for (const def of jsonDefs) byId.set(def.id, def);
+    for (const def of tsxDefs) byId.set(def.id, def);
+    return Array.from(byId.values());
+  }, [jsonDefs, tsxDefs]);
 }

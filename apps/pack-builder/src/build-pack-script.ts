@@ -53,6 +53,15 @@ import { basename } from "node:path";
 
 const PREACT_NS = "two5d-preact";
 const REACT_NS = "cardboard-react";
+const SHELL_SDK_NS = "cardboard-editor-shell";
+
+/**
+ * The shell-SDK virtual module bare specifier. Pack scripts that need
+ * to call host-side singletons (e.g. `registerCommand`, `useActiveScene`)
+ * import from this specifier; the resolver below maps it to a stub
+ * that reads from `globalThis.__cardboard_editor_shell`.
+ */
+const SHELL_SDK_SPECIFIER = "@cardboard/editor-shell";
 
 /**
  * The four Preact specifiers we externalise → matching global slot.
@@ -312,6 +321,44 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               `,
             };
           });
+        },
+      },
+      {
+        name: "cardboard-shell-externals",
+        setup(build) {
+          // Route bare `@cardboard/editor-shell` imports through our
+          // virtual namespace so the load hook below owns them. The
+          // specifier is intentionally NOT a real package — it's an
+          // editor-pack convention so authors can import singleton-
+          // dependent shell symbols (`registerCommand`,
+          // `useActiveScene`, etc.) the same way they import third-
+          // party libraries. See CORE_EDITOR_PACK.md §6 gotcha #2.
+          build.onResolve(
+            { filter: new RegExp(`^${SHELL_SDK_SPECIFIER.replace(/[/\\^$*+?.()|[\]{}]/g, "\\$&")}$`) },
+            (args) => ({
+              path: args.path,
+              namespace: SHELL_SDK_NS,
+            }),
+          );
+          // Stub re-exports each whitelisted symbol from the global
+          // slot the editor's `installShellSdkRuntime()` populates.
+          // Adding a new symbol requires (a) extending the shellSdk
+          // object in `apps/editor/src/packs/shellSdkRuntime.ts` and
+          // (b) appending a matching `export const` line below.
+          build.onLoad({ filter: /.*/, namespace: SHELL_SDK_NS }, () => ({
+            loader: "js",
+            contents: `
+              const __mod = globalThis.__cardboard_editor_shell;
+              if (!__mod) {
+                throw new Error(
+                  "cardboard: @cardboard/editor-shell not available — editor must call installShellSdkRuntime() before pack scripts run"
+                );
+              }
+              export const registerCommand = __mod.registerCommand;
+              export const useCommandStore = __mod.useCommandStore;
+              export const useActiveScene = __mod.useActiveScene;
+            `,
+          }));
         },
       },
       {

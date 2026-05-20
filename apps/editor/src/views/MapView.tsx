@@ -74,10 +74,11 @@ import {
   LightingPanel,
   MANIFEST as LIGHTING_MANIFEST,
 } from "./scene/panels/LightingPanel";
-import {
-  NotesPanel,
-  MANIFEST as NOTES_MANIFEST,
-} from "./scene/panels/NotesPanel";
+// NotesPanel migrated to `packages/core-editor-pack/panels/NotesPanel.tsx`
+// (CORE_EDITOR_PACK.md §10 P2). The pack's `scripts/setup.tsx` calls
+// `ctx.registerPanel({...NOTES_MANIFEST, component: NotesPanel})` at
+// load time; the def merges into the live registry via
+// `useEditorPackPanels()` below.
 import {
   AssetReferencesPanel,
   MANIFEST as ASSET_REFERENCES_MANIFEST,
@@ -145,7 +146,7 @@ const PANELS: readonly DockPanelDef[] = [
   { ...HISTORY_MANIFEST, component: HistoryPanel },
   { ...PREFAB_BROWSER_MANIFEST, component: PrefabBrowserPanel },
   { ...LIGHTING_MANIFEST, component: LightingPanel },
-  { ...NOTES_MANIFEST, component: NotesPanel },
+  // NotesPanel — contributed via the core-editor-pack at runtime.
   { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
   // Editor packs (loaded asynchronously via `useEditorPackPanels`)
   // are MERGED into this list at runtime — see the MapView component

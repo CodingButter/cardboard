@@ -49,6 +49,7 @@ function makeStubContext(): EditorPackContext {
     onPanelMount: () => () => {},
     share: () => {},
     consume: () => undefined,
+    registerPanel: () => () => {},
     _registerCanvasRef: () => {},
     _unregisterCanvasRef: () => {},
     _firePanelMount: () => {},

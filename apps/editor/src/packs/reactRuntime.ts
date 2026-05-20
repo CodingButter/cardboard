@@ -29,6 +29,12 @@
 
 import * as React from "react";
 import * as ReactJsxRuntime from "react/jsx-runtime";
+// Bun emits the dev JSX runtime (`jsxDEV`) in dev builds; importing
+// both runtimes here and merging them into one namespace makes the
+// pack-side stub's `jsxDEV` reference resolve regardless of build
+// mode. In prod builds Bun emits `jsx`/`jsxs` — those come from the
+// prod runtime — and `jsxDEV` is just `undefined` (never referenced).
+import * as ReactJsxDevRuntime from "react/jsx-dev-runtime";
 import * as ReactDOM from "react-dom";
 import * as ReactDOMClient from "react-dom/client";
 
@@ -50,7 +56,15 @@ declare global {
  */
 export function installReactRuntime(): void {
   globalThis.__cardboard_react = React;
-  globalThis.__cardboard_react_jsx_runtime = ReactJsxRuntime;
+  // Union the prod + dev JSX runtimes into one namespace so the pack-
+  // side stub finds `jsx`, `jsxs`, AND `jsxDEV` regardless of which
+  // mode Bun chose when bundling the pack script. Dev-runtime keys
+  // override identically-named prod keys (e.g. `Fragment`), which is
+  // fine — they reference the same React internal.
+  globalThis.__cardboard_react_jsx_runtime = {
+    ...ReactJsxRuntime,
+    ...ReactJsxDevRuntime,
+  } as typeof ReactJsxRuntime;
   globalThis.__cardboard_react_dom = ReactDOM;
   globalThis.__cardboard_react_dom_client = ReactDOMClient;
 }

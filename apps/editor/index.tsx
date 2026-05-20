@@ -4,6 +4,7 @@ import "./index.css";
 import { App } from "./src/App";
 import { assetUrl } from "./src/lib/assetUrl";
 import { installReactRuntime } from "./src/packs/reactRuntime";
+import { installShellSdkRuntime } from "./src/packs/shellSdkRuntime";
 import { useToolStore } from "./src/state/useToolStore";
 import { useBrushStore } from "./src/state/useBrushStore";
 import { useTilePresetStore } from "./src/state/useTilePresetStore";
@@ -43,6 +44,11 @@ declare global {
 // `cardboard-react-externals` plugin). Without this, the first
 // pack-shipped hook call throws "Invalid hook call".
 installReactRuntime();
+// Expose shell-side singletons (registerCommand, useActiveScene, etc.)
+// the same way. Pack-shipped TSX panels that need a host-singleton hook
+// import from `@cardboard/editor-shell`, which the pack-builder rewrites
+// to a virtual module reading from `globalThis.__cardboard_editor_shell`.
+installShellSdkRuntime();
 
 if (typeof window !== "undefined") {
   window.__cardboard = {

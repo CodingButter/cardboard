@@ -6,10 +6,21 @@ import {
   StickyNote,
   Trash2,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useActiveScene } from "../../../shell/ActiveSceneContext";
+// Type-only — Bun's bundler erases this. Reaching back into the
+// editor's source for the structural `DockPanelDef` type keeps the
+// pack's MANIFEST shape byte-identical to a hand-written panel's.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Tooltip is pure presentational React (uses createPortal + refs only);
+// the pack-builder bundles it into the .apg script. No host singleton
+// to coordinate with — bundling is safe.
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Externalised via the pack-builder's `cardboard-shell-externals`
+// plugin → reads from `globalThis.__cardboard_editor_shell` at
+// runtime so the pack-side `registerCommand` call writes into the
+// host editor's `useCommandStore` (not a bundled-in duplicate that
+// nobody reads) and `useActiveScene` resolves the host's React
+// Context. See `apps/editor/src/packs/shellSdkRuntime.ts`.
+import { registerCommand, useActiveScene } from "@cardboard/editor-shell";
 
 /**
  * NotesPanel — designer scratchpad for the active scene.

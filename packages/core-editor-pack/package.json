@@ -2,5 +2,8 @@
   "name": "@two_5_d/core-editor-pack",
   "version": "0.1.0",
   "private": true,
-  "description": "The Cardboard editor itself, shipped as an editor pack. After CORE_EDITOR_PACK.md ships, apps/editor/ is a bare shell + primitives and every view/panel/layout lives here. P1 of that plan is the de-risking spike: validate the pack-builder can externalize React + the shell SDK so pack-shipped TSX components share React with the host. The skeleton is intentionally empty for P1 — only a trivial spike script that uses React.useState to prove externalization works."
+  "description": "The Cardboard editor itself, shipped as an editor pack. P1 (spike) validated that pack-shipped TSX components share React with the host editor. P2 (this commit) migrates the first hand-written panel — NotesPanel — into the pack via the new `ctx.registerPanel(def)` API on `EditorPackContext`. Subsequent phases continue draining views/panels/layouts out of `apps/editor/src/views/` into here until the editor shell is bare and the core pack IS the editor.",
+  "dependencies": {
+    "lucide-react": "^1.16.0"
+  }
 }
