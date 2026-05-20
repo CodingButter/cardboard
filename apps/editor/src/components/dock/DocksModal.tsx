@@ -1,8 +1,9 @@
 import React from "react";
 import type { DockviewApi } from "dockview";
-import { GripVertical } from "lucide-react";
+import { Box, Check } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Modal } from "../ui/Modal";
+import { Button } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
 import type { DockPanelDef } from "./DockShell";
 
@@ -70,9 +71,14 @@ export function DocksModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Docks"
-      description="Drag a panel onto the layout to add it."
-      width="3xl"
+      title="Add panel"
+      description="Click a panel to add it to the current layout."
+      width="2xl"
+      footer={
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          Close
+        </Button>
+      }
     >
       <div
         className={cn(
@@ -134,42 +140,78 @@ export function DocksModal({
               onClick={onAdd}
               disabled={isMounted}
               className={cn(
-                "relative flex flex-col items-center justify-center gap-2",
-                "rounded-md border p-3 h-[140px]",
-                "transition-colors",
+                "group relative flex flex-col items-start justify-start gap-2",
+                "rounded-md border p-3 h-[120px] w-full",
+                "transition-colors hover:shadow-[var(--shadow-panel)]",
+                "border-(--color-border) bg-(--color-bg-card)",
                 isMounted
-                  ? "border-(--color-border) bg-(--color-bg-card) opacity-60 cursor-not-allowed"
-                  : "border-(--color-border) bg-(--color-bg-card) hover:border-(--color-border-strong) cursor-pointer",
+                  ? "cursor-not-allowed"
+                  : "hover:border-(--color-border-strong) cursor-pointer",
               )}
             >
-              {/* Large icon block */}
+              {/* Mounted-state check glyph anchored top-right of the
+                  card. Replaces the previous opacity-60 wash so the
+                  card stays visually legible while still flagged. */}
+              {isMounted ? (
+                <Check
+                  size={12}
+                  aria-label="Already in layout"
+                  className="absolute top-2 right-2 text-(--color-accent)"
+                />
+              ) : null}
+              {/* Icon block (40px) */}
               <div
                 className={cn(
-                  "h-12 w-12 rounded flex items-center justify-center",
+                  "h-10 w-10 rounded flex items-center justify-center",
                   "bg-(--color-bg-app) border border-(--color-border)",
                   "text-(--color-fg-secondary)",
                 )}
               >
                 {def.icon ? (
-                  <span className="[&_svg]:h-6 [&_svg]:w-6 flex items-center justify-center">
+                  <span className="[&_svg]:h-5 [&_svg]:w-5 flex items-center justify-center">
                     {def.icon}
                   </span>
                 ) : (
-                  <GripVertical size={18} />
+                  <Box size={18} />
                 )}
               </div>
-              <div className="text-[12px] text-(--color-fg-primary) text-center truncate w-full">
+              <div className="text-[13px] font-medium text-(--color-fg-primary) text-left truncate w-full">
                 {def.title}
               </div>
               {isMounted ? (
-                <span className="text-[9px] uppercase tracking-wider text-(--color-fg-muted)">
-                  In layout
-                </span>
-              ) : (
-                <span className="text-[9px] uppercase tracking-wider text-(--color-fg-muted)">
-                  Click to add
-                </span>
-              )}
+                <Tooltip
+                  stages={[
+                    {
+                      delay: 1000,
+                      content: <span>Already in current layout</span>,
+                    },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div>
+                          <div className="font-semibold">In layout</div>
+                          <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                            {def.title} is already mounted in this page's
+                            dockview layout. Close it from its tab strip to
+                            be able to re-add it.
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <span
+                    className={cn(
+                      "text-[10px] uppercase tracking-wider font-semibold",
+                      "px-1.5 py-0.5 rounded",
+                      "bg-(--color-bg-app) text-(--color-fg-muted)",
+                      "border border-(--color-border)",
+                    )}
+                  >
+                    In layout
+                  </span>
+                </Tooltip>
+              ) : null}
             </button>
             </Tooltip>
           );

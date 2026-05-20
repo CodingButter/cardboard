@@ -15,6 +15,11 @@ import {
 import { getPredefinedLayouts } from "../../state/predefinedLayouts";
 import { useCommandStore } from "../../state/useCommandStore";
 
+// Hoisted so the workspace-store selector's fallback reference is
+// stable across renders (returning a fresh `[]` per call defeats
+// zustand's shallow-equality optimization for unchanged state).
+const EMPTY_USER_PRESETS: WorkspacePreset[] = [];
+
 /**
  * LayoutsModal — the Workspace v1.5 layouts surface.
  *
@@ -122,7 +127,13 @@ function LayoutCard({
       setMenu({ kind: "closed" });
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu({ kind: "closed" });
+      if (e.key === "Escape") {
+        // Stop propagation so the parent LayoutsModal's window-level
+        // Esc handler doesn't dismiss the entire modal alongside the
+        // inner confirm/menu — one Esc should peel one layer.
+        e.stopPropagation();
+        setMenu({ kind: "closed" });
+      }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -194,10 +205,10 @@ function LayoutCard({
         onClick={editing ? undefined : onClick}
         onContextMenu={onContextMenu}
         className={cn(
-          "group relative flex flex-col gap-2 rounded-md border p-2 text-left",
-          "transition-colors",
+          "group relative flex flex-col gap-2 rounded-md border p-3 text-left",
+          "transition-colors hover:shadow-[var(--shadow-panel)]",
           active
-            ? "border-(--color-accent) bg-(--color-accent)/10"
+            ? "ring-1 ring-(--color-accent) border-(--color-accent) bg-(--color-bg-card)"
             : "border-(--color-border) hover:border-(--color-border-strong) bg-(--color-bg-card)",
         )}
       >
@@ -242,9 +253,9 @@ function LayoutCard({
           ) : (
             <span
               className={cn(
-                "flex-1 truncate text-[12px]",
+                "flex-1 truncate text-[13px] font-medium",
                 active
-                  ? "text-(--color-fg-primary) font-medium"
+                  ? "text-(--color-fg-primary)"
                   : "text-(--color-fg-secondary)",
               )}
             >
@@ -253,7 +264,7 @@ function LayoutCard({
           )}
           {builtIn ? (
             <Lock
-              size={11}
+              size={12}
               aria-label="Built-in layout"
               className="text-(--color-fg-muted) shrink-0"
             />
@@ -488,7 +499,12 @@ export function LayoutsModal({
       onClose={onClose}
       title="Layouts"
       description="Apply a predefined or saved workspace layout."
-      width="3xl"
+      width="2xl"
+      footer={
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          Close
+        </Button>
+      }
     >
       <div className="flex flex-col gap-4">
         {/* Header band — save / resave actions.
@@ -497,8 +513,13 @@ export function LayoutsModal({
          *     exactly matches some saved layout (predefined or user).
          *     No point creating a duplicate.
          *   - "Resave Current" enables only when there's an applied
-         *     user preset AND the live layout differs from it. */}
-        <div className="flex items-center gap-2 flex-wrap">
+         *     user preset AND the live layout differs from it.
+         *
+         * Wrapped in a bordered band that sits flush against the modal
+         * body's edges (mirrors EditorSettingsModal's footer band
+         * convention) so the action row reads as part of the dialog's
+         * structural chrome, not as floating buttons above the grid. */}
+        <div className="border-b border-zinc-800 px-5 py-3 -mx-5 -mt-4 flex items-center gap-2 flex-wrap">
           <Tooltip
             stages={[
               { delay: 1000, content: <span>Save current as new</span> },
@@ -582,9 +603,7 @@ export function LayoutsModal({
         {presets.length > 0 ? (
           <>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-                My Layouts
-              </span>
+              <span className="section-eyebrow">My Layouts</span>
               <div className="flex-1 h-px bg-(--color-border)" />
             </div>
             <div
@@ -614,8 +633,6 @@ export function LayoutsModal({
     </Modal>
   );
 }
-
-const EMPTY_USER_PRESETS: WorkspacePreset[] = [];
 
 /**
  * Strip runtime-only fields from a dockview layout snapshot so two

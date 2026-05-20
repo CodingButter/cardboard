@@ -66,6 +66,7 @@ export function Modal({
   dismissOnEsc = true,
   className,
 }: ModalProps) {
+  const titleId = React.useId();
   // Esc-to-dismiss. Captured at the window so the listener works
   // regardless of where focus lives inside the modal.
   React.useEffect(() => {
@@ -90,6 +91,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         className={cn(
           "panel-surface-rounded w-full mx-4 flex flex-col",
           WIDTH_CLASS[width],
@@ -99,7 +101,10 @@ export function Modal({
       >
         <div className="flex items-center gap-3 px-6 py-5 border-b border-zinc-800">
           <div className="flex flex-col min-w-0">
-            <h2 className="text-xl font-bold text-white truncate leading-tight">
+            <h2
+              id={titleId}
+              className="text-xl font-bold text-white truncate leading-tight"
+            >
               {title}
             </h2>
             {description ? (
