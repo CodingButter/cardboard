@@ -6,6 +6,10 @@ import { registerCommand } from "../../../state/useCommandStore";
 import { useLayerStore } from "../../../state/useLayerStore";
 import { useSceneStore } from "../../../state/useSceneStore";
 import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+import {
+  ensureLoaded as ensureTextureLoaded,
+  getTextureBitmap,
+} from "../../../state/tileTextureCache";
 import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
@@ -98,6 +102,18 @@ export function MinimapPanel(): React.JSX.Element {
   // Preset registry — looked up per-cell so the minimap reflects
   // distinct tile presets, not just layer chrome.
   const presetRegistry = useTilePresetRegistryStore((s) => s.presets);
+  // Drives re-paint when bitmaps land. See MapCanvasPanel for the
+  // full pattern; minimap is even cheaper since cells are small.
+  const texturesEpoch = useTilePresetRegistryStore((s) => s.texturesEpoch);
+  const projectId = React.useMemo(() => {
+    try {
+      return typeof window !== "undefined"
+        ? window.localStorage.getItem("editor.currentProjectId")
+        : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -227,6 +243,7 @@ export function MinimapPanel(): React.JSX.Element {
     // so the lattice reads on top, keeping cell boundaries legible
     // inside filled regions.
     ctx.globalAlpha = 0.85;
+    void texturesEpoch;
     for (const layerId of order) {
       if (visibility[layerId] === false) continue;
       const layerColor = LAYER_COLOR[layerId] ?? "#888";
@@ -238,8 +255,21 @@ export function MinimapPanel(): React.JSX.Element {
         const [xs, ys] = key.split(",");
         const x = +xs!;
         const y = +ys!;
-        ctx.fillStyle = presetRegistry[presetId]?.color ?? layerColor;
-        ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
+        const entry = presetRegistry[presetId];
+        const texPath = entry?.texture;
+        const bitmap = texPath ? getTextureBitmap(texPath) : undefined;
+        if (bitmap) {
+          // drawImage scales the source bitmap into the cell. At
+          // minimap cell sizes (often sub-8px) the result smears, but
+          // that's correct — it reads as the tile's average tone.
+          ctx.drawImage(bitmap, offX + x * cell, offY + y * cell, cell, cell);
+        } else {
+          ctx.fillStyle = entry?.color ?? layerColor;
+          ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
+          if (bitmap === undefined && texPath && projectId) {
+            ensureTextureLoaded(projectId, texPath);
+          }
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -312,6 +342,8 @@ export function MinimapPanel(): React.JSX.Element {
     order,
     cells,
     presetRegistry,
+    texturesEpoch,
+    projectId,
   ]);
 
   // ---- Handlers ----------------------------------------------------

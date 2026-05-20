@@ -14,6 +14,10 @@ import { registerCommand } from "../../../state/useCommandStore";
 import { useSceneStore } from "../../../state/useSceneStore";
 import { useLayerStore } from "../../../state/useLayerStore";
 import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+import {
+  ensureLoaded as ensureTextureLoaded,
+  getTextureBitmap,
+} from "../../../state/tileTextureCache";
 import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
@@ -249,7 +253,10 @@ function buildPreviewScene(): PreviewSceneHandle {
         for (const m of mats) m.dispose();
       }
     });
-    for (const m of materialPool.values()) m.dispose();
+    for (const m of materialPool.values()) {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    }
     materialPool.clear();
   };
 
@@ -292,6 +299,19 @@ export function PreviewPanel(): React.JSX.Element {
   // colored from the registry so two presets on the same layer tint
   // distinguishably; layer color is the fallback for unknown ids.
   const presetRegistry = useTilePresetRegistryStore((s) => s.presets);
+  // Bumped when a tile texture bitmap finishes loading. Drives the
+  // cell-mesh rebuild effect so materials swap from color-only to
+  // `{ map }` the moment a bitmap is in the cache.
+  const texturesEpoch = useTilePresetRegistryStore((s) => s.texturesEpoch);
+  const projectId = React.useMemo(() => {
+    try {
+      return typeof window !== "undefined"
+        ? window.localStorage.getItem("editor.currentProjectId")
+        : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Container-size state drives the "Too small" + "Hide toolbar" toggles.
   // We track it in React state so render-paths can react to it; the
@@ -461,8 +481,13 @@ export function PreviewPanel(): React.JSX.Element {
     // imported, hydrated colors changed) doesn't render cells at the
     // previous pack's stale colors. The pool is per-rebuild now; that's
     // fine — a 4096-cell grid creates at most ~dozens of distinct
-    // (layer, preset) keys, not thousands.
-    for (const m of handle.materialPool.values()) m.dispose();
+    // (layer, preset) keys, not thousands. We also dispose any
+    // attached texture maps — `THREE.CanvasTexture` wraps a GPU
+    // resource that `material.dispose()` does NOT free automatically.
+    for (const m of handle.materialPool.values()) {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    }
     handle.materialPool.clear();
 
     const halfW = dims.w / 2 - 0.5;
@@ -481,24 +506,59 @@ export function PreviewPanel(): React.JSX.Element {
         const presetId = cell.layers[layerId];
         if (!presetId) continue;
 
-        // Material pool — shared by `${layerId}:${presetId}`. Color is
-        // sourced from the tile-preset registry when available so two
-        // presets on the same layer tint distinguishably; falls back
-        // to the layer color when the registry has no entry yet
-        // (hydration race, stale cell, etc.).
-        const matKey = `${layerId}:${presetId}`;
+        // Material pool — keyed by `${layerId}:${presetId}:${textured}`
+        // where `textured` is `"tex"` once a bitmap is available and
+        // `"flat"` while we're still on the color fallback. The extra
+        // segment is what lets the SAME preset start as a flat-color
+        // material on first paint, then get replaced with a textured
+        // one once the bitmap loads — without it, the cached
+        // flat-color material would survive the texturesEpoch rebuild
+        // and the bitmap would never reach the GPU.
+        const entry = presetRegistry[presetId];
+        const texPath = entry?.texture;
+        // Hot-path bitmap lookup. `undefined` = never requested,
+        // `null` = known-failed, otherwise = ready.
+        const bitmap = texPath ? getTextureBitmap(texPath) : undefined;
+        if (bitmap === undefined && texPath && projectId) {
+          // Fire an async load; the next `texturesEpoch` bump will
+          // re-run this effect and pick up the bitmap.
+          ensureTextureLoaded(projectId, texPath);
+        }
+        const variant = bitmap ? "tex" : "flat";
+        const matKey = `${layerId}:${presetId}:${variant}`;
         let mat = handle.materialPool.get(matKey);
         if (!mat) {
-          const presetColor = presetRegistry[presetId]?.color;
+          const presetColor = entry?.color;
           const colorNum = presetColor
             ? hexStringToNumber(presetColor)
             : colorForLayer(layerId);
-          mat = new THREE.MeshStandardMaterial({
-            color: colorNum,
-            roughness: 0.7,
-            metalness: 0.05,
-            wireframe: wireframeRef.current,
-          });
+          if (bitmap) {
+            // ImageBitmap → THREE.CanvasTexture. CanvasTexture accepts
+            // any `TexImageSource`, including `ImageBitmap`, and bumps
+            // `needsUpdate=true` automatically on construction. We
+            // leave the material color at white so the texture's own
+            // colors pass through unchanged.
+            const tex = new THREE.CanvasTexture(bitmap);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            // Crisp pixel-art-ish look matching the top-down map.
+            tex.magFilter = THREE.NearestFilter;
+            tex.minFilter = THREE.LinearMipMapLinearFilter;
+            tex.anisotropy = 4;
+            mat = new THREE.MeshStandardMaterial({
+              map: tex,
+              color: 0xffffff,
+              roughness: 0.7,
+              metalness: 0.05,
+              wireframe: wireframeRef.current,
+            });
+          } else {
+            mat = new THREE.MeshStandardMaterial({
+              color: colorNum,
+              roughness: 0.7,
+              metalness: 0.05,
+              wireframe: wireframeRef.current,
+            });
+          }
           handle.materialPool.set(matKey, mat);
         }
         // Keep pooled materials in sync with the current wireframe flag.
@@ -513,7 +573,7 @@ export function PreviewPanel(): React.JSX.Element {
         handle.sceneGroup.add(mesh);
       }
     }
-  }, [cells, visibility, order, dims.w, dims.h, presetRegistry, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+  }, [cells, visibility, order, dims.w, dims.h, presetRegistry, texturesEpoch, projectId, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
 
   // ----- Ambient intensity from scene settings -----------------------
   React.useEffect(() => {

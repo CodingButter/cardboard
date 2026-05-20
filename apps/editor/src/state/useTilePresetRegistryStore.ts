@@ -50,6 +50,18 @@ export interface TilePresetRegistryEntry {
 export interface TilePresetRegistryStateData {
   /** Registry by preset id. Replaced wholesale on hydrate. */
   presets: Record<string, TilePresetRegistryEntry>;
+  /**
+   * Monotonic counter incremented every time a tile-texture bitmap
+   * finishes loading (or fails). Canvas effects depend on this in
+   * their render dep arrays so they re-paint the moment a bitmap
+   * arrives — without it, the first paint shows the color fallback
+   * forever even after the bitmap is in `tileTextureCache`.
+   *
+   * Lives on the registry store (rather than its own store) because
+   * every consumer of the bitmap also reads the registry, so a single
+   * subscribe is enough to drive both color + bitmap updates.
+   */
+  texturesEpoch: number;
 }
 
 export interface TilePresetRegistryStateActions {
@@ -63,6 +75,7 @@ export type TilePresetRegistryState =
 
 const INITIAL: TilePresetRegistryStateData = {
   presets: {},
+  texturesEpoch: 0,
 };
 
 export const useTilePresetRegistryStore = createSyncedStore<

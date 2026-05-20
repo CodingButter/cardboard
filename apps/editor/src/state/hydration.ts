@@ -8,6 +8,10 @@ import {
   useTilePresetRegistryStore,
   type TilePresetRegistryEntry,
 } from "./useTilePresetRegistryStore";
+import {
+  preloadFromRegistry as preloadTextureBitmaps,
+  resetTextureCache,
+} from "./tileTextureCache";
 import { useDiagnosticsStore } from "./useDiagnosticsStore";
 import type { TilePresetCategory } from "../views/scene/scene-fixtures";
 
@@ -167,20 +171,30 @@ function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
- * Derive a `#RRGGBB` color for a preset from its texture path +
- * category. Hash the texture path to a stable hue offset inside the
- * category's color band so two presets sharing a texture render the
- * same color (intentional — they're visually the same tile) but two
- * presets with different textures stand apart even within one layer.
+ * Derive a `#RRGGBB` color for a preset from its preset id + texture
+ * path + category. Hash both `id` AND `texture` so two presets with
+ * the same texture path (very common: the default pack has 5 wall
+ * presets all pointing at `wall.jpg`) still render distinctly on the
+ * map — the preset id breaks the tie. The category fixes the base hue
+ * band so walls/floors/ceilings stay broadly recognisable.
  *
  * This is intentionally NOT a sample of the actual texture image —
  * loading textures here is a larger pass (atlas, fetch, decode). The
  * hash-based palette is good enough to distinguish presets on the
  * top-down map; the texture-sample pass can land later.
  */
-function colorForPreset(category: TilePresetCategory, texture: string): string {
+function colorForPreset(
+  category: TilePresetCategory,
+  id: string,
+  texture: string,
+): string {
   const palette = CATEGORY_PALETTE[category];
-  const hash = hashString(texture);
+  // Combine the preset id + texture so presets that share a texture
+  // (the default pack ships five wall presets all on `wall.jpg`) still
+  // hash to distinct values. Texture stays in the input so two presets
+  // with the same id (impossible by construction) would also remain
+  // stable across pack reloads — defensive but cheap.
+  const hash = hashString(`${id}|${texture}`);
   // ±30° hue jitter — keeps presets in-category but visually distinct.
   const hueJitter = ((hash >>> 0) % 61) - 30;
   // ±10 lightness — adds another axis of variation so two presets
@@ -274,7 +288,7 @@ async function buildPresetRegistry(
       name: displayNameForPresetId(id),
       category,
       texture,
-      color: colorForPreset(category, texture),
+      color: colorForPreset(category, id, texture),
     };
   }
 
@@ -355,7 +369,7 @@ async function buildPresetRegistry(
       name: displayNameForPresetId(id, entry.source.displayName),
       category,
       texture,
-      color: colorForPreset(category, texture),
+      color: colorForPreset(category, id, texture),
     };
   }
 
@@ -509,7 +523,18 @@ export async function hydrateStoresFromIdb(projectId: string): Promise<void> {
   const registry = manifest
     ? await buildPresetRegistry(projectId, manifest)
     : {};
+  // Drop any cached bitmaps from a prior project — preset paths
+  // collide on `"images/tiles/wall.jpg"` across packs, so showing the
+  // old project's bitmap against the new project's preset is wrong.
+  resetTextureCache();
   useTilePresetRegistryStore.getState().replaceAll(registry);
+  // Fire-and-forget eager preload — kicks off one IDB read +
+  // createImageBitmap per unique texture path. The cache bumps
+  // `texturesEpoch` as each completes, which re-renders subscribed
+  // canvases. Without preload the bitmaps would still arrive lazily
+  // on first paint, but the user would see a single frame of flat
+  // colors before they pop in.
+  preloadTextureBitmaps(projectId);
 
   const scenePath = resolveActiveScenePath(projectId, manifest?.startScene);
 
