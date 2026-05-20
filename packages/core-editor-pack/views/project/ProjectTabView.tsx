@@ -1,9 +1,9 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { EmptyState } from "../components/ui/EmptyState";
+import { EmptyState } from "@cardboard/editor-shell";
 
 /**
- * ProjectView — Phase 2 stub.
+ * ProjectTabView — Phase 2 stub (migrated into core-editor-pack at P5b).
  *
  * The previous implementation was wiped 2026-05-18 to reset the
  * editor's view layer from a known foundation: design system (Phase 0)
@@ -12,30 +12,25 @@ import { EmptyState } from "../components/ui/EmptyState";
  *
  * Mockup:    Editor Design/ProjectManagement.png
  * Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1.4 (Project)
- *
- * KEEP: the named `WorkflowMode` export — EditorShell imports it for
- * its tab-id → ProjectView prop typing. Wave A may collapse this once
- * the shell's call site is rewritten, but for the stub we preserve it.
  */
-
-export type WorkflowMode = "scene" | "prefabs" | "scripts" | "assets" | "animation";
-
-export interface ProjectViewProps {
-  projectId: string;
-  onBackHome: () => void;
-  workflowMode?: WorkflowMode;
+export interface ProjectTabViewProps {
+  /** Widened — kept for compatibility with the shell-side
+   *  ViewComponent signature. */
+  [key: string]: unknown;
 }
 
-export function ProjectView(_props: ProjectViewProps): React.JSX.Element {
+export function ProjectTabView(
+  _props: ProjectTabViewProps = {},
+): React.JSX.Element {
   return (
     <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState
           icon={<Construction size={28} />}
-          title="Project workflow — coming soon"
+          title="Project — coming soon"
           description="This page is being rebuilt. Mockup: Editor Design/ProjectManagement.png · Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1.4"
         />
       </div>
   );
 }
 
-export default ProjectView;
+export default ProjectTabView;

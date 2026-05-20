@@ -14,45 +14,46 @@ import {
   GitBranch,
   Check,
 } from "lucide-react";
+// HomeScreen migrated into the core-editor-pack during P5b
+// (CORE_EDITOR_PACK.md §10 P5b). Host-singleton-dependent symbols
+// (EditorProjectStore + IDB types, importPack* helpers, assetUrl,
+// useStatusBar + StatusBarSection, EmptyState) route through the
+// shell SDK so they share host identity. Presentational primitives
+// (Button, Card, Modal, Tooltip, etc.) live in `apps/editor/src/
+// components/ui/*` and bundle into the pack via relative paths —
+// same convention every other pack-shipped panel uses.
 import {
   EditorProjectStore,
-  type ProjectMeta,
-} from "../lib/EditorProjectStore";
-import {
   importPackFromBlob,
   importPackFromUrl,
-} from "../lib/importPack";
-import { assetUrl } from "../lib/assetUrl";
+  assetUrl,
+  useStatusBar,
+  EmptyState,
+  useRoute,
+  buildHash,
+  type ProjectMeta,
+  type StatusBarSection,
+} from "@cardboard/editor-shell";
 
-// Specific-path imports are kept here from the era when the legacy
-// `ui.tsx` shadowed the `ui/index.ts` barrel under Node-style
-// resolution. The legacy file has been deleted (see audit dispatch),
-// so these could equivalently be folded into a single
-// `import { ... } from "../components/ui"` line — left specific for
-// now to minimise diff churn.
-import { Button } from "../components/ui/Button";
+import { Button } from "../../../apps/editor/src/components/ui/Button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "../components/ui/Card";
-import { TextInput } from "../components/ui/TextInput";
-import { Textarea } from "../components/ui/Textarea";
-import { Modal } from "../components/ui/Modal";
-import { EmptyState } from "../components/ui/EmptyState";
-import { Badge } from "../components/ui/Badge";
-import { FilePicker } from "../components/ui/FilePicker";
-import { IconButton } from "../components/ui/IconButton";
-import { KeyValueList } from "../components/ui/KeyValueList";
-import { PanelHeader } from "../components/ui/PanelHeader";
-import { ScrollArea } from "../components/ui/ScrollArea";
-import { StatsBlock } from "../components/ui/StatsBlock";
-
-import { useStatusBar } from "../shell/StatusBarContext";
-import type { StatusBarSection } from "../components/ui/StatusBar";
-import { Tooltip } from "../components/ui/Tooltip";
-import { cn } from "../lib/cn";
+} from "../../../apps/editor/src/components/ui/Card";
+import { TextInput } from "../../../apps/editor/src/components/ui/TextInput";
+import { Textarea } from "../../../apps/editor/src/components/ui/Textarea";
+import { Modal } from "../../../apps/editor/src/components/ui/Modal";
+import { Badge } from "../../../apps/editor/src/components/ui/Badge";
+import { FilePicker } from "../../../apps/editor/src/components/ui/FilePicker";
+import { IconButton } from "../../../apps/editor/src/components/ui/IconButton";
+import { KeyValueList } from "../../../apps/editor/src/components/ui/KeyValueList";
+import { PanelHeader } from "../../../apps/editor/src/components/ui/PanelHeader";
+import { ScrollArea } from "../../../apps/editor/src/components/ui/ScrollArea";
+import { StatsBlock } from "../../../apps/editor/src/components/ui/StatsBlock";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import { cn } from "../../../apps/editor/src/lib/cn";
 
 /** Helper: build the two-stage tooltip stages for a label + description. */
 function tipStages(label: string, description: string) {
@@ -141,23 +142,32 @@ const STARTER_TEMPLATES: ReadonlyArray<{
   },
 ];
 
-interface HomeScreenProps {
-  onOpenProject: (id: string) => void;
-  /**
-   * Id of the project that is currently "active" — i.e. the one
-   * carried in the URL hash (`#/p/<id>` or `#/p/<id>/<tab>`). When
-   * set, Home highlights that project in both the recents list and
-   * the main grid so the user can see which project will be re-
-   * entered when they click a non-Home tab. Null when on the bare
-   * `#/` route (no current project).
-   */
-  currentProjectId?: string | null;
+/**
+ * Props are widened to the shell-side `ViewComponent` signature — the
+ * editor shell mounts pack-contributed views WITHOUT supplying any
+ * props. HomeScreen reads the active project id off the URL hash via
+ * `useRoute()` and drives navigation through `buildHash` instead of an
+ * `onOpenProject` callback. The previous prop-driven shape predated
+ * P5b — see the migration note at the top of the file.
+ */
+export interface HomeScreenProps {
+  [key: string]: unknown;
 }
 
-export function HomeScreen({
-  onOpenProject,
-  currentProjectId = null,
-}: HomeScreenProps) {
+export function HomeScreen(_props: HomeScreenProps = {}): React.JSX.Element {
+  // Route-driven currentProjectId + "open project" navigation. The shell
+  // shell narrows `route.tab` separately; we only need the projectId
+  // here. Picking a project lands the user on the Scene tab — the
+  // canonical workflow entry — and stamps the hash with both segments
+  // so reload/back/forward all keep working.
+  const [route, navigate] = useRoute();
+  const currentProjectId = route.projectId ?? null;
+  const onOpenProject = React.useCallback(
+    (id: string) => {
+      navigate(buildHash(id, "scene"));
+    },
+    [navigate],
+  );
   const [projects, setProjects] = React.useState<ProjectMeta[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);

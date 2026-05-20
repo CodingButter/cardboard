@@ -381,6 +381,21 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const buildHash = __mod.buildHash;
               export const useEditorPackPanels = __mod.useEditorPackPanels;
               export const useEditorPacksLoaded = __mod.useEditorPacksLoaded;
+              // P5b — view-migration constants. SET_TAB_EVENT is a
+              // string identity, EditorProjectStore is a module-level
+              // IDB singleton, importPack* + assetUrl + useStatusBar
+              // are each host-bound. Type-only specifiers
+              // (SetTabEventDetail / WorkflowMode / ProjectMeta /
+              // AssetMeta / StatusBarSection) compile away so they
+              // need no runtime line here — but TypeScript still
+              // resolves them through this stub module via the
+              // ambient .d.ts surface the shell publishes.
+              export const SET_TAB_EVENT = __mod.SET_TAB_EVENT;
+              export const EditorProjectStore = __mod.EditorProjectStore;
+              export const importPackFromBlob = __mod.importPackFromBlob;
+              export const importPackFromUrl = __mod.importPackFromUrl;
+              export const assetUrl = __mod.assetUrl;
+              export const useStatusBar = __mod.useStatusBar;
             `,
           }));
         },

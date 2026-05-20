@@ -61,6 +61,40 @@ import {
   useEditorPackPanels,
   useEditorPacksLoaded,
 } from "./editorPackLoader";
+// P5b — view-migration constants/types. SET_TAB_EVENT + SetTabEventDetail
+// were owned by AssetsView pre-migration; WorkflowMode by ProjectView.
+// Both files moved into the core-editor-pack, but the constants/types
+// belong in the SHELL so any pack (core or third-party) can dispatch
+// tab-switch intents or type a ProjectView-style body mode. See
+// `./shellEvents.ts` for the canonical declarations.
+import {
+  SET_TAB_EVENT,
+  type SetTabEventDetail,
+  type WorkflowMode,
+} from "./shellEvents";
+// P5b — re-export EditorProjectStore singleton + types. HomeScreen
+// migrated into the pack but it owns the create / list / rename / delete
+// flow that writes to the editor's IDB store. The store is a
+// module-level singleton (one open IndexedDB connection per origin) —
+// bundling a duplicate inside the pack would crash IDB's "concurrent
+// open" guard. Same dogfooding contract: a third-party Home replacement
+// would reach for the same surface.
+import {
+  EditorProjectStore,
+  type ProjectMeta,
+  type AssetMeta,
+} from "../lib/EditorProjectStore";
+// P5b — importPack helpers. HomeScreen wires the "import a .apg" + "open
+// pack from URL" flows; both helpers wrap IDB writes + manifest
+// validation against the shared store. Bundling duplicates would fork
+// the (memoized) zip-read pipeline + lose access to the singleton store.
+import { importPackFromBlob, importPackFromUrl } from "../lib/importPack";
+// P5b — assetUrl + StatusBar context + StatusBarSection type. HomeScreen
+// uses assetUrl() to resolve the Cardboard.apg template against the
+// editor's deploy base + pushes StatusBar sections during its mount.
+import { assetUrl } from "../lib/assetUrl";
+import { useStatusBar } from "../shell/StatusBarContext";
+import type { StatusBarSection } from "../components/ui/StatusBar";
 
 /**
  * P3 batch D-light — narrow public surface over `tileTextureCache`.
@@ -227,9 +261,34 @@ export const shellSdk = {
   buildHash,
   useEditorPackPanels,
   useEditorPacksLoaded,
+  // P5b — view-migration constants. SET_TAB_EVENT is the cross-view
+  // navigation event name; the shell registers its listener against
+  // this exact string, so pack-side dispatchers MUST use the same
+  // constant. The store + helpers below are the surface HomeScreen
+  // (now pack-shipped) reaches for to drive project create / list /
+  // import flows. Each is a host-side singleton — IDB connection,
+  // memoized fetch pipeline, React Context — that bundling would fork.
+  SET_TAB_EVENT,
+  EditorProjectStore,
+  importPackFromBlob,
+  importPackFromUrl,
+  assetUrl,
+  useStatusBar,
 } as const;
 
 export type ShellSdk = typeof shellSdk;
+
+// P5b — type-only re-exports for pack code. Types compile away so they
+// don't need a runtime slot, but TypeScript needs them exposed from the
+// SDK module shape to follow `import type { ... } from "@cardboard/editor-shell"`.
+// The pack-builder's stub module re-exports them as `export type` lines.
+export type {
+  SetTabEventDetail,
+  WorkflowMode,
+  ProjectMeta,
+  AssetMeta,
+  StatusBarSection,
+};
 
 declare global {
   // eslint-disable-next-line no-var

@@ -1,9 +1,9 @@
 import React from "react";
 import { Blocks } from "lucide-react";
-import { EmptyState } from "../components/ui/EmptyState";
+import { EmptyState } from "@cardboard/editor-shell";
 
 /**
- * Components — Phase 2 stub.
+ * Components — Phase 2 stub (migrated into core-editor-pack at P5b).
  *
  * The Component Builder page where users will author manifest.components[]
  * schemas: component name + tags + property fields (type, default,
@@ -16,10 +16,12 @@ import { EmptyState } from "../components/ui/EmptyState";
  * Next: Wave A page-layout agent + Wave B page-local components.
  */
 export interface ComponentsViewProps {
-  projectId: string;
+  /** Widened — kept for compatibility with the shell-side
+   *  ViewComponent signature. */
+  [key: string]: unknown;
 }
 
-export function ComponentsView(_props: ComponentsViewProps): React.JSX.Element {
+export function ComponentsView(_props: ComponentsViewProps = {}): React.JSX.Element {
   return (
     <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState

@@ -1,9 +1,9 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { EmptyState } from "../components/ui/EmptyState";
+import { EmptyState } from "@cardboard/editor-shell";
 
 /**
- * ScriptsView — Phase 2 stub.
+ * ScriptsView — Phase 2 stub (migrated into core-editor-pack at P5b).
  *
  * The previous implementation was wiped 2026-05-18 to reset the
  * editor's view layer from a known foundation: design system (Phase 0)
@@ -12,15 +12,14 @@ import { EmptyState } from "../components/ui/EmptyState";
  *
  * Mockup:    Editor Design/Scripting.png
  * Inventory: docs/EDITOR_DESIGN_INVENTORY.md §1.6 (Scripts)
- *
- * The Monaco ambient typings in `scripts/modApiTypes.ts` survived the
- * wipe — they're foundational for whatever IDE surface Wave A picks.
  */
 export interface ScriptsViewProps {
-  projectId: string;
+  /** Widened — kept for compatibility with the shell-side
+   *  ViewComponent signature. */
+  [key: string]: unknown;
 }
 
-export function ScriptsView(_props: ScriptsViewProps): React.JSX.Element {
+export function ScriptsView(_props: ScriptsViewProps = {}): React.JSX.Element {
   return (
     <div className="h-full w-full p-6 flex items-center justify-center">
         <EmptyState

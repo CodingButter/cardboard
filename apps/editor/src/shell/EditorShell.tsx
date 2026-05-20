@@ -1,10 +1,5 @@
 import React from "react";
-import {
-  FolderOpen,
-  Palette,
-  AudioLines,
-  LayoutPanelTop,
-} from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { useRoute, buildHash } from "../lib/router";
 import { resolveSceneLabel } from "../lib/sceneLabel";
 import {
@@ -13,13 +8,14 @@ import {
   type AssetMeta,
 } from "../lib/EditorProjectStore";
 import type { PackManifest } from "@two_5_d/engine";
-import { HomeScreen } from "../views/HomeScreen";
-import { ProjectView, type WorkflowMode } from "../views/ProjectView";
-import { ProjectTabView } from "../views/project/ProjectTabView";
-import { AssetsView } from "../views/AssetsView";
-import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
-import { ScriptsView } from "../views/ScriptsView";
-import { ComponentsView } from "../views/ComponentsView";
+// P5b — every shell-side view migrated into the core-editor-pack. The
+// shell-side imports for HomeScreen / ProjectView / ProjectTabView /
+// AssetsView / ScriptsView / ComponentsView are gone; their views are
+// now resolved through the pack-contributed view registry. SET_TAB_EVENT
+// + SetTabEventDetail (formerly defined inside AssetsView) moved into
+// the shell SDK at `../packs/shellEvents.ts` so any pack can dispatch
+// a tab-switch.
+import { SET_TAB_EVENT, type SetTabEventDetail } from "../packs/shellEvents";
 import { EditorSettingsModal } from "../views/EditorSettingsModal";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Tooltip } from "../components/ui/Tooltip";
@@ -117,22 +113,16 @@ function isRegisteredTabId(value: string | null): value is PrimaryTabId {
  *     `key={mode}` to force a remount whenever the shell flips a tab.
  */
 
+/** Tabs that persist a `cardboard_editor_workflow_mode_<projectId>`
+ *  localStorage key so a fresh-tab open with no hash can rehydrate to
+ *  the user's last workflow tab. Strictly a preference cache — the
+ *  shell no longer renders a ProjectView body off this list (every
+ *  workflow view comes from the pack-contributed view registry). */
 const PROJECT_WORKFLOW_TABS: ReadonlyArray<PrimaryTabId> = [
   "scene",
   "prefabs",
   "animation",
-  // R4e promoted `scripts` out — it renders its own top-level
-  // ScriptsView with a Monaco-backed editor (lazy-loaded).
-];
-
-/** Tabs that have an actual implementation today. Other project-
- *  scoped tabs render an EmptyState. R4f promoted `project` out of
- *  this list — see `ProjectTabView`. R4g promoted `assets` out — see
- *  `AssetsView`. */
-const PROJECT_PLACEHOLDER_TABS: ReadonlyArray<PrimaryTabId> = [
-  "imageLab",
-  "soundLab",
-  "uiBuilder",
+  "scripts",
 ];
 
 export function EditorShell() {
@@ -461,7 +451,10 @@ export function EditorShell() {
   // Settings modal (cog).
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
-  const projectName = meta?.name ?? "";
+  // `hasProject` gates the tab strip (non-Home tabs are disabled when
+  // no project is open). The TopBar no longer reads the project name —
+  // any pack-shipped chrome that wants the project label reads `meta`
+  // directly through `EditorProjectStore`.
   const hasProject = projectId !== null && meta !== null;
 
   return (
@@ -481,19 +474,21 @@ export function EditorShell() {
           <TabContextSlotProvider>
             <CommandPalette />
             <ShellChrome
-              projectName={projectName}
               tab={tab}
               setTab={setTab}
               hasProject={hasProject}
               projectId={projectId}
               onOpenProject={(id) => {
-                // Picking a project from Home lands the user on Scene
-                // (the canonical workflow entry) and stamps the hash
-                // with both segments so reload/back/forward all work.
+                // Picking a project from Home (or via the palette's
+                // dynamic `homescreen.openProject.<id>` entries) lands
+                // the user on Scene (the canonical workflow entry) and
+                // stamps the hash with both segments so reload/back/
+                // forward all work. Also nudges the project-metadata
+                // refresh tick so the new project's manifest +
+                // scene list reload promptly.
                 navigate(buildHash(id, "scene"));
                 setRefreshTick((n) => n + 1);
               }}
-              onProjectMutated={() => setRefreshTick((n) => n + 1)}
               // "Back to Home" preserves the current project segment so
               // Home highlights it and subsequent tab clicks re-enter
               // the same project without re-picking.
@@ -512,13 +507,14 @@ export function EditorShell() {
 }
 
 interface ShellChromeProps {
-  projectName: string;
   tab: PrimaryTabId;
   setTab: (next: PrimaryTabId) => void;
   hasProject: boolean;
   projectId: string | null;
+  /** Closes over a `navigate(buildHash(id, "scene"))` call — surfaced
+   *  through ShellChrome so the dynamic `homescreen.openProject.<id>`
+   *  palette commands stay reachable from any tab. */
   onOpenProject: (id: string) => void;
-  onProjectMutated: () => void;
   onNavigateHome: () => void;
   onOpenSettings: () => void;
 }
@@ -531,13 +527,11 @@ interface ShellChromeProps {
  * (`useEditorActions`) — both require being inside the provider.
  */
 function ShellChrome({
-  projectName,
   tab,
   setTab,
   hasProject,
   projectId,
   onOpenProject,
-  onProjectMutated,
   onNavigateHome,
   onOpenSettings,
 }: ShellChromeProps) {
@@ -786,14 +780,12 @@ function ShellChrome({
         <ShellBody
           tab={tab}
           projectId={projectId}
-          onOpenProject={onOpenProject}
-          onProjectMutated={onProjectMutated}
           onNavigateHome={onNavigateHome}
         />
       </main>
-      {/* `projectId` is intentionally threaded through ShellBody so
-          HomeScreen can read it as `currentProjectId` and highlight
-          the active project even when rendered without a tab segment. */}
+      {/* The pack-contributed Home view reads `route.projectId` from
+          the shell SDK's `useRoute()` hook — no shell-supplied prop
+          required. Same for every other view in the registry. */}
     </div>
   );
 }
@@ -801,44 +793,39 @@ function ShellChrome({
 interface ShellBodyProps {
   tab: PrimaryTabId;
   projectId: string | null;
-  onOpenProject: (id: string) => void;
-  onProjectMutated: () => void;
   onNavigateHome: () => void;
 }
 
-function ShellBody({
-  tab,
-  projectId,
-  onOpenProject,
-  onNavigateHome,
-}: ShellBodyProps) {
-  // P4 — view registry lookup. The core-editor-pack registers
-  // MapView under "scene" and PrefabsView under "prefabs"; the shell
-  // renders whatever the pack contributed via the registry. Tabs that
-  // still have a shell-side view (HomeScreen, ProjectTabView,
-  // AssetsView, ScriptsView, ComponentsView, the placeholder labs,
-  // ProjectView) fall through to the legacy branches below until a
-  // future commit migrates them into the pack too.
+function ShellBody({ tab, projectId, onNavigateHome }: ShellBodyProps) {
+  // P5b — view-registry-driven body. Every primary tab resolves through
+  // the pack-contributed view registry. The shell no longer hardcodes a
+  // branch per tab; it asks the registry for `tab` (and falls back to
+  // `home` for the bare `#/` route + the per-tab "no project open"
+  // empty state when needed).
+  //
+  // Disable the core-editor-pack and the registry returns null for every
+  // tab — the shell renders the "no editor pack" empty state, which is
+  // the dogfooding proof: the shell does not depend on any specific
+  // pack to boot.
   const PackView = useRegisteredView(tab);
 
-  // Home: always rendered as-is. HomeScreen lists every project and
-  // lets the user open one. When `projectId` is set (route is
-  // `#/p/<id>` with no tab segment) Home highlights that project so
-  // the user can see which one they'll re-enter when picking a
-  // workflow tab.
+  // Home is the only tab that may render without an open project (it IS
+  // the project picker). Every other tab requires a projectId before
+  // the registry's view can do meaningful work.
   if (tab === "home") {
+    if (PackView === null) {
+      return (
+        <NoEditorPackEmptyState onNavigateHome={onNavigateHome} />
+      );
+    }
     return (
       <div className="h-full overflow-auto">
-        <HomeScreen
-          onOpenProject={onOpenProject}
-          currentProjectId={projectId}
-        />
+        <PackView />
       </div>
     );
   }
 
-  // Every other tab needs an open project. If none, render an empty
-  // state that nudges the user back to Home.
+  // Every non-Home tab needs an open project.
   if (!projectId) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -878,68 +865,11 @@ function ShellBody({
     );
   }
 
-  if (PROJECT_PLACEHOLDER_TABS.includes(tab)) {
-    const meta = PLACEHOLDER_COPY[tab as keyof typeof PLACEHOLDER_COPY];
-    return (
-      <div className="h-full flex items-center justify-center">
-        <EmptyState
-          icon={meta.icon}
-          title={meta.title}
-          description={meta.description}
-        />
-      </div>
-    );
-  }
-
-  // R4f: Project tab renders the new top-level surface, not ProjectView.
-  if (tab === "project") {
-    return (
-      <div className="h-full overflow-hidden">
-        <ProjectTabView key={`project::${projectId}`} projectId={projectId} />
-      </div>
-    );
-  }
-
-  // R4g: Assets tab renders the new asset browser.
-  if (tab === "assets") {
-    return (
-      <div className="h-full overflow-hidden">
-        <AssetsView key={`assets::${projectId}`} projectId={projectId} />
-      </div>
-    );
-  }
-
-  // R4e: Scripts tab renders the Monaco-backed script editor.
-  // The Monaco bundle itself lazy-loads on first mount; this thin
-  // wrapper is in the main bundle.
-  if (tab === "scripts") {
-    return (
-      <div className="h-full overflow-hidden">
-        <ScriptsView key={`scripts::${projectId}`} projectId={projectId} />
-      </div>
-    );
-  }
-
-  // Components tab — the Component Builder where users author
-  // manifest.components[] schemas. Stubbed for now; see
-  // docs/EDITOR_DESIGN_INVENTORY.md §1 (Component Builder).
-  if (tab === "components") {
-    return (
-      <div className="h-full overflow-hidden">
-        <ComponentsView
-          key={`components::${projectId}`}
-          projectId={projectId}
-        />
-      </div>
-    );
-  }
-
-  // Scene + Prefabs tabs route through the pack-contributed view
-  // registry (CORE_EDITOR_PACK.md §10 P4). The core-editor-pack
-  // registers MapView under "scene" and PrefabsView under "prefabs";
-  // the shell here is fully dynamic — `PackView` is whichever
-  // component the pack contributed.
-  if (PackView !== null && (tab === "scene" || tab === "prefabs")) {
+  // Registry hit — render the pack-contributed view. `key` carries
+  // projectId so opening a different project cleanly remounts the view
+  // (and its IDB-backed state); the tab change itself reuses the same
+  // mount when possible.
+  if (PackView !== null) {
     return (
       <div className="h-full overflow-hidden">
         <PackView key={`${tab}::${projectId}`} />
@@ -947,48 +877,64 @@ function ShellBody({
     );
   }
 
-  // Real project-workflow tabs: Prefabs / Animation.
-  // ProjectView is the existing monolith that switches its body based
-  // on the `workflowMode` prop we feed in here. We keep `key={projectId}`
-  // so opening a different project still cleanly remounts the view
-  // (and its iframe/asset state), but the workflow-mode tab change no
-  // longer triggers a remount — the prop simply updates.
+  // Registry miss — a tab descriptor exists but no view was contributed
+  // (or every pack contributing views is disabled). Render the no-pack
+  // empty state with a hint at the missing view id.
   return (
-    <div className="h-full overflow-hidden">
-      <ProjectView
-        key={projectId}
-        projectId={projectId}
-        workflowMode={tab as WorkflowMode}
-        onBackHome={onNavigateHome}
+    <NoEditorPackEmptyState
+      onNavigateHome={onNavigateHome}
+      hint={`No view registered for "${tab}". Enable a pack that contributes one.`}
+    />
+  );
+}
+
+/** Empty state shown when the shell has no view to render — either
+ *  because no editor pack is enabled, or because the active tab id
+ *  doesn't resolve to a registry entry. Dogfooding proof: the shell is
+ *  fully functional without any pack; it just renders this. */
+function NoEditorPackEmptyState({
+  onNavigateHome,
+  hint,
+}: {
+  onNavigateHome: () => void;
+  hint?: string;
+}): React.JSX.Element {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <EmptyState
+        icon={<FolderOpen size={28} />}
+        title="No editor extensions enabled"
+        description={
+          hint ??
+          "Enable an editor pack from Editor Settings → Extensions to see views, tabs, and panels here."
+        }
+        action={
+          <Tooltip
+            stages={[
+              { delay: 1000, content: <span>Go to Home</span> },
+              {
+                delay: 3000,
+                content: (
+                  <div>
+                    <div className="font-semibold">Go to Home</div>
+                    <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
+                      Drops the URL hash so the shell falls back to the
+                      registered Home view (when any pack contributes one).
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          >
+            <button
+              onClick={onNavigateHome}
+              className="inline-flex items-center justify-center rounded-md bg-amber-500 text-zinc-950 hover:bg-amber-400 h-8 px-3 text-xs font-medium"
+            >
+              Go to Home
+            </button>
+          </Tooltip>
+        }
       />
     </div>
   );
 }
-
-const PLACEHOLDER_COPY: Record<
-  "imageLab" | "soundLab" | "uiBuilder",
-  {
-    icon: React.ReactNode;
-    title: string;
-    description: string;
-  }
-> = {
-  imageLab: {
-    icon: <Palette size={28} />,
-    title: "Image Lab — coming soon",
-    description:
-      "Procedural image generation for tiles, sprites, and skyboxes. See docs/plans/IMAGE_LAB.md (in design now).",
-  },
-  soundLab: {
-    icon: <AudioLines size={28} />,
-    title: "Sound Lab — coming soon",
-    description:
-      "Procedural sound and music generation: SFX synthesis, music patterns, ambient beds. See docs/plans/SOUND_LAB.md (in design now).",
-  },
-  uiBuilder: {
-    icon: <LayoutPanelTop size={28} />,
-    title: "UI Builder — coming soon",
-    description:
-      "Visual editor for pack UI. Drag-drop builder outputs structured JSON trees that the engine renders at runtime. See #212.",
-  },
-};

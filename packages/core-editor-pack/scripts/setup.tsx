@@ -63,6 +63,18 @@ import {
 } from "lucide-react";
 import { MapView } from "../views/MapView";
 import { PrefabsView } from "../views/PrefabsView";
+// P5b — the remaining 6 shell-side views migrated into the pack.
+// HomeScreen, AssetsView, ProjectView, ProjectTabView, ScriptsView, and
+// ComponentsView all register through `ctx.registerView(...)` alongside
+// MapView + PrefabsView. After this commit the editor's `views/`
+// directory contains ONLY EditorSettingsModal + settings/ExtensionsTab
+// (the recovery surface), per CORE_EDITOR_PACK.md §3.3.
+import { HomeScreen } from "../views/HomeScreen";
+import { AssetsView } from "../views/AssetsView";
+import { ProjectView } from "../views/ProjectView";
+import { ProjectTabView } from "../views/project/ProjectTabView";
+import { ScriptsView } from "../views/ScriptsView";
+import { ComponentsView } from "../views/ComponentsView";
 import { SCENE_DEFAULT_LAYOUT } from "../layouts/scene-default";
 import { PREFABS_DEFAULT_LAYOUT } from "../layouts/prefabs-default";
 // P5 — predefined Scene-page layouts moved out of the shell-side
@@ -277,6 +289,24 @@ export default function setup(ctx: EditorPackContext): () => void {
     // route the active primary tab.
     ctx.registerView("scene", MapView),
     ctx.registerView("prefabs", PrefabsView),
+    // P5b — the remaining shell-side views. Each one was a stub in
+    // `apps/editor/src/views/` that EditorShell hardcoded a branch
+    // for; the shell's <ShellBody/> now falls through to the registry
+    // lookup. EditorSettingsModal + settings/ExtensionsTab stay
+    // shell-side (recovery surface — see CORE_EDITOR_PACK.md §3.3).
+    //
+    // HomeScreen is registered against the "home" tab id; the shell
+    // matches the route's tab segment (null → "home") so the registry
+    // entry surfaces whenever the user lands on the bare or
+    // project-scoped Home route. Prop-less by convention — HomeScreen
+    // reads `useRoute()` for the current project and dispatches
+    // `buildHash(id, "scene")` to open one.
+    ctx.registerView("home", HomeScreen),
+    ctx.registerView("assets", AssetsView),
+    ctx.registerView("project", ProjectTabView),
+    ctx.registerView("scripts", ScriptsView),
+    ctx.registerView("components", ComponentsView),
+    ctx.registerView("animation", ProjectView),
     // P4 — default-layout contributions. Each view shell reads
     // `useDefaultLayout(viewId)` to find these.
     ctx.registerLayout("scene", SCENE_DEFAULT_LAYOUT),
