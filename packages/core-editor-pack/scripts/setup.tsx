@@ -67,6 +67,37 @@ import { MinimapPanel, MANIFEST as MINIMAP_MANIFEST } from "../panels/MinimapPan
 import { CellInspectorPanel, MANIFEST as CELL_INSPECTOR_MANIFEST } from "../panels/CellInspectorPanel";
 import { PrefabBrowserPanel, MANIFEST as PREFAB_BROWSER_MANIFEST } from "../panels/PrefabBrowserPanel";
 import { PreviewPanel, MANIFEST as PREVIEW_MANIFEST } from "../panels/PreviewPanel";
+// P3 prefabs batch — the six Prefabs-view panels migrate together as
+// the final view-panel sweep before P4 absorbs the view shells
+// themselves. ComponentEditor + EntityHeader + EntityList feed off
+// the mock entity fixtures; EntityDropZone is the file-import target;
+// EntityPreview is a THREE.js mini-stage that derives its scene from
+// the active entity's components; JsonPreview is the live serialised-
+// definition readout with Save & Test / Copy JSON affordances.
+import {
+  ComponentEditorPanel,
+  MANIFEST as COMPONENT_EDITOR_MANIFEST,
+} from "../panels/prefabs/ComponentEditorPanel";
+import {
+  EntityDropZonePanel,
+  MANIFEST as ENTITY_DROP_ZONE_MANIFEST,
+} from "../panels/prefabs/EntityDropZonePanel";
+import {
+  EntityHeaderPanel,
+  MANIFEST as ENTITY_HEADER_MANIFEST,
+} from "../panels/prefabs/EntityHeaderPanel";
+import {
+  EntityListPanel,
+  MANIFEST as ENTITY_LIST_MANIFEST,
+} from "../panels/prefabs/EntityListPanel";
+import {
+  EntityPreviewPanel,
+  MANIFEST as ENTITY_PREVIEW_MANIFEST,
+} from "../panels/prefabs/EntityPreviewPanel";
+import {
+  JsonPreviewPanel,
+  MANIFEST as JSON_PREVIEW_MANIFEST,
+} from "../panels/prefabs/JsonPreviewPanel";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // Compose each panel def the same way MapView's old static `PANELS`
@@ -176,6 +207,39 @@ export default function setup(ctx: EditorPackContext): () => void {
     ctx.registerPanel({
       ...PREVIEW_MANIFEST,
       component: PreviewPanel,
+    }),
+    // P3 prefabs batch — Prefabs-view panels. EntityHeader was the
+    // only one PrefabsView previously registered with an explicit
+    // `surface: true` flag (the form strip card chrome differentiates
+    // it from the larger ComponentEditor body below); JsonPreview was
+    // explicitly `surface: false` (the monospace block fills the dock
+    // group flush, no card chrome). Preserve both flags verbatim. The
+    // remaining four use default surface flags.
+    ctx.registerPanel({
+      ...ENTITY_PREVIEW_MANIFEST,
+      component: EntityPreviewPanel,
+    }),
+    ctx.registerPanel({
+      ...ENTITY_LIST_MANIFEST,
+      component: EntityListPanel,
+    }),
+    ctx.registerPanel({
+      ...ENTITY_DROP_ZONE_MANIFEST,
+      component: EntityDropZonePanel,
+    }),
+    ctx.registerPanel({
+      ...ENTITY_HEADER_MANIFEST,
+      component: EntityHeaderPanel,
+      surface: true,
+    }),
+    ctx.registerPanel({
+      ...COMPONENT_EDITOR_MANIFEST,
+      component: ComponentEditorPanel,
+    }),
+    ctx.registerPanel({
+      ...JSON_PREVIEW_MANIFEST,
+      component: JsonPreviewPanel,
+      surface: false,
     }),
   ];
 

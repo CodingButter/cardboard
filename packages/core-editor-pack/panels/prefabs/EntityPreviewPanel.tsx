@@ -1,3 +1,19 @@
+// P3 prefabs batch migration. Moved from
+// `apps/editor/src/views/prefabs/panels/EntityPreviewPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import paths
+// flipped to pack-relative for presentational primitives and SDK-routed
+// for `registerCommand`.
+//
+// `three` ships as a pack dependency (already added for `PreviewPanel`
+// in P3 batch D-final), so the duplicate-THREE warning that previously
+// appeared when both pack and shell pulled `three` independently is now
+// gone — the pack-builder bundles `three` from the same workspace
+// `node_modules/three` instance the editor already uses.
+//
+// `buildPreviewScene` / `buildEntityVisual` stay panel-local — they're
+// private THREE.js scene-graph constructors with no third-party-pack
+// utility. A custom-preview pack would build its own scene chrome from
+// scratch.
 import React from "react";
 import * as THREE from "three";
 import {
@@ -8,10 +24,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import { MOCK_ENTITIES, type EntityRow } from "../prefabs-fixtures";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle.
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `registerCommand` must run against the host's
+// `useCommandStore` singleton.
+import { registerCommand } from "@cardboard/editor-shell";
+import { MOCK_ENTITIES, type EntityRow } from "./prefabs-fixtures";
 
 /**
  * EntityPreviewPanel — small 3D preview of the SELECTED entity.

@@ -10,30 +10,17 @@ import {
   type DockPanelDef,
 } from "../components/dock/DockShell";
 import { WorkspaceRail } from "../components/dock/WorkspacePanel";
+// All six Prefabs-view panels migrated to the core-editor-pack
+// (P3 prefabs batch): ComponentEditor, EntityDropZone, EntityHeader,
+// EntityList, EntityPreview, JsonPreview. The pack's
+// `scripts/setup.tsx` calls `ctx.registerPanel(...)` for each at load
+// time; the defs merge into the live registry via
+// `useEditorPackPanels()` below — identical pattern to MapView's
+// drained PANELS array (CORE_EDITOR_PACK.md §10).
 import {
-  EntityPreviewPanel,
-  MANIFEST as ENTITY_PREVIEW_MANIFEST,
-} from "./prefabs/panels/EntityPreviewPanel";
-import {
-  EntityListPanel,
-  MANIFEST as ENTITY_LIST_MANIFEST,
-} from "./prefabs/panels/EntityListPanel";
-import {
-  EntityDropZonePanel,
-  MANIFEST as ENTITY_DROP_ZONE_MANIFEST,
-} from "./prefabs/panels/EntityDropZonePanel";
-import {
-  EntityHeaderPanel,
-  MANIFEST as ENTITY_HEADER_MANIFEST,
-} from "./prefabs/panels/EntityHeaderPanel";
-import {
-  ComponentEditorPanel,
-  MANIFEST as COMPONENT_EDITOR_MANIFEST,
-} from "./prefabs/panels/ComponentEditorPanel";
-import {
-  JsonPreviewPanel,
-  MANIFEST as JSON_PREVIEW_MANIFEST,
-} from "./prefabs/panels/JsonPreviewPanel";
+  useEditorPackPanels,
+  useEditorPacksLoaded,
+} from "../packs/editorPackLoader";
 import { MOCK_ENTITIES } from "./prefabs/prefabs-fixtures";
 
 /**
@@ -79,20 +66,21 @@ export interface PrefabsViewProps {
 /** Stable panel registry — declared at module scope so each PrefabsView
  *  mount reuses the same component identities. dockview keys panels by
  *  their `contentComponent` string at layout-time, so flipping the
- *  identity of the component would force a full remount. */
+ *  identity of the component would force a full remount.
+ *
+ *  After the P3 prefabs batch, every Prefabs panel is contributed by
+ *  the core-editor-pack and merges in via `useEditorPackPanels()`
+ *  below. The shell-side PANELS array is intentionally empty —
+ *  preserved so future shell-only panels (e.g. a debug-only inspector
+ *  the editor wants to ship without packaging) have a one-line append
+ *  surface. */
 const PANELS: readonly DockPanelDef[] = [
-  // Left column
-  { ...ENTITY_PREVIEW_MANIFEST, component: EntityPreviewPanel },
-  { ...ENTITY_LIST_MANIFEST, component: EntityListPanel },
-  { ...ENTITY_DROP_ZONE_MANIFEST, component: EntityDropZonePanel },
-  // Center column
-  // Entity Header gets a surface card so it reads as a distinct form
-  // strip above the larger Component editor body.
-  { ...ENTITY_HEADER_MANIFEST, component: EntityHeaderPanel, surface: true },
-  { ...COMPONENT_EDITOR_MANIFEST, component: ComponentEditorPanel },
-  // Right column — JSON preview renders flush so the monospace code
-  // area can fill the dock group without a competing card chrome.
-  { ...JSON_PREVIEW_MANIFEST, component: JsonPreviewPanel, surface: false },
+  // EntityPreviewPanel  — core-editor-pack (P3 prefabs batch)
+  // EntityListPanel     — core-editor-pack (P3 prefabs batch)
+  // EntityDropZonePanel — core-editor-pack (P3 prefabs batch)
+  // EntityHeaderPanel   — core-editor-pack (P3 prefabs batch)
+  // ComponentEditorPanel — core-editor-pack (P3 prefabs batch)
+  // JsonPreviewPanel    — core-editor-pack (P3 prefabs batch)
 ];
 
 /** Initial layout JSON — three-column layout matching Entities.png.
@@ -290,6 +278,24 @@ export function PrefabsView(_props: PrefabsViewProps = {}): React.JSX.Element {
     };
   }, []);
 
+  // Editor-pack contributions — fetched async on mount, merged into
+  // the live panel registry once loaded. Identical pattern to MapView
+  // since the P3 prefabs batch landed.
+  const editorPackPanels = useEditorPackPanels();
+  const panels = React.useMemo<readonly DockPanelDef[]>(
+    () => [...PANELS, ...editorPackPanels],
+    [editorPackPanels],
+  );
+
+  // Gate the DockShell mount on the editor-pack load. The default
+  // prefabs layout references panel ids (`entity-preview`, ...) whose
+  // components are contributed by the core-editor-pack. Mounting the
+  // dockview before the pack registers them would crash dockview's
+  // deserializer with "Only React.memo / ForwardRef / functional
+  // components are accepted" — the saved layout names an id whose
+  // `components[id]` is still `undefined`.
+  const packsLoaded = useEditorPacksLoaded();
+
   // Guard rail: if for some reason there's no project (e.g. someone
   // navigates here without one), render a polite empty state rather
   // than mount a dock shell with no persistence key.
@@ -313,18 +319,31 @@ export function PrefabsView(_props: PrefabsViewProps = {}): React.JSX.Element {
   // instance DockShell creates.
   const apiRef = React.useRef<DockviewApi | null>(null);
 
+  // Pre-load splash — see `packsLoaded` note above.
+  if (!packsLoaded) {
+    return (
+      <div className="h-full w-full p-6 flex items-center justify-center">
+        <EmptyState
+          icon={<Construction size={28} />}
+          title="Loading editor packs…"
+          description="Resolving panels contributed by enabled editor packs."
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="h-full w-full min-h-0 flex">
       <WorkspaceRail
         pageId="prefabs"
         storageKey={storageKey}
         apiRef={apiRef}
-        registry={PANELS}
+        registry={panels}
       />
       <div className="flex-1 min-w-0 h-full">
         <DockShell
           storageKey={storageKey}
-          panels={PANELS}
+          panels={panels}
           defaultLayout={defaultLayout}
           apiRef={apiRef}
         />

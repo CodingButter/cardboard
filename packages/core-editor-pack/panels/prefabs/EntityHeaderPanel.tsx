@@ -1,17 +1,27 @@
+// P3 prefabs batch migration. Moved from
+// `apps/editor/src/views/prefabs/panels/EntityHeaderPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import paths
+// flipped to pack-relative for presentational primitives and SDK-routed
+// for `registerCommand`.
+//
 // TODO: wire to selection store + entity store. For now the panel
 // imports MOCK_ENTITIES[0] as if it were the currently-edited
 // entity and keeps its edits in local state (no persistence; reset
 // on remount).
 import React from "react";
 import { FileText, Plus, Pencil } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { Chip } from "../../../components/ui/Chip";
-import { TextInput } from "../../../components/ui/TextInput";
-import { Textarea } from "../../../components/ui/Textarea";
-import { Button } from "../../../components/ui/Button";
-import { registerCommand } from "../../../state/useCommandStore";
-import { MOCK_ENTITIES, type EntityRow } from "../prefabs-fixtures";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitives — safe to bundle.
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+import { Chip } from "../../../../apps/editor/src/components/ui/Chip";
+import { TextInput } from "../../../../apps/editor/src/components/ui/TextInput";
+import { Textarea } from "../../../../apps/editor/src/components/ui/Textarea";
+import { Button } from "../../../../apps/editor/src/components/ui/Button";
+// Externalised — `registerCommand` must run against the host's
+// `useCommandStore` singleton.
+import { registerCommand } from "@cardboard/editor-shell";
+import { MOCK_ENTITIES, type EntityRow } from "./prefabs-fixtures";
 
 /**
  * EntityHeaderPanel — top strip of the Prefabs center column.

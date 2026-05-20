@@ -1,8 +1,17 @@
+// P3 prefabs batch migration. Moved from
+// `apps/editor/src/views/prefabs/panels/EntityDropZonePanel.tsx` into
+// the core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-relative for presentational primitives and
+// SDK-routed for `registerCommand`.
 import React from "react";
 import { Upload } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle.
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `registerCommand` must run against the host's
+// `useCommandStore` singleton.
+import { registerCommand } from "@cardboard/editor-shell";
 
 /**
  * EntityDropZonePanel — dashed drop-target for importing entity

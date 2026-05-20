@@ -1,3 +1,8 @@
+// P3 prefabs batch migration. Moved from
+// `apps/editor/src/views/prefabs/panels/EntityListPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import paths
+// flipped to pack-relative for presentational primitives and SDK-routed
+// for `registerCommand` + `EmptyState`.
 import React from "react";
 import {
   Box,
@@ -10,15 +15,20 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle.
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `EmptyState` transitively imports a binary asset
+// (`logo.png with { type: "file" }`) the pack-builder cannot resolve;
+// `registerCommand` must run against the host's `useCommandStore`
+// singleton.
+import { EmptyState, registerCommand } from "@cardboard/editor-shell";
 import {
   MOCK_ENTITIES,
   type EntityCategory,
   type EntityRow,
-} from "../prefabs-fixtures";
+} from "./prefabs-fixtures";
 
 /**
  * EntityListPanel — vertical scrollable list of every entity (prefab)

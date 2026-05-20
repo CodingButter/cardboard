@@ -1,3 +1,13 @@
+// P3 prefabs batch migration. Moved from
+// `apps/editor/src/views/prefabs/panels/ComponentEditorPanel.tsx` into
+// the core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `./prefabs-fixtures` and the shell-SDK
+// externals. The pack-builder's `cardboard-react-externals` +
+// `cardboard-shell-externals` plugins rewrite `react` and
+// `@cardboard/editor-shell` imports into the host-populated global
+// slots so the host React identity + host command-store are reused
+// across the boundary.
+//
 // TODO: wire to selection store + entity store. For now the panel
 // imports MOCK_ENTITIES[0] as if it were the currently-edited
 // entity and keeps its component edits in local state (no persistence;
@@ -14,14 +24,21 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../../apps/editor/src/components/dock/DockShell";
 import { Layers } from "lucide-react";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { NumberInput } from "../../../components/ui/NumberInput";
-import { TextInput } from "../../../components/ui/TextInput";
-import { ToggleSwitch } from "../../../components/ui/controls";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Presentational primitives — safe to bundle (no singleton state, no
+// host-side React Context to coordinate with).
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+import { NumberInput } from "../../../../apps/editor/src/components/ui/NumberInput";
+import { TextInput } from "../../../../apps/editor/src/components/ui/TextInput";
+import { ToggleSwitch } from "../../../../apps/editor/src/components/ui/controls";
+// Externalised — `EmptyState` transitively imports a binary asset
+// (`logo.png with { type: "file" }`) the pack-builder cannot resolve,
+// so it ships via the SDK; `registerCommand` MUST run against the
+// host's `useCommandStore` singleton so commands surface in the
+// editor's command palette.
+import { EmptyState, registerCommand } from "@cardboard/editor-shell";
 import {
   COMPONENT_SCHEMAS,
   MOCK_ENTITIES,
@@ -29,7 +46,7 @@ import {
   type ComponentKind,
   type ComponentSchemaField,
   type EntityRow,
-} from "../prefabs-fixtures";
+} from "./prefabs-fixtures";
 
 /**
  * ComponentEditorPanel — schema-driven vertical stack of collapsible
