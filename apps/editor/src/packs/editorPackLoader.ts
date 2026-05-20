@@ -17,9 +17,13 @@
  *
  * The public surface (`loadEditorPacks`, `useEditorPackPanels`) is
  * unchanged so MapView / DockShell / etc. don't have to know which
- * load mechanism is in use. Phase 2 (Extensions tab) replaces the
- * hardcoded `EDITOR_PACK_IDS` list with a user-configurable set
- * persisted in IDB; the loader internals stay the same.
+ * load mechanism is in use. Phase 2 (this commit) wired the loader to
+ * `useEditorPacksStore` — the set of pack ids to fetch is now read at
+ * load time from the user-facing Extensions tab's persisted state.
+ * Disabling a pack and reloading skips its `.apg` entirely. The
+ * loader also writes manifest metadata (name / version / panelCount)
+ * back to the store after a successful decode so the Extensions tab
+ * can render real metadata even before the next load completes.
  *
  * See `docs/plans/EDITOR_ENGINE.md` §8.
  */
@@ -30,14 +34,10 @@ import type { DockPanelDef } from "../components/dock/DockShell";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
 import type { PanelSpec } from "../panel-renderer/types";
 import { ZipAssetPack, type PackManifest } from "@two_5_d/engine";
-
-/** Hard-coded list of editor-pack ids the editor loads at startup.
- *  Phase 1 ships exactly one — the demo pack — to prove the loader
- *  works end-to-end. Phase 2 (Extensions tab) replaces this with a
- *  user-configurable list persisted in IDB / localStorage. */
-const EDITOR_PACK_IDS: ReadonlyArray<string> = [
-  "cardboard-editor-pack-demo",
-];
+import {
+  getEnabledEditorPackIds,
+  useEditorPacksStore,
+} from "../state/useEditorPacksStore";
 
 /** Base path the editor dev server serves editor packs from. Each
  *  id resolves to `<EDITOR_PACKS_BASE>/<id>.apg`, served by the
@@ -118,6 +118,16 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     return [];
   }
   const panelPaths = manifest.editorPanels ?? [];
+  // Cache the manifest-derived metadata on the store BEFORE the
+  // panel-spec loop. The Extensions tab reads from this cache so
+  // even a pack with zero contributed panels still surfaces its
+  // name + version. Setting meta with `panelCount: 0` is the
+  // correct signal that the pack loaded but contributes nothing.
+  useEditorPacksStore.getState().setMeta(packId, {
+    name: manifest.name,
+    version: manifest.version,
+    panelCount: panelPaths.length,
+  });
   if (panelPaths.length === 0) {
     // Editor-scope pack with no panel contributions — not an error,
     // but worth a debug log so authors notice an empty manifest.
@@ -167,8 +177,14 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
  * any editor pack to function.
  */
 export async function loadEditorPacks(): Promise<DockPanelDef[]> {
+  // Read the enabled set from the store at the moment of load. Order
+  // is the insertion order of `useEditorPacksStore.packs` (newest
+  // installs last), giving deterministic panel-registration order
+  // across reloads. Disabled packs are excluded — they neither
+  // fetch nor mutate the manifest meta cache.
+  const enabledIds = getEnabledEditorPackIds();
   const defs: DockPanelDef[] = [];
-  for (const packId of EDITOR_PACK_IDS) {
+  for (const packId of enabledIds) {
     const packDefs = await loadOneEditorPack(packId);
     defs.push(...packDefs);
   }

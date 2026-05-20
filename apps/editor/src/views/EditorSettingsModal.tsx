@@ -5,12 +5,14 @@ import { Select } from "../components/ui/Select";
 import { PropertyRow } from "../components/ui/PropertyRow";
 import { NumberInput } from "../components/ui/NumberInput";
 import { TextInput } from "../components/ui/TextInput";
+import { TabStrip, type TabDescriptor } from "../components/ui/TabStrip";
 import {
   registerSetting,
   useSettingsStore,
   useSettingsList,
   type EditorSetting,
 } from "../state/useSettingsStore";
+import { ExtensionsTab } from "./settings/ExtensionsTab";
 
 /**
  * EditorSettingsModal — opened by the TopBar cog.
@@ -211,6 +213,26 @@ export interface EditorSettingsModalProps {
   onClose: () => void;
 }
 
+/** Top-level tabs inside the Editor Settings modal. */
+type SettingsTabId = "general" | "extensions";
+
+const SETTINGS_TABS: ReadonlyArray<TabDescriptor<SettingsTabId>> = [
+  {
+    id: "general",
+    label: "General",
+    tooltipLabel: "General",
+    tooltipDescription:
+      "Editor-scope preferences (theme, accent, keybindings, files, motion).",
+  },
+  {
+    id: "extensions",
+    label: "Extensions",
+    tooltipLabel: "Extensions",
+    tooltipDescription:
+      "Manage installed editor packs — enable or disable contributed panels and tools.",
+  },
+];
+
 export function EditorSettingsModal({
   open,
   onClose,
@@ -223,6 +245,45 @@ export function EditorSettingsModal({
     return registerGlobalEditorSettings();
   }, []);
 
+  const [tab, setTab] = React.useState<SettingsTabId>("general");
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Editor settings"
+      width="lg"
+      footer={
+        <Button variant="primary" size="sm" onClick={onClose}>
+          Done
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {/* Sub-tab strip. `secondary` variant matches the in-modal
+            grouping pattern used elsewhere (LayoutsModal, ProjectSettings). */}
+        <TabStrip
+          variant="secondary"
+          tabs={SETTINGS_TABS}
+          value={tab}
+          onChange={setTab}
+          aria-label="Editor settings sections"
+        />
+
+        {tab === "general" ? <GeneralTab /> : null}
+        {tab === "extensions" ? <ExtensionsTab /> : null}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * GeneralTab — the registry-driven settings form that previously lived
+ * directly in the modal body. Renders every `scope: "global"` setting
+ * grouped by category. New tunables appear here automatically when
+ * their owning component calls `registerSetting({...})`.
+ */
+function GeneralTab() {
   // Reactive list of registered global settings. Project- and page-
   // scoped settings render in their respective modals (Project tab,
   // page settings) — not this one.
@@ -248,44 +309,33 @@ export function EditorSettingsModal({
   }, [globalSettings]);
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Editor settings"
-      footer={
-        <Button variant="primary" size="sm" onClick={onClose}>
-          Done
-        </Button>
-      }
-    >
-      <div className="space-y-5">
-        <p className="text-xs text-zinc-500 leading-relaxed">
-          Editor preferences live in your browser and apply across every
-          project you open. For project-scoped configuration (manifest,
-          dependencies, export, advanced) open the{" "}
-          <span className="text-zinc-300 font-medium">Project</span> tab.
+    <div className="space-y-5">
+      <p className="text-xs text-zinc-500 leading-relaxed">
+        Editor preferences live in your browser and apply across every
+        project you open. For project-scoped configuration (manifest,
+        dependencies, export, advanced) open the{" "}
+        <span className="text-zinc-300 font-medium">Project</span> tab.
+      </p>
+
+      {grouped.length === 0 ? (
+        <p className="text-xs text-zinc-500">
+          No editor settings have been registered.
         </p>
+      ) : null}
 
-        {grouped.length === 0 ? (
-          <p className="text-xs text-zinc-500">
-            No editor settings have been registered.
-          </p>
-        ) : null}
-
-        {grouped.map((group) => (
-          <section key={group.category} className="space-y-2">
-            <h3 className="text-[10px] uppercase tracking-[0.18em] text-zinc-500 font-semibold">
-              {group.category}
-            </h3>
-            <div className="space-y-1">
-              {group.items.map((setting) => (
-                <SettingRow key={setting.id} setting={setting} />
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </Modal>
+      {grouped.map((group) => (
+        <section key={group.category} className="space-y-2">
+          <h3 className="text-[10px] uppercase tracking-[0.18em] text-zinc-500 font-semibold">
+            {group.category}
+          </h3>
+          <div className="space-y-1">
+            {group.items.map((setting) => (
+              <SettingRow key={setting.id} setting={setting} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
