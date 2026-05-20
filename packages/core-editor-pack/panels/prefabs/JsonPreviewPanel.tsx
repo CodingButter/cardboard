@@ -258,6 +258,9 @@ export function JsonPreviewPanel(): React.JSX.Element {
       <div
         ref={rootRef}
         data-panel="json-preview"
+        // `data-tutorial-id="json-preview"` anchors the built-in
+        // `prefabs-intro` step that shows the live JSON rendering.
+        data-tutorial-id="json-preview"
         className="h-full w-full min-h-0 flex items-center justify-center"
       >
         <div className="text-[10px] uppercase tracking-[0.18em] text-(--color-fg-muted) text-center px-2">
@@ -271,6 +274,7 @@ export function JsonPreviewPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="json-preview"
+      data-tutorial-id="json-preview"
       className="h-full w-full min-h-0 flex flex-col gap-1.5 overflow-x-hidden"
     >
       {/* Eyebrow — matches the page's other small section labels. */}

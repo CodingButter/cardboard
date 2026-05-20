@@ -1,0 +1,52 @@
+{
+  "$schema": "tutorial/1",
+  "id": "prefabs-intro",
+  "title": "Prefabs: 90-second tour",
+  "description": "Meet the entity list, the component editor, the live JSON, and the 3-D preview.",
+  "estimatedSeconds": 90,
+  "steps": [
+    {
+      "id": "intro",
+      "target": null,
+      "hint": "Prefabs are reusable entity templates — lights, actors, items, triggers. Let's walk through the four panels that make up the Prefabs view.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    },
+    {
+      "id": "entity-list",
+      "target": "entity-list",
+      "hint": "On the left, every entity in the active pack. Filter by category, click a row to make it the active prefab.",
+      "advance": { "kind": "next" },
+      "placement": "right",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "component-editor",
+      "target": "component-editor",
+      "hint": "The component editor — add, remove, and tune the components attached to the active prefab.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "json-preview",
+      "target": "json-preview",
+      "hint": "Every edit reflects live in the JSON preview — this is exactly what the pack will ship.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "entity-preview",
+      "target": "entity-preview",
+      "hint": "And the 3-D preview — drag to orbit, scroll to zoom. The entity renders with its real components, lights, and materials.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    }
+  ]
+}

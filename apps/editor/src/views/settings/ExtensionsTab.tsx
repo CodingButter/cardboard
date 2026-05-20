@@ -167,7 +167,9 @@ export function ExtensionsTab() {
   }, [entries, setEnabled, applyToggleLive]);
 
   return (
-    <div className="space-y-4">
+    // `data-tutorial-id="extensions-tab"` anchors the built-in
+    // `extensions-intro` tutorial's "this is the Extensions tab" step.
+    <div className="space-y-4" data-tutorial-id="extensions-tab">
       <p className="text-xs text-zinc-500 leading-relaxed">
         Editor extensions add panels, inspectors, and tools to the
         editor. Disabled extensions are skipped at load time — their
@@ -178,6 +180,9 @@ export function ExtensionsTab() {
       {dirty && (
         <div
           role="alert"
+          // `data-tutorial-id="extensions-reload-banner"` anchors the
+          // step describing the reload-required affordance.
+          data-tutorial-id="extensions-reload-banner"
           className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
         >
           <div className="flex items-center gap-2 text-xs text-amber-200">
@@ -238,7 +243,10 @@ export function ExtensionsTab() {
           </p>
         </div>
       ) : (
-        <ul className="space-y-1">
+        // `data-tutorial-id="extensions-pack-list"` anchors the
+        // built-in `extensions-intro` step about the installed-pack list
+        // and per-pack on/off toggle.
+        <ul className="space-y-1" data-tutorial-id="extensions-pack-list">
           {entries.map((entry) => (
             <ExtensionRow
               key={entry.id}
@@ -271,7 +279,13 @@ function ExtensionRow({ entry, onToggle }: ExtensionRowProps) {
       : `Contributes ${panelCount} ${panelCount === 1 ? "panel" : "panels"}`;
 
   return (
-    <li className="flex items-start justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2.5">
+    // `data-tutorial-id="extensions-pack-row"` matches every installed
+    // pack's row — the built-in `extensions-intro` tutorial highlights
+    // the first one to demo the on/off toggle affordance.
+    <li
+      className="flex items-start justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2.5"
+      data-tutorial-id="extensions-pack-row"
+    >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Puzzle

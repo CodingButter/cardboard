@@ -207,7 +207,12 @@ function PaletteTile({ entry }: PaletteTileProps): React.JSX.Element {
 
 function PalettePane(): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-1 p-2 overflow-y-auto h-full">
+    // `data-tutorial-id="panel-builder-palette"` anchors the built-in
+    // `panel-builder-intro` tutorial step pointing at the node palette.
+    <div
+      className="flex flex-col gap-1 p-2 overflow-y-auto h-full"
+      data-tutorial-id="panel-builder-palette"
+    >
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-1 pb-1">
         Palette
       </div>
@@ -757,6 +762,10 @@ function CanvasPane({
                   : "border-zinc-800 bg-zinc-950",
             ].join(" ")}
             data-testid="panel-builder-canvas"
+            // `data-tutorial-id="panel-builder-canvas"` anchors the
+            // built-in `panel-builder-intro` step instructing the user
+            // to drop a palette tile onto the canvas.
+            data-tutorial-id="panel-builder-canvas"
             aria-label="Panel Builder canvas drop target"
           >
             {showEmptyState ? (
@@ -954,7 +963,13 @@ function InspectorPane(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="flex flex-col h-full">
+    // `data-tutorial-id="panel-builder-inspector"` anchors the
+    // built-in `panel-builder-intro` step describing the per-node
+    // property editor.
+    <div
+      className="flex flex-col h-full"
+      data-tutorial-id="panel-builder-inspector"
+    >
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pt-2 pb-1">
         Inspector
       </div>

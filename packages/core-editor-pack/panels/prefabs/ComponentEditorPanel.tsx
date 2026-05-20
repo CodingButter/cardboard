@@ -775,6 +775,9 @@ export function ComponentEditorPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="component-editor"
+      // `data-tutorial-id="component-editor"` anchors the built-in
+      // `prefabs-intro` walkthrough's "edit components here" step.
+      data-tutorial-id="component-editor"
       className="h-full w-full flex flex-col gap-1.5 overflow-y-auto overflow-x-hidden"
     >
       {tooNarrow ? (

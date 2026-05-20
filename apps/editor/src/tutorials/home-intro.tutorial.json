@@ -1,0 +1,34 @@
+{
+  "$schema": "tutorial/1",
+  "id": "home-intro",
+  "title": "Welcome to cardboard",
+  "description": "A quick tour of the home screen — your recent projects and the create-or-import entry point.",
+  "estimatedSeconds": 30,
+  "steps": [
+    {
+      "id": "intro",
+      "target": null,
+      "hint": "Welcome to cardboard. The home screen is where you switch between projects and start new ones — let's take a quick look.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    },
+    {
+      "id": "recents",
+      "target": "home-recents",
+      "hint": "Your recent projects live here. Click any project to jump back into its scene editor.",
+      "advance": { "kind": "next" },
+      "placement": "right",
+      "highlightPadding": 6,
+      "highlightRadius": 8
+    },
+    {
+      "id": "create-import",
+      "target": "home-create-import",
+      "hint": "Start fresh with a new project or import an existing pack from a URL. Both create a project you can open and start editing right away.",
+      "advance": { "kind": "next" },
+      "placement": "left",
+      "highlightPadding": 6,
+      "highlightRadius": 8
+    }
+  ]
+}

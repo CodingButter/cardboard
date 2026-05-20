@@ -384,7 +384,12 @@ export function HomeScreen(_props: HomeScreenProps = {}): React.JSX.Element {
   return (
     <div className="grid grid-cols-12 gap-6 h-full p-6 text-zinc-100">
       {/* ─────────── Recents sidebar (left, 3 cols) ─────────── */}
-      <aside className="col-span-12 lg:col-span-3 flex flex-col min-h-0 rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden">
+      {/* `data-tutorial-id="home-recents"` anchors the built-in
+          `home-intro` tutorial step pointing at the recents list. */}
+      <aside
+        className="col-span-12 lg:col-span-3 flex flex-col min-h-0 rounded-lg border border-zinc-800 bg-zinc-950/40 overflow-hidden"
+        data-tutorial-id="home-recents"
+      >
         <PanelHeader
           title="Recents"
           action={
@@ -536,7 +541,12 @@ export function HomeScreen(_props: HomeScreenProps = {}): React.JSX.Element {
       </main>
 
       {/* ─────────── Create / import / quick links (right, 3 cols) ─────────── */}
-      <aside className="col-span-12 lg:col-span-3 flex flex-col min-h-0 space-y-4 overflow-y-auto">
+      {/* `data-tutorial-id="home-create-import"` anchors the built-in
+          `home-intro` step pointing at the Create / Open primary CTAs. */}
+      <aside
+        className="col-span-12 lg:col-span-3 flex flex-col min-h-0 space-y-4 overflow-y-auto"
+        data-tutorial-id="home-create-import"
+      >
         <Card>
           <CardHeader>
             <CardTitle>Create or import</CardTitle>

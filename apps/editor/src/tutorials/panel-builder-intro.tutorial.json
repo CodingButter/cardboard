@@ -1,0 +1,43 @@
+{
+  "$schema": "tutorial/1",
+  "id": "panel-builder-intro",
+  "title": "Panel Builder: visual UI authoring",
+  "description": "Drag nodes from the palette, drop them onto the canvas, then edit their properties in the inspector.",
+  "estimatedSeconds": 75,
+  "steps": [
+    {
+      "id": "intro",
+      "target": null,
+      "hint": "The Panel Builder authors PanelSpec JSON visually. Three panes: palette on the left, live canvas in the middle, inspector on the right.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    },
+    {
+      "id": "palette",
+      "target": "panel-builder-palette",
+      "hint": "The palette lists every node kind you can drop — stacks, text, sliders, buttons. Drag a tile onto the canvas to add it.",
+      "advance": { "kind": "next" },
+      "placement": "right",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "canvas",
+      "target": "panel-builder-canvas",
+      "hint": "The canvas previews your draft live. Drop palette tiles here. Click a node to select it.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "inspector",
+      "target": "panel-builder-inspector",
+      "hint": "The inspector shows the selected node's properties. Edit a label, change a colour, or delete the node — every change reflects in the canvas immediately.",
+      "advance": { "kind": "next" },
+      "placement": "left",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    }
+  ]
+}

@@ -666,6 +666,9 @@ export function EntityPreviewPanel(): React.JSX.Element {
     <div
       ref={containerRef}
       data-panel="entity-preview"
+      // `data-tutorial-id="entity-preview"` anchors the built-in
+      // `prefabs-intro` step pointing at the 3-D entity preview.
+      data-tutorial-id="entity-preview"
       className="relative h-full w-full overflow-hidden"
     >
       {tooSmall ? (

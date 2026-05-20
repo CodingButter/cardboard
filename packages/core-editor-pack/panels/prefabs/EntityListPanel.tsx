@@ -310,6 +310,9 @@ export function EntityListPanel(): React.JSX.Element {
     <div
       ref={rootRef}
       data-panel="entity-list"
+      // `data-tutorial-id="entity-list"` anchors the built-in
+      // `prefabs-intro` tutorial's "this is where prefabs live" step.
+      data-tutorial-id="entity-list"
       className="h-full w-full flex flex-col gap-1 min-h-0 overflow-x-hidden"
     >
       <CategoryFilterRow

@@ -1,0 +1,36 @@
+{
+  "$schema": "tutorial/1",
+  "id": "extensions-intro",
+  "title": "Extensions: managing editor packs",
+  "description": "Toggle editor extensions on or off, reload when prompted, and discover what each pack contributes.",
+  "estimatedSeconds": 45,
+  "steps": [
+    {
+      "id": "intro",
+      "target": "extensions-tab",
+      "hint": "The Extensions tab — every editor pack you've installed lives here. Disable a pack to skip it at load time.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "pack-list",
+      "target": "extensions-pack-list",
+      "hint": "Each row is one pack. Name, version, panel count — and a toggle on the right.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    },
+    {
+      "id": "toggle",
+      "target": "extensions-pack-row",
+      "hint": "Click a pack's toggle to flip it on or off. Most toggles apply live — panels and commands appear or disappear without a reload.",
+      "advance": { "kind": "next" },
+      "placement": "auto",
+      "highlightPadding": 4,
+      "highlightRadius": 6
+    }
+  ]
+}
