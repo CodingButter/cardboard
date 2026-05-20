@@ -9,6 +9,7 @@ import {
   Loader2,
   AlertCircle,
   CircleDot,
+  QrCode,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Button } from "../components/ui";
@@ -16,6 +17,8 @@ import { Tooltip } from "../components/ui/Tooltip";
 import { UserAvatar } from "./UserAvatar";
 import { PaletteSearchInput } from "../components/palette/PaletteSearchInput";
 import { registerCommand } from "../state/useCommandStore";
+import { PairDeviceModal } from "../components/pairing/PairDeviceModal";
+import { useDesktopPairingStore } from "../state/useDesktopPairingStore";
 import logoUrl from "../assets/logo.png" with { type: "file" };
 import type { SaveState } from "../components/ui/TopBar";
 
@@ -87,6 +90,16 @@ export function TopBar({
     };
   }, [onSave, onExport, onOpenSettings, onTogglePlaytest]);
 
+  // Pair-device modal local UI state. Lives on the TopBar because the
+  // trigger is here and the modal closes (returning focus to the
+  // trigger) when dismissed. The peer + connection lifetime lives in
+  // `desktopPairingSingleton` and survives the modal close — closing
+  // the modal does NOT disconnect.
+  const [pairOpen, setPairOpen] = React.useState(false);
+  const pairedCount = useDesktopPairingStore((s) =>
+    Object.values(s.pairedPeers).filter((p) => p.status === "connected").length,
+  );
+
   React.useEffect(() => {
     const unregs = [
       registerCommand({
@@ -121,11 +134,19 @@ export function TopBar({
           if (fn) fn();
         },
       }),
+      registerCommand({
+        id: "scene.pairDevice",
+        title: "Pair Device",
+        category: "View",
+        keywords: ["pair", "qr", "device", "sidecar", "phone", "tablet", "remote"],
+        run: () => setPairOpen(true),
+      }),
     ];
     return () => unregs.forEach((u) => u());
   }, []);
 
   return (
+    <>
     <header
       className={cn(
         "flex items-center h-16 px-5 gap-4 shrink-0",
@@ -241,6 +262,25 @@ export function TopBar({
             </Button>
           </ShellActionTooltip>
           <ShellActionTooltip
+            label={pairedCount > 0 ? `Pair Device (${pairedCount} connected)` : "Pair Device"}
+            description="Show a QR code so a phone or tablet can pair with this editor and host panels."
+          >
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setPairOpen(true)}
+              leadingIcon={<QrCode size={12} />}
+              className={cn(
+                "h-7 px-3 bg-transparent border-zinc-700 hover:bg-zinc-800/50",
+                pairedCount > 0 &&
+                  "border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/10",
+              )}
+              data-testid="topbar-pair-device"
+            >
+              Pair
+            </Button>
+          </ShellActionTooltip>
+          <ShellActionTooltip
             label="Settings"
             description="Open editor settings (theme, keybindings, autosave)."
           >
@@ -271,6 +311,8 @@ export function TopBar({
         </ShellActionTooltip>
       </div>
     </header>
+    <PairDeviceModal open={pairOpen} onClose={() => setPairOpen(false)} />
+    </>
   );
 }
 

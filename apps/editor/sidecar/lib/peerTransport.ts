@@ -3,7 +3,18 @@
 // `peerjs-js-binarypack`, `webrtc-adapter`, and `@msgpack/msgpack` as
 // externals that aren't installed in this workspace. The `.min.js`
 // build inlines them and registers `window.Peer` globally.
-import "peerjs/dist/peerjs.min.js";
+//
+// `import * as` + `void` is mandatory: a bare side-effect import gets
+// TREE-SHAKEN by `bun build` in production mode (the bundler proves
+// the module has no observable effect on its caller and drops it).
+// In production the `window.Peer` assignment then never runs and the
+// sidecar crashes with "Peer is not a constructor". The namespace
+// import + `void` reference is enough to make the bundler retain it.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-expect-error — `peerjs/dist/peerjs.min.js` is a self-contained
+// browser bundle with no .d.ts. We only need its side effects.
+import * as _peerJsSideEffect from "peerjs/dist/peerjs.min.js";
+void _peerJsSideEffect;
 // Types come from the package's `dist/types.d.ts` — they don't pull
 // the broken module path because they're erased at compile time.
 import type { Peer as PeerCtor, DataConnection } from "peerjs";

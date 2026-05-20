@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "bun run sync:plans && bun run gen:api && bun run stage:game && bun run stage:editor",
+    "prebuild": "bun run sync:plans && bun run gen:api && bun run stage:game && bun run stage:editor && bun run stage:sidecar",
     "stage:game": "bun ../../scripts/build-game-for-docs.ts",
     "stage:editor": "bun ../../scripts/build-editor-for-docs.ts",
+    "stage:sidecar": "bun ../../scripts/build-sidecar-for-docs.ts",
     "build": "next build --webpack",
     "dev": "next dev",
     "start": "serve out",

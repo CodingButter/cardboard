@@ -73,4 +73,5 @@ screenshots/
 # static assets, so they should never appear in commits.
 apps/docs/public/play/
 apps/docs/public/editor/
+apps/docs/public/sidecar/
 apps/editor/public/play/
