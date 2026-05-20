@@ -255,22 +255,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   ),
 );
 
-/** Selector helper — read the preset list for a page. Stable
- *  reference when the underlying array doesn't change (zustand's
- *  default Object.is comparison). */
-export function selectPresetsForPage(
-  pageId: string,
-): (state: WorkspaceState) => WorkspacePreset[] {
-  return (state) => state.presets[pageId] ?? [];
-}
-
-/** Selector helper — read the persisted layout for a storage key. */
-export function selectDockLayout(
-  storageKey: string,
-): (state: WorkspaceState) => DockLayoutJSON | null {
-  return (state) => state.dockLayouts[storageKey] ?? null;
-}
-
 /**
  * Reactive read of the currently-editing preset id for a page (the
  * card that should be in inline-rename mode in the LayoutsModal). Null

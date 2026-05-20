@@ -377,21 +377,22 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const DockShell = __mod.DockShell;
               export const WorkspaceRail = __mod.WorkspaceRail;
               export const useTabContextSlot = __mod.useTabContextSlot;
-              export const useTabContextSlotValue = __mod.useTabContextSlotValue;
               export const useRoute = __mod.useRoute;
               export const buildHash = __mod.buildHash;
               export const useEditorPackPanels = __mod.useEditorPackPanels;
               export const useEditorPacksLoaded = __mod.useEditorPacksLoaded;
-              // P5b — view-migration constants. SET_TAB_EVENT is a
-              // string identity, EditorProjectStore is a module-level
-              // IDB singleton, importPack* + assetUrl + useStatusBar
-              // are each host-bound. Type-only specifiers
+              // P5b — host-bound singletons. EditorProjectStore is a
+              // module-level IDB singleton; importPack* + assetUrl +
+              // useStatusBar are each host-bound. Type-only specifiers
               // (SetTabEventDetail / WorkflowMode / ProjectMeta /
               // AssetMeta / StatusBarSection) compile away so they
               // need no runtime line here — but TypeScript still
               // resolves them through this stub module via the
               // ambient .d.ts surface the shell publishes.
-              export const SET_TAB_EVENT = __mod.SET_TAB_EVENT;
+              //
+              // SET_TAB_EVENT + useTabContextSlotValue lived here
+              // pre-2026-05-20 but were pruned (zero pack callers; the
+              // event/context-slot APIs are shell-internal).
               export const EditorProjectStore = __mod.EditorProjectStore;
               export const importPackFromBlob = __mod.importPackFromBlob;
               export const importPackFromUrl = __mod.importPackFromUrl;

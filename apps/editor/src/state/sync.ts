@@ -1,4 +1,3 @@
-import React from "react";
 import { create, type StateCreator, type StoreApi, type UseBoundStore } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
@@ -12,7 +11,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
  * instance from the orchestrator's. Without sync, state changes in one
  * window are invisible to the other.
  *
- * This module exports three primitives:
+ * This module exports two primitives:
  *
  *   1. `createSyncedStore`  — a thin wrapper around zustand's `create +
  *      persist` that ALSO listens for `window.addEventListener("storage")`
@@ -21,14 +20,13 @@ import { persist, createJSONStorage } from "zustand/middleware";
  *      optional `BroadcastChannel` adds an ephemeral lane for messages
  *      the caller wants to gossip but not persist.
  *
- *   2. `useEphemeralSync`   — a React hook that subscribes a callback to
- *      a `BroadcastChannel` and returns a `broadcast(msg)` helper.
- *      Auto-cleans on unmount. For hot ephemeral data (cursor coords,
- *      drag previews) that has no business in localStorage.
- *
- *   3. `throttle`           — a tiny trailing-edge throttle. Hot paths
+ *   2. `throttle`           — a tiny trailing-edge throttle. Hot paths
  *      like cursor tracking want at-most-N-Hz broadcasts; this drops
  *      intermediate calls and runs the last queued one after `intervalMs`.
+ *
+ * (`useEphemeralSync` previously lived here too as a React hook over
+ * `BroadcastChannel`; the post-extraction audit confirmed zero callers and
+ * it was removed.)
  *
  * Why both `storage` events AND `BroadcastChannel`?
  *   - `storage` events fire in OTHER same-origin windows when
@@ -293,69 +291,6 @@ export function createSyncedStore<T extends object, A extends object>(
 
   useStore.channel = channel;
   return useStore;
-}
-
-// ---------------------------------------------------------------------------
-// useEphemeralSync
-// ---------------------------------------------------------------------------
-
-/**
- * Subscribe to a `BroadcastChannel` for ephemeral messages. Returns a
- * `broadcast` helper for posting on the same channel.
- *
- * Use this when you need cross-window gossip that has NO business in
- * localStorage — e.g. cursor positions, drag previews, "user is typing"
- * indicators. For state that should survive reloads, use
- * `createSyncedStore` instead.
- *
- * @example
- *   useEphemeralSync<{ x: number; y: number }>(
- *     "cardboard:hover",
- *     (msg) => setHoverCell(msg),
- *   );
- */
-export function useEphemeralSync<TMsg>(
-  channelName: string,
-  listener: (msg: TMsg) => void,
-): { broadcast: (msg: TMsg) => void } {
-  // Keep the listener in a ref so the effect doesn't tear down + rebuild
-  // the channel on every render where the listener identity changes.
-  const listenerRef = React.useRef(listener);
-  React.useEffect(() => {
-    listenerRef.current = listener;
-  }, [listener]);
-
-  // Hold the channel in a ref so `broadcast` can publish synchronously
-  // without waiting for the effect to commit.
-  const channelRef = React.useRef<BroadcastChannel | null>(null);
-
-  React.useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
-    const ch = new BroadcastChannel(channelName);
-    channelRef.current = ch;
-    const onMessage = (ev: MessageEvent): void => {
-      listenerRef.current(ev.data as TMsg);
-    };
-    ch.addEventListener("message", onMessage);
-    return () => {
-      ch.removeEventListener("message", onMessage);
-      ch.close();
-      channelRef.current = null;
-    };
-  }, [channelName]);
-
-  const broadcast = React.useCallback((msg: TMsg) => {
-    const ch = channelRef.current;
-    if (!ch) return;
-    try {
-      ch.postMessage(msg);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[useEphemeralSync:${channelName}] broadcast failed`, err);
-    }
-  }, [channelName]);
-
-  return { broadcast };
 }
 
 // ---------------------------------------------------------------------------

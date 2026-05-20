@@ -1,26 +1,20 @@
 /**
- * Shell-level event + type definitions exposed via the editor shell SDK.
+ * Shell-level event + type definitions for cross-view navigation.
  *
- * These constants and types describe cross-view navigation contracts
- * that BOTH the shell and pack-shipped views need to share by identity.
- * Bundling a duplicate inside a pack would fork the string constant
- * (event listeners on `cardboard:set-tab` wouldn't fire if the
- * dispatcher used a different copy) — they MUST resolve to the same
- * runtime value the shell registers its listener against.
- *
- * Pack authors import these from `@cardboard/editor-shell`:
- *
- *   ```ts
- *   import { SET_TAB_EVENT, type SetTabEventDetail } from "@cardboard/editor-shell";
- *   window.dispatchEvent(new CustomEvent<SetTabEventDetail>(SET_TAB_EVENT, {
- *     detail: { tab: "assets", assetId: "scenes/level-1.json" },
- *   }));
- *   ```
+ * `SET_TAB_EVENT` is the string identity the shell's `EditorShell` mounts
+ * its listener against. It's currently shell-internal — the
+ * post-extraction audit (2026-05-20) confirmed zero pack-side callers,
+ * and the matching SDK whitelist entry was removed. The constant lives
+ * here (rather than at the EditorShell callsite) so the matching
+ * `SetTabEventDetail` type can be re-exported through the SDK
+ * surface for typing payloads; if a pack ever needs to dispatch the
+ * event itself, the SDK can re-add `SET_TAB_EVENT` to the whitelist
+ * without moving the source declaration.
  *
  * Promoted out of `apps/editor/src/views/AssetsView.tsx` + ProjectView.tsx
  * during the P5b shell-view migration — those files moved into the
  * core-editor-pack, but the constants belong in the SHELL so any pack
- * (core or third-party) can dispatch tab-switch intents.
+ * (core or third-party) could dispatch tab-switch intents if needed.
  *
  * CORE_EDITOR_PACK.md §10 P5b.
  */

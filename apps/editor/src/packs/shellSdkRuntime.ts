@@ -56,26 +56,21 @@ import {
 // state. CORE_EDITOR_PACK.md §10 P4.
 import { DockShell } from "../components/dock/DockShell";
 import { WorkspaceRail } from "../components/dock/WorkspacePanel";
-import {
-  useTabContextSlot,
-  useTabContextSlotValue,
-} from "../lib/tabContextSlot";
+import { useTabContextSlot } from "../lib/tabContextSlot";
 import { useRoute, buildHash } from "../lib/router";
 import {
   useEditorPackPanels,
   useEditorPacksLoaded,
 } from "./editorPackLoader";
-// P5b — view-migration constants/types. SET_TAB_EVENT + SetTabEventDetail
-// were owned by AssetsView pre-migration; WorkflowMode by ProjectView.
-// Both files moved into the core-editor-pack, but the constants/types
-// belong in the SHELL so any pack (core or third-party) can dispatch
-// tab-switch intents or type a ProjectView-style body mode. See
-// `./shellEvents.ts` for the canonical declarations.
-import {
-  SET_TAB_EVENT,
-  type SetTabEventDetail,
-  type WorkflowMode,
-} from "./shellEvents";
+// P5b — view-migration types. SetTabEventDetail was owned by AssetsView
+// pre-migration; WorkflowMode by ProjectView. Both files moved into the
+// core-editor-pack, but the types belong in the SHELL so any pack (core
+// or third-party) can type a tab-switch intent payload or a
+// ProjectView-style body mode. See `./shellEvents.ts` for the canonical
+// declarations. (The matching `SET_TAB_EVENT` string constant was
+// removed from the SDK whitelist in the 2026-05-20 audit — zero pack
+// callers; the shell still owns the event internally.)
+import type { SetTabEventDetail, WorkflowMode } from "./shellEvents";
 // P5b — re-export EditorProjectStore singleton + types. HomeScreen
 // migrated into the pack but it owns the create / list / rename / delete
 // flow that writes to the editor's IDB store. The store is a
@@ -301,19 +296,14 @@ export const shellSdk = {
   DockShell,
   WorkspaceRail,
   useTabContextSlot,
-  useTabContextSlotValue,
   useRoute,
   buildHash,
   useEditorPackPanels,
   useEditorPacksLoaded,
-  // P5b — view-migration constants. SET_TAB_EVENT is the cross-view
-  // navigation event name; the shell registers its listener against
-  // this exact string, so pack-side dispatchers MUST use the same
-  // constant. The store + helpers below are the surface HomeScreen
-  // (now pack-shipped) reaches for to drive project create / list /
-  // import flows. Each is a host-side singleton — IDB connection,
-  // memoized fetch pipeline, React Context — that bundling would fork.
-  SET_TAB_EVENT,
+  // P5b — store + helpers HomeScreen (now pack-shipped) reaches for to
+  // drive project create / list / import flows. Each is a host-side
+  // singleton — IDB connection, memoized fetch pipeline, React Context —
+  // that bundling would fork.
   EditorProjectStore,
   importPackFromBlob,
   importPackFromUrl,
