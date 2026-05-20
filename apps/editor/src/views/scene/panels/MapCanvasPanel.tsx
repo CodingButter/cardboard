@@ -5,13 +5,20 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import { SceneTabContextPicker } from "../SceneTabContextPicker";
 import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
-import { useSceneStore } from "../../../state/useSceneStore";
+import { useSceneStore, cellKey } from "../../../state/useSceneStore";
 import { useLayerStore, type CustomLayer } from "../../../state/useLayerStore";
 import { useSelectionStore } from "../../../state/useSelectionStore";
 import { useToolStore } from "../../../state/useToolStore";
 import { useDiagnosticsStore } from "../../../state/useDiagnosticsStore";
-import { useHistoryStore } from "../../../state/useHistoryStore";
+import { useHistoryStore, type HistoryEntry } from "../../../state/useHistoryStore";
+import { useBrushStore } from "../../../state/useBrushStore";
+import { useTilePresetStore } from "../../../state/useTilePresetStore";
 import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+import {
+  undoOnce,
+  redoOnce,
+  type PaintOp,
+} from "../../../state/historyDispatcher";
 import {
   ensureLoaded as ensureTextureLoaded,
   getTextureBitmap,
@@ -29,9 +36,14 @@ import {
  * panel-local until `useViewportStore` lands — `LS_ZOOM` and
  * `LS_PAN_*` persistence remain.
  *
- * Paint-write loop + history entries are 3.4 scope and intentionally
- * deferred — non-select tools surface a diagnostic via
- * `useDiagnosticsStore.log("info", ...)` instead of mutating cells.
+ * Wave 3.4: paint + erase strokes commit via a mousedown/move/up state
+ * machine — the in-flight `paintDragRef` accumulates ops, mouseup
+ * pushes a single HistoryEntry + a single `paintCells`/`eraseCells`
+ * bulk write (one storage event per stroke, not N). Fill is one-shot
+ * via BFS; dropper picks the topmost preset under the cursor.
+ * Undo/redo replay through `historyDispatcher`. Hover-preview
+ * footprint overlay + multi-point line/rect brush geometry +
+ * entity-place tool remain deferred.
  *
  * The panel is registered with `surface: false` + `headerless: true`
  * in MapView so it renders flush against the dock — no panel chrome,
@@ -140,6 +152,104 @@ const CUSTOM_LAYER_PALETTE: readonly string[] = [
   "#84cc16",
   "#22d3ee",
 ];
+
+// ---------------------------------------------------------------------------
+// Wave 3.4 paint helpers.
+
+/**
+ * Resolve the cells a brush stamp touches, given its center cell + the
+ * brush configuration. `point` and `brush-single` are a single cell;
+ * `square` / `circle` use the discrete `size` (1..20) as a footprint
+ * diameter. `line` / `rect` are deferred — they need drag-shape
+ * geometry across multiple sample points, not a per-cell stamp, so
+ * Wave 3.4 stamps them as a single point and a diagnostic surfaces the
+ * gap when those brush kinds are used.
+ *
+ * Returned cells are NOT clipped to scene dims here; the caller does
+ * that after de-duplicating against the drag-wide `visited` set.
+ */
+function footprintCells(
+  cx: number,
+  cy: number,
+  kind: string,
+  size: number,
+): Array<{ x: number; y: number }> {
+  // Single-cell footprints.
+  if (kind === "point" || kind === "brush-single" || size <= 1) {
+    return [{ x: cx, y: cy }];
+  }
+  // Deferred multi-point shapes — stamp as a single cell for now.
+  if (kind === "line" || kind === "rect") {
+    return [{ x: cx, y: cy }];
+  }
+  const out: Array<{ x: number; y: number }> = [];
+  if (kind === "square") {
+    const r = Math.floor((size - 1) / 2);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        out.push({ x: cx + dx, y: cy + dy });
+      }
+    }
+    return out;
+  }
+  if (kind === "circle") {
+    // Radius in cells. `size` is the diameter; use half (rounded) so
+    // size=2 reads as a 3-cell-wide cluster, matching paint-app norms.
+    const r = size / 2;
+    const ri = Math.ceil(r);
+    const r2 = r * r;
+    for (let dy = -ri; dy <= ri; dy++) {
+      for (let dx = -ri; dx <= ri; dx++) {
+        if (dx * dx + dy * dy <= r2) {
+          out.push({ x: cx + dx, y: cy + dy });
+        }
+      }
+    }
+    return out;
+  }
+  // Unknown kind — fall back to single cell.
+  return [{ x: cx, y: cy }];
+}
+
+/**
+ * Flood-fill BFS for the `fill` tool. Walks all 4-connected cells
+ * matching the start cell's current preset on `activeLayerId`. Returns
+ * the resulting paint ops — empty array if the target already equals
+ * the next preset (no-op).
+ */
+function floodFillOps(
+  startX: number,
+  startY: number,
+  dims: { w: number; h: number },
+  cells: Record<string, { layers: Record<string, string> } | undefined>,
+  activeLayerId: string,
+  nextPresetId: string | null,
+): PaintOp[] {
+  const startKey = cellKey(startX, startY);
+  const targetPresetId = cells[startKey]?.layers[activeLayerId] ?? null;
+  if (targetPresetId === nextPresetId) return [];
+  const ops: PaintOp[] = [];
+  const visited = new Set<string>();
+  const queue: Array<[number, number]> = [[startX, startY]];
+  while (queue.length) {
+    const [x, y] = queue.shift()!;
+    if (x < 0 || x >= dims.w || y < 0 || y >= dims.h) continue;
+    const k = cellKey(x, y);
+    if (visited.has(k)) continue;
+    visited.add(k);
+    const presetHere = cells[k]?.layers[activeLayerId] ?? null;
+    if (presetHere !== targetPresetId) continue;
+    ops.push({
+      x,
+      y,
+      layerId: activeLayerId,
+      prevPresetId: targetPresetId,
+      nextPresetId,
+    });
+    queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  return ops;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -783,6 +893,56 @@ export function MapCanvasPanel(): React.JSX.Element {
     startPanY: number;
   } | null>(null);
 
+  // Paint-drag state — set on mousedown for paint/eraser tools, read
+  // on each mousemove to extend the stroke, drained on mouseup into a
+  // single history entry + single bulk store write. layerId and
+  // presetId are LOCKED at mousedown so mid-drag layer/preset changes
+  // don't fork the stroke across multiple targets. `visited` is the
+  // drag-wide guard preventing repeat work on cells the brush already
+  // touched this stroke.
+  const paintDragRef = React.useRef<{
+    active: boolean;
+    layerId: string;
+    presetId: string;
+    tool: "paint" | "eraser";
+    visited: Set<string>;
+    ops: PaintOp[];
+  } | null>(null);
+
+  /**
+   * Stamp the active brush footprint at the given center cell. Mutates
+   * `paintDragRef.current.ops` and `.visited` in place — caller has
+   * already verified `paintDragRef.current?.active`.
+   */
+  const stampBrush = React.useCallback(
+    (cx: number, cy: number) => {
+      const drag = paintDragRef.current;
+      if (!drag || !drag.active) return;
+      const brush = useBrushStore.getState();
+      const footprint = footprintCells(cx, cy, brush.kind, brush.size);
+      const sceneCells = useSceneStore.getState().cells;
+      const isEraser = drag.tool === "eraser";
+      const nextPresetId: string | null = isEraser ? null : drag.presetId;
+      for (const f of footprint) {
+        if (f.x < 0 || f.x >= dims.w || f.y < 0 || f.y >= dims.h) continue;
+        const k = cellKey(f.x, f.y);
+        if (drag.visited.has(k)) continue;
+        drag.visited.add(k);
+        const prevPresetId = sceneCells[k]?.layers[drag.layerId] ?? null;
+        // No-op write — same preset already there (or erasing an empty cell).
+        if (prevPresetId === nextPresetId) continue;
+        drag.ops.push({
+          x: f.x,
+          y: f.y,
+          layerId: drag.layerId,
+          prevPresetId,
+          nextPresetId,
+        });
+      }
+    },
+    [dims.w, dims.h],
+  );
+
   const handleMouseMove = React.useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
       const drag = panDragRef.current;
@@ -800,14 +960,91 @@ export function MapCanvasPanel(): React.JSX.Element {
       // setHover / setCursor on every mousemove is the intended flow.
       useSelectionStore.getState().setHover(c);
       useSelectionStore.getState().setCursor({ x: local.x, y: local.y });
+      // Paint-drag extension. Pan takes precedence (guarded above), so
+      // we only reach here for paint/eraser strokes. The `visited` set
+      // inside stampBrush guarantees idempotence even at high tick rates.
+      if (paintDragRef.current?.active && c) {
+        stampBrush(c.x, c.y);
+      }
     },
-    [cellAt, localAt],
+    [cellAt, localAt, stampBrush],
   );
+
+  /**
+   * Finalize an in-flight paint drag. Builds a single HistoryEntry,
+   * pushes it BEFORE touching the scene store (so a thrown bulk write
+   * doesn't leave history out of sync), then bulk-writes the cells.
+   * Called from handleMouseUp + handleMouseLeave + the click handler's
+   * paint-tool branch (single click ⇒ stroke with 1+ stamps).
+   */
+  const finalizePaintDrag = React.useCallback(() => {
+    const drag = paintDragRef.current;
+    paintDragRef.current = null;
+    if (!drag || drag.ops.length === 0) return;
+    const ops = drag.ops;
+    const isEraser = drag.tool === "eraser";
+    const label = `${isEraser ? "Erase" : "Paint"} ${ops.length} cell${ops.length === 1 ? "" : "s"}`;
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const entry: HistoryEntry = {
+      id,
+      // Tool ids and history entry types don't fully line up: the tool
+      // is "eraser" but the history-entry vocabulary uses "erase".
+      type: isEraser ? "erase" : "paint",
+      label,
+      ts: Date.now(),
+      undoPayload: { ops },
+      redoPayload: { ops },
+    };
+    // Push history BEFORE mutating scene — if a bulk write somehow
+    // throws, we'd rather have history slightly ahead than the cells
+    // changed with no undo entry. (Bulk writes are pure structural
+    // ops so this is defensive, not currently triggerable.)
+    useHistoryStore.getState().push(entry);
+    const scene = useSceneStore.getState();
+    if (isEraser) {
+      scene.eraseCells(ops.map((o) => ({ x: o.x, y: o.y, layerId: o.layerId })));
+    } else {
+      // Re-route any erase ops (prev→null transitions can't happen on
+      // a paint stroke today, but the shape allows them) through the
+      // erase path. Paint ops with a non-null nextPresetId go through
+      // paintCells.
+      const paints = ops.filter((o) => o.nextPresetId !== null) as Array<
+        PaintOp & { nextPresetId: string }
+      >;
+      const erases = ops.filter((o) => o.nextPresetId === null);
+      if (paints.length > 0) {
+        scene.paintCells(
+          paints.map((o) => ({
+            x: o.x,
+            y: o.y,
+            layerId: o.layerId,
+            presetId: o.nextPresetId,
+          })),
+        );
+      }
+      if (erases.length > 0) {
+        scene.eraseCells(
+          erases.map((o) => ({ x: o.x, y: o.y, layerId: o.layerId })),
+        );
+      }
+    }
+    useDiagnosticsStore
+      .getState()
+      .log("info", `${label} on "${drag.layerId}"`);
+  }, []);
 
   const handleMouseLeave = React.useCallback(() => {
     useSelectionStore.getState().setHover(null);
     useSelectionStore.getState().setCursor(null);
-  }, []);
+    // Commit any in-flight stroke so the user doesn't lose work when
+    // they drag past the canvas edge.
+    if (paintDragRef.current?.active) {
+      finalizePaintDrag();
+    }
+  }, [finalizePaintDrag]);
 
   const handleMouseDown = React.useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -821,14 +1058,57 @@ export function MapCanvasPanel(): React.JSX.Element {
           startPanX: pan.x,
           startPanY: pan.y,
         };
+        return;
       }
+      // Left-button + no modifiers: start a paint/eraser stroke when
+      // the active tool calls for it. Other tools (select, fill,
+      // dropper, entity-place) are one-shot ops handled by handleClick.
+      if (event.button !== 0) return;
+      const tool = useToolStore.getState().activeTool;
+      if (tool !== "paint" && tool !== "eraser") return;
+      const local = localAt(event);
+      if (!local) return;
+      const c = cellAt(local.x, local.y);
+      if (!c) return;
+      const layerId = useLayerStore.getState().activeId;
+      const presetId = useTilePresetStore.getState().activeId;
+      if (tool === "paint" && !presetId) {
+        useDiagnosticsStore
+          .getState()
+          .log("warn", "Paint: no active tile preset");
+        return;
+      }
+      // Brush-kind-aware diagnostic for the deferred line/rect shapes
+      // so the user understands why the stroke isn't drawing a multi-
+      // point geometry. Logged once per stroke (at start), not per stamp.
+      const brushKind = useBrushStore.getState().kind;
+      if (brushKind === "line" || brushKind === "rect") {
+        useDiagnosticsStore
+          .getState()
+          .log(
+            "info",
+            `Brush "${brushKind}": multi-point geometry deferred — stamping as single cell (Wave 3.4)`,
+          );
+      }
+      paintDragRef.current = {
+        active: true,
+        layerId,
+        presetId,
+        tool,
+        visited: new Set<string>(),
+        ops: [],
+      };
+      stampBrush(c.x, c.y);
     },
-    [pan.x, pan.y],
+    [pan.x, pan.y, cellAt, localAt, stampBrush],
   );
 
   const handleMouseUp = React.useCallback(() => {
     panDragRef.current = null;
-  }, []);
+    if (paintDragRef.current?.active) {
+      finalizePaintDrag();
+    }
+  }, [finalizePaintDrag]);
 
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -839,9 +1119,9 @@ export function MapCanvasPanel(): React.JSX.Element {
       const local = localAt(event);
       if (!local) return;
       const c = cellAt(local.x, local.y);
-      // Tool dispatcher. `select` is the only tool wired to a real
-      // store action in Wave 3.3.14; the paint family is intentionally
-      // deferred to Wave 3.4 (paint-write loop + history entries).
+      // Tool dispatcher. Paint + eraser are stroke-based, handled in
+      // mousedown/move/up; they fall through to a no-op here (the
+      // stroke's already been committed by handleMouseUp).
       const tool = useToolStore.getState().activeTool;
       switch (tool) {
         case "select":
@@ -849,12 +1129,102 @@ export function MapCanvasPanel(): React.JSX.Element {
           break;
         case "paint":
         case "eraser":
-        case "fill":
-        case "dropper":
-        case "entity-place":
+          // No-op — handled by the drag state machine. Click without
+          // drag (single mousedown→up at one cell) still produces one
+          // stamp via the mousedown→mouseup path.
+          break;
+        case "fill": {
+          if (!c) break;
+          const sceneState = useSceneStore.getState();
+          const layerId = useLayerStore.getState().activeId;
+          const presetId = useTilePresetStore.getState().activeId;
+          if (!presetId) {
+            useDiagnosticsStore
+              .getState()
+              .log("warn", "Fill: no active tile preset");
+            break;
+          }
+          const ops = floodFillOps(
+            c.x,
+            c.y,
+            sceneState.dims,
+            sceneState.cells,
+            layerId,
+            presetId,
+          );
+          if (ops.length === 0) {
+            useDiagnosticsStore
+              .getState()
+              .log("info", "Fill: no-op (target already matches active preset)");
+            break;
+          }
+          const entry: HistoryEntry = {
+            id:
+              typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: "paint",
+            label: `Fill ${ops.length} cell${ops.length === 1 ? "" : "s"}`,
+            ts: Date.now(),
+            undoPayload: { ops },
+            redoPayload: { ops },
+          };
+          useHistoryStore.getState().push(entry);
+          sceneState.paintCells(
+            ops.map((o) => ({
+              x: o.x,
+              y: o.y,
+              layerId: o.layerId,
+              presetId: presetId,
+            })),
+          );
           useDiagnosticsStore
             .getState()
-            .log("info", `Tool "${tool}" not wired yet (Wave 3.4)`);
+            .log("info", `Fill ${ops.length} cells on "${layerId}"`);
+          break;
+        }
+        case "dropper": {
+          if (!c) break;
+          const layerId = useLayerStore.getState().activeId;
+          const cellHere = useSceneStore.getState().cells[cellKey(c.x, c.y)];
+          // Pick the topmost painted preset on the active layer first;
+          // if the active layer is empty, walk the layer order top→bottom
+          // for a usable hit. (Matches "dropper picks what you see".)
+          let pickedPreset: string | undefined = cellHere?.layers[layerId];
+          let pickedLayer: string | undefined = pickedPreset ? layerId : undefined;
+          if (!pickedPreset && cellHere) {
+            const layerOrder = useLayerStore.getState().order;
+            for (let i = layerOrder.length - 1; i >= 0; i--) {
+              const lid = layerOrder[i]!;
+              const p = cellHere.layers[lid];
+              if (p) {
+                pickedPreset = p;
+                pickedLayer = lid;
+                break;
+              }
+            }
+          }
+          if (pickedPreset) {
+            useTilePresetStore.getState().setActiveId(pickedPreset);
+            useDiagnosticsStore
+              .getState()
+              .log(
+                "info",
+                `Dropper: picked "${pickedPreset}" from ${pickedLayer ?? "?"} @ ${c.x},${c.y}`,
+              );
+          } else {
+            useDiagnosticsStore
+              .getState()
+              .log("info", `Dropper: empty cell @ ${c.x},${c.y}`);
+          }
+          break;
+        }
+        case "entity-place":
+          // Entity store doesn't exist yet — keep the stub diagnostic
+          // so the surface is discoverable, matching the previous wave.
+          useDiagnosticsStore
+            .getState()
+            .log("info", `Tool "${tool}" not wired yet (awaiting entity store)`);
           break;
         default:
           // Unknown / future tool ids — also surface a diagnostic so
@@ -915,14 +1285,13 @@ export function MapCanvasPanel(): React.JSX.Element {
   }, []);
 
   const undo = React.useCallback(() => {
-    // 3.3.14 wires the cursor mover; payload dispatch (replaying the
-    // inverse op into scene state) lands in 3.4 alongside the paint
-    // loop that creates the entries in the first place.
-    useHistoryStore.getState().undo();
+    // 3.4: cursor move + payload replay into the scene store. See
+    // `historyDispatcher.ts` for the entry→ops fan-out.
+    undoOnce();
   }, []);
 
   const redo = React.useCallback(() => {
-    useHistoryStore.getState().redo();
+    redoOnce();
   }, []);
 
   // ---- Command-registry refs --------------------------------------
@@ -989,7 +1358,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         title: "Undo",
         category: "Map",
         keywords: ["undo", "history", "revert"],
-        description: "Undo the most recent edit (history dispatcher lands in Wave 3.4).",
+        description: "Undo the most recent edit — replays the inverse payload into the scene store.",
         run: () => undoRef.current(),
       }),
       registerCommand({
@@ -997,7 +1366,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         title: "Redo",
         category: "Map",
         keywords: ["redo", "history", "reapply"],
-        description: "Redo the most recently undone edit (history dispatcher lands in Wave 3.4).",
+        description: "Redo the most recently undone edit — replays the forward payload into the scene store.",
         run: () => redoRef.current(),
       }),
     ];

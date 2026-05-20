@@ -54,6 +54,22 @@ export interface SceneStateData {
 export interface SceneStateActions {
   paintCell: (x: number, y: number, layerId: string, presetId: string) => void;
   eraseCell: (x: number, y: number, layerId: string) => void;
+  /**
+   * Bulk paint — apply N cell writes in ONE `set` callback. Used by the
+   * MapCanvas drag-paint loop in Wave 3.4 so a single stroke produces a
+   * single storage event (one popout sync per stroke, not N). Each op
+   * upserts a per-layer preset assignment on `cells[<x,y>].layers[layerId]`.
+   */
+  paintCells: (
+    ops: Array<{ x: number; y: number; layerId: string; presetId: string }>,
+  ) => void;
+  /**
+   * Bulk erase — mirror of `paintCells` for erasure. Drops fully-empty
+   * cells from the sparse map just like the single-cell `eraseCell`.
+   */
+  eraseCells: (
+    ops: Array<{ x: number; y: number; layerId: string }>,
+  ) => void;
   setCellHeight: (x: number, y: number, h: number) => void;
   toggleCellTag: (x: number, y: number, tag: string) => void;
   setProperty: (x: number, y: number, key: string, value: unknown) => void;
@@ -117,6 +133,49 @@ export const useSceneStore = createSyncedStore<
           delete nextCells[key];
         } else {
           nextCells[key] = { ...existing, layers: nextLayers };
+        }
+        return { cells: nextCells };
+      });
+    },
+    paintCells: (ops) => {
+      if (ops.length === 0) return;
+      set((s) => {
+        // Single-pass accumulator. We mutate a working object (NOT the
+        // store's `s.cells`) and assign back at the end so the store
+        // sees ONE reference swap and emits ONE storage event for the
+        // whole stroke.
+        const nextCells: Record<string, SceneCell> = { ...s.cells };
+        for (const op of ops) {
+          const key = cellKey(op.x, op.y);
+          const existing = nextCells[key] ?? emptyCell();
+          nextCells[key] = {
+            ...existing,
+            layers: { ...existing.layers, [op.layerId]: op.presetId },
+          };
+        }
+        return { cells: nextCells };
+      });
+    },
+    eraseCells: (ops) => {
+      if (ops.length === 0) return;
+      set((s) => {
+        const nextCells: Record<string, SceneCell> = { ...s.cells };
+        for (const op of ops) {
+          const key = cellKey(op.x, op.y);
+          const existing = nextCells[key];
+          if (!existing) continue;
+          const nextLayers = { ...existing.layers };
+          delete nextLayers[op.layerId];
+          const hasLayers = Object.keys(nextLayers).length > 0;
+          const hasMeta =
+            existing.height !== 0 ||
+            existing.tags.length > 0 ||
+            Object.keys(existing.properties).length > 0;
+          if (!hasLayers && !hasMeta) {
+            delete nextCells[key];
+          } else {
+            nextCells[key] = { ...existing, layers: nextLayers };
+          }
         }
         return { cells: nextCells };
       });
