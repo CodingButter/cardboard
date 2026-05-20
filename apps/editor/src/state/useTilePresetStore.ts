@@ -32,7 +32,12 @@ export interface TilePresetStateActions {
 export type TilePresetState = TilePresetStateData & TilePresetStateActions;
 
 const INITIAL: TilePresetStateData = {
-  activeId: "wall-brick",
+  // Empty string = no preset selected yet. The actual id is filled in
+  // by `hydrateStoresFromIdb` from the loaded pack's registry. Picking
+  // any concrete id here would lie to the user before any pack is
+  // loaded (the previous "wall-brick" default was a `MOCK_*` id that
+  // no real pack ships — Wave 3.5 critical #2).
+  activeId: "",
   activeCategory: "all",
 };
 

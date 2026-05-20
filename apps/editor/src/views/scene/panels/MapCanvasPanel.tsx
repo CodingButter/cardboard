@@ -1358,6 +1358,10 @@ export function MapCanvasPanel(): React.JSX.Element {
         title: "Undo",
         category: "Map",
         keywords: ["undo", "history", "revert"],
+        // MapCanvas is always mounted in the Scene workspace
+        // (`headerless: true`), so this keybinding stays live whether
+        // or not HistoryPanel is open. Wave 3.5 audit #4.
+        keybinding: "Ctrl+Z",
         description: "Undo the most recent edit — replays the inverse payload into the scene store.",
         run: () => undoRef.current(),
       }),
@@ -1366,6 +1370,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         title: "Redo",
         category: "Map",
         keywords: ["redo", "history", "reapply"],
+        keybinding: "Ctrl+Shift+Z",
         description: "Redo the most recently undone edit — replays the forward payload into the scene store.",
         run: () => redoRef.current(),
       }),

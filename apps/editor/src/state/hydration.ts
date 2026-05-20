@@ -502,8 +502,22 @@ function projectGridsIntoCells(
 }
 
 /**
+ * Module-scoped guard for `hydrateStoresFromIdb`. Tracks the last
+ * project we successfully hydrated so the function can no-op when
+ * called redundantly for the same project (e.g. a second tab/window
+ * mounts after the first has already populated the store). Without
+ * this guard the second mount would call `useSceneStore.setState`
+ * with the IDB snapshot, fire a `storage` event via `createSyncedStore`,
+ * and OVERWRITE in-memory paints made in the first tab. Wave 3.5 audit
+ * critical #1. Reset to null only on full module reload.
+ */
+let lastHydratedProjectId: string | null = null;
+
+/**
  * Hydrate the wave-3 Zustand stores from the project's IDB rows. Safe
- * to call multiple times — each call REPLACES the relevant slices.
+ * to call multiple times — repeat calls for the SAME projectId no-op
+ * once the store is populated. Switching to a different project always
+ * re-hydrates (the guard keys on projectId equality).
  *
  * Failure modes:
  *   - No manifest → push empty cells + default 64×64 dims + default layers.
@@ -513,6 +527,17 @@ function projectGridsIntoCells(
  *   - Bad preset file → diagnostic, that preset is skipped; the rest hydrate.
  */
 export async function hydrateStoresFromIdb(projectId: string): Promise<void> {
+  // Guard: skip re-hydration when projectId matches the last successful
+  // hydrate AND the scene store currently has cells. Empty-cell store
+  // for the same project is treated as "first mount or post-failure
+  // retry" — proceed in that case so the user isn't stuck with a blank
+  // scene. Cross-project switches always proceed.
+  if (
+    lastHydratedProjectId === projectId &&
+    Object.keys(useSceneStore.getState().cells).length > 0
+  ) {
+    return;
+  }
   // 1) Manifest. Drives `startScene` + preset-file discovery.
   const manifest = await EditorProjectStore.loadManifest(projectId);
 
@@ -627,4 +652,11 @@ export async function hydrateStoresFromIdb(projectId: string): Promise<void> {
       activeCategory: tp.activeCategory ?? "all",
     });
   }
+
+  // Mark this project as hydrated. The early-return guard at the top of
+  // the function uses this together with the cells-count check; setting
+  // it on every successful path (including the empty-scene fallback)
+  // means a SECOND mount of the same project no-ops correctly while a
+  // first mount of a different project always re-hydrates.
+  lastHydratedProjectId = projectId;
 }

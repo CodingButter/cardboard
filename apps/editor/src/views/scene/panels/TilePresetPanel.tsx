@@ -17,10 +17,8 @@ import {
   useTilePresetStore,
   type TilePresetCategoryFilter,
 } from "../../../state/useTilePresetStore";
-import {
-  MOCK_TILE_PRESETS,
-  type TilePresetRow,
-} from "../scene-fixtures";
+import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+import type { TilePresetRow } from "../scene-fixtures";
 
 /**
  * TilePresetPanel — categorised tile preset picker (walls / floors /
@@ -118,20 +116,48 @@ function findCategoryMeta(id: CategoryFilter): CategoryMeta {
   return CATEGORY_META.find((c) => c.id === id) ?? CATEGORY_META[0]!;
 }
 
+/**
+ * Live preset list — adapter from `useTilePresetRegistryStore` (the
+ * IDB-hydrated registry) to the panel's `TilePresetRow` shape. Reads
+ * the registry's `presets` record, returns a stable insertion-ordered
+ * array of rows. Wave 3.5 critical #2 — replaces the previous
+ * `MOCK_TILE_PRESETS` feed which produced ids (`wall-brick`) the
+ * registry didn't know about, causing paints to write unknown ids
+ * with no texture/colour mapping. The shape adapter keeps PresetList
+ * + PresetRow unchanged.
+ */
+function useLivePresets(): readonly TilePresetRow[] {
+  const presets = useTilePresetRegistryStore((s) => s.presets);
+  return React.useMemo<readonly TilePresetRow[]>(
+    () =>
+      Object.values(presets).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        category: entry.category,
+        // Registry doesn't carry a description; pack authors can add
+        // one to the preset JSONC and hydration can surface it later.
+        // For now the row's tooltip shows the id as a stable fallback.
+        description: entry.id,
+      })),
+    [presets],
+  );
+}
+
 /** Per-category counts (incl. the "all" pseudo-category). */
-function useCategoryCounts(): Record<CategoryFilter, number> {
+function useCategoryCounts(
+  presets: readonly TilePresetRow[],
+): Record<CategoryFilter, number> {
   return React.useMemo(() => {
-    const all = MOCK_TILE_PRESETS as readonly TilePresetRow[];
     const counts: Record<CategoryFilter, number> = {
-      all: all.length,
+      all: presets.length,
       walls: 0,
       floors: 0,
       ceilings: 0,
       decor: 0,
     };
-    for (const p of all) counts[p.category] += 1;
+    for (const p of presets) counts[p.category] += 1;
     return counts;
-  }, []);
+  }, [presets]);
 }
 
 // ---------------------------------------------------------------------------
@@ -155,13 +181,15 @@ export function TilePresetPanel(): React.JSX.Element {
     useTilePresetStore.getState().setActiveCategory(cat);
   }, []);
 
-  // Dynamic per-preset commands. Re-registers if MOCK_TILE_PRESETS
-  // changes shape (which it will when the real store lands).
-  // MOCK_TILE_PRESETS is a module-level constant so empty deps are
-  // correct.
+  // Live preset list from the IDB-hydrated registry. Replaces the
+  // prior `MOCK_TILE_PRESETS` source — see `useLivePresets` JSDoc.
+  const allPresets = useLivePresets();
+
+  // Dynamic per-preset commands. Re-registers when the live registry
+  // changes (e.g. project switch, hot-reload of a pack manifest), so
+  // the command palette always reflects the current pack's presets.
   React.useEffect(() => {
-    const presets = MOCK_TILE_PRESETS as readonly TilePresetRow[];
-    const unregs = presets.map((preset) =>
+    const unregs = allPresets.map((preset) =>
       registerCommand({
         id: `scene.tile.select.${preset.id}`,
         title: `Select Tile: ${preset.name}`,
@@ -172,7 +200,7 @@ export function TilePresetPanel(): React.JSX.Element {
       }),
     );
     return () => unregs.forEach((u) => u());
-  }, []);
+  }, [allPresets]);
 
   // Per-category filter commands (incl. the "all" pseudo-category).
   React.useEffect(() => {
@@ -189,13 +217,12 @@ export function TilePresetPanel(): React.JSX.Element {
     return () => unregs.forEach((u) => u());
   }, []);
 
-  const counts = useCategoryCounts();
+  const counts = useCategoryCounts(allPresets);
 
   const visiblePresets = React.useMemo(() => {
-    const all = MOCK_TILE_PRESETS as readonly TilePresetRow[];
-    if (activeCategory === "all") return all;
-    return all.filter((p) => p.category === activeCategory);
-  }, [activeCategory]);
+    if (activeCategory === "all") return allPresets;
+    return allPresets.filter((p) => p.category === activeCategory);
+  }, [activeCategory, allPresets]);
 
   // Outer container is layout-only (no card chrome) — DockShell wraps
   // this in <PanelSurface/>. We own:

@@ -179,28 +179,18 @@ export function HistoryPanel(): React.JSX.Element {
     jumpRef.current = handleJump;
   }, [handleUndo, handleRedo, handleMarkAllApplied, handleClear, handleJump]);
 
-  // Static commands: undo / redo / markAllApplied / clear. Empty-deps
-  // register-once.
+  // Static commands: markAllApplied / clear / jump (per-entry below).
+  //
+  // Undo + Redo are NOT registered here — they're owned by
+  // MapCanvasPanel as `scene.mapCanvas.undo` / `scene.mapCanvas.redo`
+  // with the Ctrl+Z / Ctrl+Shift+Z keybindings attached there. Reason:
+  // HistoryPanel is opt-in (not in the default Scene layout) so
+  // registering the global keybinding here would leave Ctrl+Z dead
+  // in the default workspace. MapCanvasPanel is `headerless: true` +
+  // always mounted in Scene, so its keybinding is always live. Wave
+  // 3.5 audit #4 — collapses the previous duplicate command pair.
   React.useEffect(() => {
     const unregs: Array<() => void> = [
-      registerCommand({
-        id: "scene.history.undo",
-        title: "Undo",
-        category: "History",
-        keywords: ["undo", "history", "back"],
-        keybinding: "Ctrl+Z",
-        icon: <Undo2 size={14} />,
-        run: () => undoRef.current(),
-      }),
-      registerCommand({
-        id: "scene.history.redo",
-        title: "Redo",
-        category: "History",
-        keywords: ["redo", "history", "forward"],
-        keybinding: "Ctrl+Shift+Z",
-        icon: <Redo2 size={14} />,
-        run: () => redoRef.current(),
-      }),
       registerCommand({
         id: "scene.history.markAllApplied",
         title: "Mark All Applied",
