@@ -1,0 +1,271 @@
+{
+  "id": "cell-inspector",
+  "title": "Cell Inspector",
+  "category": "Inspector",
+  "dockKind": "dockable-window",
+  "state": {},
+  "rootOptions": {
+    "padding": 0,
+    "bare": true
+  },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 1,
+    "className": "h-full w-full min-h-0 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)",
+    "children": [
+      {
+        "type": "Conditional",
+        "when": "store.selection.selected",
+        "equals": null,
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "row",
+            "align": "center",
+            "justify": "center",
+            "className": "h-full w-full text-center px-2",
+            "children": [
+              {
+                "type": "Text",
+                "variant": "label",
+                "text": "No cell selected"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Conditional",
+        "when": "store.selection.selected",
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "row",
+            "align": "center",
+            "gap": 1,
+            "className": "min-w-0",
+            "children": [
+              {
+                "type": "Layout",
+                "direction": "row",
+                "align": "baseline",
+                "gap": 1,
+                "className": "min-w-0 flex-1 truncate",
+                "children": [
+                  {
+                    "type": "Text",
+                    "variant": "label",
+                    "text": "Cell"
+                  },
+                  {
+                    "type": "Tooltip",
+                    "side": "top",
+                    "stages": [
+                      {
+                        "delay": 1000,
+                        "content": {
+                          "type": "Text",
+                          "text": "store.selection.selected",
+                          "format": "cell"
+                        }
+                      },
+                      {
+                        "delay": 3000,
+                        "content": {
+                          "type": "Layout",
+                          "direction": "column",
+                          "gap": 1,
+                          "children": [
+                            {
+                              "type": "Heading",
+                              "level": 4,
+                              "text": "Selected Cell"
+                            },
+                            {
+                              "type": "Text",
+                              "variant": "muted",
+                              "text": "Coordinates of the selected cell in tile-space."
+                            },
+                            {
+                              "type": "Text",
+                              "variant": "value",
+                              "text": "store.selection.selected",
+                              "format": "cell"
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "child": {
+                      "type": "Text",
+                      "variant": "value",
+                      "text": "store.selection.selected",
+                      "format": "cell",
+                      "truncate": true
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Tooltip",
+                "side": "top",
+                "stages": [
+                  {
+                    "delay": 1000,
+                    "content": { "type": "Text", "text": "Deselect cell" }
+                  },
+                  {
+                    "delay": 3000,
+                    "content": {
+                      "type": "Layout",
+                      "direction": "column",
+                      "gap": 1,
+                      "children": [
+                        {
+                          "type": "Heading",
+                          "level": 4,
+                          "text": "Deselect"
+                        },
+                        {
+                          "type": "Text",
+                          "variant": "muted",
+                          "text": "Clear the current cell selection. Equivalent to pressing Escape in the canvas."
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "child": {
+                  "type": "Button",
+                  "shape": "icon",
+                  "icon": "X",
+                  "iconSize": 11,
+                  "ariaLabel": "Deselect cell",
+                  "onClick": { "script": "scene.cell.deselect" }
+                }
+              }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 0,
+            "className": "min-w-0",
+            "children": [
+              {
+                "type": "Tooltip",
+                "side": "top",
+                "stages": [
+                  {
+                    "delay": 1000,
+                    "content": { "type": "Text", "text": "Height" }
+                  },
+                  {
+                    "delay": 3000,
+                    "content": {
+                      "type": "Layout",
+                      "direction": "column",
+                      "gap": 1,
+                      "children": [
+                        {
+                          "type": "Heading",
+                          "level": 4,
+                          "text": "Height"
+                        },
+                        {
+                          "type": "Text",
+                          "variant": "muted",
+                          "text": "Cell height in scene units. Used by the raycaster for partial walls."
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "child": {
+                  "type": "Text",
+                  "variant": "label",
+                  "text": "Height"
+                }
+              },
+              {
+                "type": "Layout",
+                "direction": "row",
+                "align": "center",
+                "gap": 1,
+                "className": "min-w-0",
+                "children": [
+                  {
+                    "type": "NumberInput",
+                    "bind": "store.scene.cells[selected].height",
+                    "min": 0,
+                    "max": 8,
+                    "step": 0.1,
+                    "precision": 2,
+                    "showSteppers": true,
+                    "ariaLabel": "Cell height"
+                  },
+                  {
+                    "type": "Text",
+                    "variant": "label",
+                    "text": "m"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 0,
+            "className": "min-w-0",
+            "children": [
+              {
+                "type": "Tooltip",
+                "side": "top",
+                "stages": [
+                  {
+                    "delay": 1000,
+                    "content": { "type": "Text", "text": "Layer" }
+                  },
+                  {
+                    "delay": 3000,
+                    "content": {
+                      "type": "Layout",
+                      "direction": "column",
+                      "gap": 1,
+                      "children": [
+                        {
+                          "type": "Heading",
+                          "level": 4,
+                          "text": "Active Layer"
+                        },
+                        {
+                          "type": "Text",
+                          "variant": "muted",
+                          "text": "Switches which layer the inspector surfaces. The Type field shows the tile preset painted on the chosen layer for this cell."
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "child": {
+                  "type": "Text",
+                  "variant": "label",
+                  "text": "Layer"
+                }
+              },
+              {
+                "type": "Select",
+                "bind": "store.layer.activeId",
+                "optionsFrom": "layers",
+                "ariaLabel": "Cell layer",
+                "size": "sm"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

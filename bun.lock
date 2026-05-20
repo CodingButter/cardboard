@@ -114,6 +114,7 @@
       "version": "0.1.0",
       "dependencies": {
         "lucide-react": "^1.16.0",
+        "three": "^0.169.0",
       },
     },
     "packages/default-pack": {

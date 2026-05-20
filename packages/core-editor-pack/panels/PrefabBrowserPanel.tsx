@@ -1,3 +1,16 @@
+// P3 batch D-final migration. Moved from
+// `apps/editor/src/views/scene/panels/PrefabBrowserPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `scene-fixtures` (MOCK_PREFABS is now
+// pack-local) and the shell-SDK externals (`EmptyState` +
+// `registerCommand`).
+//
+// State source: today the panel is store-free — every datum comes from
+// the bundled `MOCK_PREFABS` fixture. When the live prefab-registry
+// store lands (analogous to `useTilePresetRegistryStore`) the
+// subscription hook gets externalised through the shell SDK and the
+// fixture import goes away. Until then, the pack owns its prefab
+// content the same way it owns layer + light fixtures.
 import React from "react";
 import {
   Box,
@@ -10,15 +23,20 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle (no singleton state).
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `EmptyState` ships via the shell SDK because it
+// transitively imports a binary asset (`logo.png`) the pack-builder
+// can't resolve; `registerCommand` routes into the host command
+// store + palette.
+import { EmptyState, registerCommand } from "@cardboard/editor-shell";
 import {
   MOCK_PREFABS,
   type PrefabCategory,
   type PrefabRow,
-} from "../scene-fixtures";
+} from "./scene-fixtures";
 
 /**
  * PrefabBrowserPanel — browse + place prefab instances.

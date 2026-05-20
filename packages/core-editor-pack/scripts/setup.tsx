@@ -59,6 +59,14 @@ import { BrushPanel, MANIFEST as BRUSH_MANIFEST } from "../panels/BrushPanel";
 import { ToolPalettePanel, MANIFEST as TOOL_PALETTE_MANIFEST } from "../panels/ToolPalettePanel";
 // P3 batch D-light — the Scene workspace's centerpiece painter.
 import { MapCanvasPanel, MANIFEST as MAP_CANVAS_MANIFEST } from "../panels/MapCanvasPanel";
+// P3 batch D-final — the last four Scene panels migrate together.
+// MinimapPanel (cells overview), CellInspectorPanel (hybrid TSX+JSON),
+// PrefabBrowserPanel (placeable-prefab grid), PreviewPanel (THREE.js
+// 3D preview with WebGL graceful-degradation).
+import { MinimapPanel, MANIFEST as MINIMAP_MANIFEST } from "../panels/MinimapPanel";
+import { CellInspectorPanel, MANIFEST as CELL_INSPECTOR_MANIFEST } from "../panels/CellInspectorPanel";
+import { PrefabBrowserPanel, MANIFEST as PREFAB_BROWSER_MANIFEST } from "../panels/PrefabBrowserPanel";
+import { PreviewPanel, MANIFEST as PREVIEW_MANIFEST } from "../panels/PreviewPanel";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // Compose each panel def the same way MapView's old static `PANELS`
@@ -148,6 +156,26 @@ export default function setup(ctx: EditorPackContext): () => void {
       component: MapCanvasPanel,
       surface: false,
       headerless: true,
+    }),
+    // P3 batch D-final — the remaining four Scene panels. All four
+    // were registered with default surface flags in MapView (no
+    // `surface: false`, no `headerless: true`), so the default
+    // PanelSurface card chrome applies to each.
+    ctx.registerPanel({
+      ...MINIMAP_MANIFEST,
+      component: MinimapPanel,
+    }),
+    ctx.registerPanel({
+      ...CELL_INSPECTOR_MANIFEST,
+      component: CellInspectorPanel,
+    }),
+    ctx.registerPanel({
+      ...PREFAB_BROWSER_MANIFEST,
+      component: PrefabBrowserPanel,
+    }),
+    ctx.registerPanel({
+      ...PREVIEW_MANIFEST,
+      component: PreviewPanel,
     }),
   ];
 

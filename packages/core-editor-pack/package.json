@@ -4,6 +4,7 @@
   "private": true,
   "description": "The Cardboard editor itself, shipped as an editor pack. P1 (spike) validated that pack-shipped TSX components share React with the host editor. P2 (this commit) migrates the first hand-written panel — NotesPanel — into the pack via the new `ctx.registerPanel(def)` API on `EditorPackContext`. Subsequent phases continue draining views/panels/layouts out of `apps/editor/src/views/` into here until the editor shell is bare and the core pack IS the editor.",
   "dependencies": {
-    "lucide-react": "^1.16.0"
+    "lucide-react": "^1.16.0",
+    "three": "^0.169.0"
   }
 }

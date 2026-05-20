@@ -1,3 +1,27 @@
+// P3 batch D-final migration. Moved from
+// `apps/editor/src/views/scene/panels/PreviewPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `scene-fixtures` and the shell-SDK
+// externals. The WebGL graceful-degradation logic from the original
+// commit (try/catch around `buildPreviewScene()` + the
+// `PreviewErrorBoundary` class) rides along verbatim — both layers
+// are necessary (effect errors aren't caught by error boundaries,
+// boundary alone wouldn't catch the common context-acquisition
+// failure path).
+//
+// State source: Wave 3.3 — `useSceneStore` (cells + dims +
+// settings.ambient), `useLayerStore` (visibility + order),
+// `useTilePresetRegistryStore` (per-preset color/texture metadata +
+// `texturesEpoch` repaint driver), `useDiagnosticsStore` (Output /
+// Problems surfacing of WebGL failures). All four are synced Wave-3
+// stores with their own BroadcastChannel; bundling duplicates would
+// isolate the preview from the painter.
+//
+// `buildPreviewScene` stays panel-local — it's a private THREE.js
+// scene-graph constructor with no third-party-pack utility (a
+// custom-preview pack would build its own scene chrome from
+// scratch). `three` itself is bundled into the pack via Bun's
+// workspace resolution (added to the pack's `dependencies`).
 import React from "react";
 import * as THREE from "three";
 import {
@@ -9,20 +33,30 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Button } from "../../../components/ui/Button";
-import { EmptyState } from "../../../components/ui/EmptyState";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import { getDiagnosticsState } from "../../../state/useDiagnosticsStore";
-import { useSceneStore } from "../../../state/useSceneStore";
-import { useLayerStore } from "../../../state/useLayerStore";
-import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitives — safe to bundle (no singleton state).
+// `Button` and `Tooltip` are pure presentational; `EmptyState` is
+// SDK-routed because it transitively imports a binary asset
+// (`logo.png`) the pack-builder can't resolve.
+import { Button } from "../../../apps/editor/src/components/ui/Button";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — Wave-3 synced stores + `EmptyState` + the wrapped
+// tile-texture cache. `useDiagnosticsStore.getState()` replaces the
+// shell-side `useDiagnosticsStore.getState()` sugar (the SDK exposes the hook,
+// not the imperative wrapper, so this panel calls
+// `.getState()` directly).
 import {
-  ensureLoaded as ensureTextureLoaded,
-  getTextureBitmap,
-} from "../../../state/tileTextureCache";
-import { MOCK_LAYERS } from "../scene-fixtures";
+  EmptyState,
+  registerCommand,
+  useDiagnosticsStore,
+  useLayerStore,
+  useSceneStore,
+  useTilePresetRegistryStore,
+  loadTileTexture,
+  getTileTextureSync,
+} from "@cardboard/editor-shell";
+import { MOCK_LAYERS } from "./scene-fixtures";
 
 /**
  * PreviewPanel — Three.js 3D preview of the current scene.
@@ -419,7 +453,7 @@ function PreviewPanelInner(): React.JSX.Element {
       // the preview is offline. Diagnostics is broadcast-synced so
       // popouts see this too.
       try {
-        getDiagnosticsState().log(
+        useDiagnosticsStore.getState().log(
           "error",
           `3D preview unavailable — WebGL initialization failed: ${message}`,
         );
@@ -465,7 +499,7 @@ function PreviewPanelInner(): React.JSX.Element {
         const message =
           err instanceof Error ? err.message : String(err ?? "unknown error");
         try {
-          getDiagnosticsState().log(
+          useDiagnosticsStore.getState().log(
             "error",
             `3D preview render failed: ${message}`,
           );
@@ -606,11 +640,13 @@ function PreviewPanelInner(): React.JSX.Element {
         const texPath = entry?.texture;
         // Hot-path bitmap lookup. `undefined` = never requested,
         // `null` = known-failed, otherwise = ready.
-        const bitmap = texPath ? getTextureBitmap(texPath) : undefined;
+        const bitmap = texPath
+          ? getTileTextureSync(presetId, texPath)
+          : undefined;
         if (bitmap === undefined && texPath && projectId) {
           // Fire an async load; the next `texturesEpoch` bump will
           // re-run this effect and pick up the bitmap.
-          ensureTextureLoaded(projectId, texPath);
+          loadTileTexture(projectId, presetId, texPath);
         }
         const variant = bitmap ? "tex" : "flat";
         const matKey = `${layerId}:${presetId}:${variant}`;
@@ -1122,7 +1158,7 @@ class PreviewErrorBoundary extends React.Component<
 
   override componentDidCatch(error: Error, info: React.ErrorInfo): void {
     try {
-      getDiagnosticsState().log(
+      useDiagnosticsStore.getState().log(
         "error",
         `3D preview crashed: ${error.message}`,
       );

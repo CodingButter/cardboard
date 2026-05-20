@@ -352,3 +352,30 @@ export const MOCK_ASSETS = [
   { id: "prefab-barrel-ref", name: "barrel.prefab", kind: "prefab", path: "prefabs/barrel.prefab", refCount: 7, missing: false, description: "Standard barrel prop prefab." },
   { id: "script-trigger-door", name: "trigger-door.ts", kind: "script", path: "scripts/triggers/door.ts", refCount: 3, missing: false, description: "Door trigger behavior script." },
 ] as const satisfies readonly AssetRefRow[];
+
+// ---------------------------------------------------------------------------
+// Prefabs — consumed by PrefabBrowserPanel for the placeable-prefab grid.
+
+export type PrefabCategory = "enemy" | "item" | "trigger" | "decor" | "spawn";
+
+export interface PrefabRow {
+  id: string;
+  name: string;
+  category: PrefabCategory;
+  description: string;
+}
+
+export const MOCK_PREFABS = [
+  { id: "prefab-grunt", name: "Grunt", category: "enemy", description: "Basic melee enemy. Patrols a fixed path." },
+  { id: "prefab-sniper", name: "Sniper", category: "enemy", description: "Long-range hitscan enemy. Telegraphs before firing." },
+  { id: "prefab-bossA", name: "Boss A", category: "enemy", description: "Level boss with multi-stage attack patterns." },
+  { id: "prefab-medkit", name: "Medkit", category: "item", description: "Restores 25 HP on pickup." },
+  { id: "prefab-armor", name: "Armor", category: "item", description: "Grants 50 armor on pickup." },
+  { id: "prefab-keycard", name: "Keycard", category: "item", description: "Unlocks doors of matching color." },
+  { id: "prefab-trigger-door", name: "Door Trigger", category: "trigger", description: "Opens a tagged door when entered." },
+  { id: "prefab-trigger-checkpoint", name: "Checkpoint", category: "trigger", description: "Saves player progress when crossed." },
+  { id: "prefab-spawn-player", name: "Player Spawn", category: "spawn", description: "Marks a valid player spawn point." },
+  { id: "prefab-spawn-enemy", name: "Enemy Spawn", category: "spawn", description: "Marks an enemy spawn point — can be wave-triggered." },
+  { id: "prefab-decor-torch", name: "Torch", category: "decor", description: "Wall-mounted light source with flicker." },
+  { id: "prefab-decor-banner", name: "Banner", category: "decor", description: "Hanging banner. Pure decoration." },
+] as const satisfies readonly PrefabRow[];

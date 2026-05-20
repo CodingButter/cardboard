@@ -1,16 +1,38 @@
+// P3 batch D-final migration. Moved from
+// `apps/editor/src/views/scene/panels/MinimapPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `scene-fixtures` and the shell-SDK
+// externals. The tile-texture cache surface is the wrapped pair
+// (`loadTileTexture` + `getTileTextureSync`) exposed by the
+// MapCanvas migration; reading raw `ensureLoaded`/`getTextureBitmap`
+// from the cache directly would let the pack mutate the global
+// cache by arbitrary path, which the wrapper explicitly gates.
+//
+// State source: Wave 3.3 — `useSceneStore` (cells + dims),
+// `useLayerStore` (visibility + order), `useTilePresetRegistryStore`
+// (per-preset color/texture metadata + `texturesEpoch` repaint
+// driver). All four are synced Wave-3 stores with their own
+// BroadcastChannel; bundling duplicates into the pack would isolate
+// the minimap from the painter (paint a cell on MapCanvas →
+// minimap never sees it).
 import React from "react";
 import { Grid3x3, Map, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useLayerStore } from "../../../state/useLayerStore";
-import { useSceneStore } from "../../../state/useSceneStore";
-import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle (no singleton state).
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — Wave-3 synced stores + the wrapped tile-texture
+// cache. See MapCanvasPanel for the full rationale on why each must
+// resolve to the host singleton.
 import {
-  ensureLoaded as ensureTextureLoaded,
-  getTextureBitmap,
-} from "../../../state/tileTextureCache";
-import { MOCK_LAYERS } from "../scene-fixtures";
+  registerCommand,
+  useLayerStore,
+  useSceneStore,
+  useTilePresetRegistryStore,
+  loadTileTexture,
+  getTileTextureSync,
+} from "@cardboard/editor-shell";
+import { MOCK_LAYERS } from "./scene-fixtures";
 
 /**
  * MinimapPanel — opt-in compact overview of the whole scene.
@@ -257,7 +279,9 @@ export function MinimapPanel(): React.JSX.Element {
         const y = +ys!;
         const entry = presetRegistry[presetId];
         const texPath = entry?.texture;
-        const bitmap = texPath ? getTextureBitmap(texPath) : undefined;
+        const bitmap = texPath
+          ? getTileTextureSync(presetId, texPath)
+          : undefined;
         if (bitmap) {
           // drawImage scales the source bitmap into the cell. At
           // minimap cell sizes (often sub-8px) the result smears, but
@@ -267,7 +291,7 @@ export function MinimapPanel(): React.JSX.Element {
           ctx.fillStyle = entry?.color ?? layerColor;
           ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
           if (bitmap === undefined && texPath && projectId) {
-            ensureTextureLoaded(projectId, texPath);
+            loadTileTexture(projectId, presetId, texPath);
           }
         }
       }

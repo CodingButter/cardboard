@@ -1,55 +1,49 @@
-// Wave 3.4 — TSX → JSON migration (Phase 1b, fifth cut).
+// P3 batch D-final migration. Moved from
+// `apps/editor/src/views/scene/panels/CellInspectorPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `cell-inspector.json` (the JSON spec
+// rides along, same pattern as quick-tools / selection-info / brush /
+// tool-palette) and the shell-SDK externals (`PanelRenderer`,
+// `registerCommand`, Wave-3 stores, `cellKey`).
 //
-// CellInspectorPanel is the most complex panel migrated so far. The
-// JSON renderer can express MOST of the body:
-//
-//   - Empty-state ("No cell selected")
-//   - Header — `(x, y)` coord + Deselect button
-//   - Height — NumberInput round-tripping through a new writer entry
-//     `scene.cells[selected].height` (dynamic-indexer write path; the
-//     resolver matches the canonical key string verbatim).
-//   - Layer — new `Select` node bound to `store.layer.activeId`, with
-//     options sourced from the renderer's `layers` source (MOCK_LAYERS
-//     + `useLayerStore.customLayers` ordered by `useLayerStore.order`).
-//
-// What stays in TSX (no renderer support yet):
-//
-//   - Type field — bound to `cells[selected].layers[<activeId>]` which
-//     would require a SECOND dynamic indexer. The resolver only
-//     special-cases `[selected]` today.
-//   - Tags chip wrap — needs an iteration node (map over a bound
-//     array). No `Repeat`/`ForEach` primitive exists today.
-//   - Add-tag inline input — needs panel-local state (the original
-//     `addingTag` / `tagDraft` pair). The renderer has no local-state
-//     surface yet.
-//   - Properties list — needs the same iteration primitive over a
-//     dynamic key set.
-//
-// Both halves render inside the same scrolling root so the panel still
-// feels like one inspector. Width-responsive narrow/tiny fallbacks
-// from the original TSX panel are dropped — the renderer has no
-// panel-width reactive context yet. Same gap as Brush / QuickTools;
-// flagged in the deliverable report.
+// Hybrid TSX+JSON shape:
+//   - The JSON spec drives empty-state, header, Height, and Layer
+//     rows via `<PanelRenderer/>`.
+//   - The TSX tail still owns Type + Tags + Properties — those need
+//     iteration / panel-local state primitives the renderer hasn't
+//     grown yet.
 //
 // State source: Wave 3.3 — reads / writes via `useSceneStore`,
 // `useSelectionStore`, `useLayerStore`. The JSON spec binds directly
-// through the resolver; the inline TSX continues to call the store
-// actions imperatively for the un-migrated rows.
+// through the host renderer's resolver; the inline TSX continues to
+// call the store actions imperatively for the un-migrated rows.
 import React from "react";
 import { SlidersHorizontal, Plus } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { Chip } from "../../../components/ui/Chip";
-import { ToggleSwitch } from "../../../components/ui/controls";
-import { TextInput } from "../../../components/ui/TextInput";
-import { NumberInput } from "../../../components/ui/NumberInput";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useSelectionStore } from "../../../state/useSelectionStore";
-import { useSceneStore, cellKey } from "../../../state/useSceneStore";
-import { useLayerStore } from "../../../state/useLayerStore";
-import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
-import type { PanelSpec } from "../../../panel-renderer/types";
-import cellInspectorSpecJson from "../../../panel-renderer/specs/cell-inspector.json";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
+// Presentational primitives — safe to bundle (no singleton state, no
+// host-side React Context to coordinate with).
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import { Chip } from "../../../apps/editor/src/components/ui/Chip";
+import { ToggleSwitch } from "../../../apps/editor/src/components/ui/controls";
+import { TextInput } from "../../../apps/editor/src/components/ui/TextInput";
+import { NumberInput } from "../../../apps/editor/src/components/ui/NumberInput";
+// Externalised — `PanelRenderer` reads the renderer's dynamic-store
+// registry which is host-side; Wave-3 stores carry BroadcastChannel
+// sync; `cellKey` is the canonical coord-key helper. Bundling
+// duplicates would silently disconnect the inspector from the painter.
+import {
+  PanelRenderer,
+  cellKey,
+  registerCommand,
+  useLayerStore,
+  useSceneStore,
+  useSelectionStore,
+} from "@cardboard/editor-shell";
+// Bun bundles JSON imports inline — the spec ships as a literal in
+// the compiled pack-script bundle.
+import cellInspectorSpecJson from "./cell-inspector.json";
 
 const CELL_INSPECTOR_SPEC = cellInspectorSpecJson as PanelSpec;
 

@@ -14,30 +14,18 @@ import { WorkspaceRail } from "../components/dock/WorkspacePanel";
 // BrushPanel migrated to the core-editor-pack (P3 batch D).
 // TilePresetPanel migrated to the core-editor-pack (P3 batch B).
 // MapCanvasPanel migrated to the core-editor-pack (P3 batch D-light).
-import {
-  PreviewPanel,
-  MANIFEST as PREVIEW_MANIFEST,
-} from "./scene/panels/PreviewPanel";
+// PreviewPanel migrated to the core-editor-pack (P3 batch D-final).
 // LayersPanel migrated to the core-editor-pack (P3 batch B).
-import {
-  CellInspectorPanel,
-  MANIFEST as CELL_INSPECTOR_MANIFEST,
-} from "./scene/panels/CellInspectorPanel";
+// CellInspectorPanel migrated to the core-editor-pack (P3 batch D-final).
 // QuickToolsPanel migrated to the core-editor-pack (P3 batch B).
 // OutputPanel + ProblemsPanel migrated to the core-editor-pack
 // (CORE_EDITOR_PACK.md §10 P3 batch A). Registered via the pack's
 // `scripts/setup.tsx` with `surface: false`.
 // SelectionInfoPanel migrated to the core-editor-pack (P3 batch B).
 // SceneSettingsPanel migrated to the core-editor-pack (P3 batch D).
-import {
-  MinimapPanel,
-  MANIFEST as MINIMAP_MANIFEST,
-} from "./scene/panels/MinimapPanel";
+// MinimapPanel migrated to the core-editor-pack (P3 batch D-final).
 // HistoryPanel migrated to the core-editor-pack (P3 batch A).
-import {
-  PrefabBrowserPanel,
-  MANIFEST as PREFAB_BROWSER_MANIFEST,
-} from "./scene/panels/PrefabBrowserPanel";
+// PrefabBrowserPanel migrated to the core-editor-pack (P3 batch D-final).
 // LightingPanel migrated to the core-editor-pack (P3 batch A).
 // NotesPanel migrated to `packages/core-editor-pack/panels/NotesPanel.tsx`
 // (CORE_EDITOR_PACK.md §10 P2). The pack's `scripts/setup.tsx` calls
@@ -99,20 +87,19 @@ const PANELS: readonly DockPanelDef[] = [
   // MapCanvasPanel — contributed via the core-editor-pack (P3 batch
   // D-light; registered with `surface: false, headerless: true` so
   // the painter fills the dock area flush).
-  { ...PREVIEW_MANIFEST, component: PreviewPanel },
+  // PreviewPanel — contributed via the core-editor-pack (P3 batch D-final).
   // LayersPanel — contributed via the core-editor-pack (P3 batch B).
-  { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
+  // CellInspectorPanel — contributed via the core-editor-pack (P3 batch D-final).
   // QuickToolsPanel — contributed via the core-editor-pack (P3 batch B).
   // OutputPanel + ProblemsPanel — contributed via the core-editor-pack
   // at runtime (P3 batch A; registered with `surface: false`).
   // SelectionInfoPanel — contributed via the core-editor-pack (P3 batch
   // B; registered with `surface: false, headerless: true`).
   // SceneSettingsPanel — contributed via the core-editor-pack (P3 batch D).
-  // Opt-in Wave-2 panels — discoverable via the DocksModal but
-  // intentionally absent from the default layout below.
-  { ...MINIMAP_MANIFEST, component: MinimapPanel },
+  // Opt-in Wave-2 panels (Minimap, PrefabBrowser) — contributed via
+  // the core-editor-pack (P3 batch D-final). Discoverable via the
+  // DocksModal but intentionally absent from the default layout.
   // HistoryPanel — contributed via the core-editor-pack (P3 batch A).
-  { ...PREFAB_BROWSER_MANIFEST, component: PrefabBrowserPanel },
   // LightingPanel — contributed via the core-editor-pack (P3 batch A).
   // NotesPanel — contributed via the core-editor-pack at runtime.
   // AssetReferencesPanel — contributed via the core-editor-pack (P3 batch D).
