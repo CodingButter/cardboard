@@ -5,6 +5,7 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import { useLayerStore } from "../../../state/useLayerStore";
 import { useSceneStore } from "../../../state/useSceneStore";
+import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
 import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
@@ -39,11 +40,11 @@ const LS_SHOW_GRID = "cardboard.scene.minimap.showGrid";
 const LS_SHOW_VIEWPORT = "cardboard.scene.minimap.showViewport";
 const LS_ZOOM = "cardboard.scene.minimap.zoom";
 
-/** Layer color palette derived from MOCK_LAYERS so the minimap renders
- *  each layer's cells in its panel-defined color. Once tile presets gain
- *  a real per-preset color field, this can be replaced with a preset
- *  lookup keyed by the cell's preset id. */
-// TODO: when tile presets gain a 'color' field, prefer preset color over layer color.
+/** Layer color fallback derived from MOCK_LAYERS — used when the
+ *  tile-preset registry has no entry for a cell's preset id (stale
+ *  cell from a previous pack, hydration race, etc.). The primary color
+ *  source is `useTilePresetRegistryStore` per-preset entries, so two
+ *  presets on the same layer render distinguishably. */
 const LAYER_COLOR: Record<string, string> = Object.fromEntries(
   MOCK_LAYERS.map((l) => [l.id, l.color]),
 );
@@ -94,6 +95,9 @@ export function MinimapPanel(): React.JSX.Element {
   const cells = useSceneStore((s) => s.cells);
   const visibility = useLayerStore((s) => s.visibility);
   const order = useLayerStore((s) => s.order);
+  // Preset registry — looked up per-cell so the minimap reflects
+  // distinct tile presets, not just layer chrome.
+  const presetRegistry = useTilePresetRegistryStore((s) => s.presets);
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -217,20 +221,24 @@ export function MinimapPanel(): React.JSX.Element {
 
     // Real scene cells, painted back-to-front per `order` so upper
     // layers visually occlude lower ones. Hidden layers are skipped —
-    // mirrors LayersPanel state via the store. Drawn before the grid
+    // mirrors LayersPanel state via the store. Per-preset color via
+    // `presetRegistry` is the primary color source; layer color is
+    // only the fallback for unknown preset ids. Drawn before the grid
     // so the lattice reads on top, keeping cell boundaries legible
     // inside filled regions.
     ctx.globalAlpha = 0.85;
     for (const layerId of order) {
       if (visibility[layerId] === false) continue;
       const layerColor = LAYER_COLOR[layerId] ?? "#888";
-      ctx.fillStyle = layerColor;
       for (const key in cells) {
         const cellRecord = cells[key];
-        if (!cellRecord || !cellRecord.layers[layerId]) continue;
+        if (!cellRecord) continue;
+        const presetId = cellRecord.layers[layerId];
+        if (!presetId) continue;
         const [xs, ys] = key.split(",");
         const x = +xs!;
         const y = +ys!;
+        ctx.fillStyle = presetRegistry[presetId]?.color ?? layerColor;
         ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
       }
     }
@@ -303,6 +311,7 @@ export function MinimapPanel(): React.JSX.Element {
     visibility,
     order,
     cells,
+    presetRegistry,
   ]);
 
   // ---- Handlers ----------------------------------------------------

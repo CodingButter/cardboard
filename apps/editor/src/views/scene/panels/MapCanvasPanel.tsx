@@ -11,6 +11,7 @@ import { useSelectionStore } from "../../../state/useSelectionStore";
 import { useToolStore } from "../../../state/useToolStore";
 import { useDiagnosticsStore } from "../../../state/useDiagnosticsStore";
 import { useHistoryStore } from "../../../state/useHistoryStore";
+import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
 
 /**
  * MapCanvasPanel — the Scene page's primary top-down map canvas.
@@ -161,6 +162,11 @@ export function MapCanvasPanel(): React.JSX.Element {
   const customLayers = useLayerStore((s) => s.customLayers);
   const selected = useSelectionStore((s) => s.selected);
   const hover = useSelectionStore((s) => s.hover);
+  // Tile preset registry — per-preset color overrides per-layer color
+  // so two presets on the same layer render distinguishably. Falls back
+  // to layer color when the registry doesn't know the preset id (stale
+  // cell from a previous pack, etc.).
+  const presetRegistry = useTilePresetRegistryStore((s) => s.presets);
 
   // Zoom + pan remain panel-local until useViewportStore lands. Pan is
   // in CSS pixels relative to the letterboxed center; zoom multiplies
@@ -339,15 +345,17 @@ export function MapCanvasPanel(): React.JSX.Element {
     // Painted cells — sourced from `useSceneStore.cells`. Iterate
     // layers in `order` (bottom-to-top render order) and within each
     // layer pull every cell that has a preset assigned for that
-    // layer. Coloring is per-layer for now — tile-preset color
-    // resolution is a future gap (TODO 3.4+).
+    // layer. Per-preset color (from useTilePresetRegistryStore) takes
+    // precedence over per-layer color so two presets on the same
+    // layer render distinguishably; we fall back to the layer color
+    // when the registry has no entry for the preset id (stale cell
+    // from a previous pack, hydration race, etc.).
     const layerIndex = new Map<string, number>(
       order.map((id, i) => [id, i]),
     );
     for (const layerId of order) {
       if (visibility[layerId] === false) continue;
-      const color = layerColorById.get(layerId) ?? "#888";
-      ctx.fillStyle = color;
+      const layerColor = layerColorById.get(layerId) ?? "#888";
       for (const key in cells) {
         const c = cells[key];
         if (!c) continue;
@@ -362,6 +370,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         const py = rowEdges[y]!;
         const pw = colEdges[x + 1]! - px;
         const ph = rowEdges[y + 1]! - py;
+        ctx.fillStyle = presetRegistry[presetId]?.color ?? layerColor;
         ctx.fillRect(px, py, pw, ph);
       }
     }
@@ -486,16 +495,22 @@ export function MapCanvasPanel(): React.JSX.Element {
         let label = "Empty";
         if (cellAtSel) {
           // Walk layers from top to bottom (reverse `order`) and
-          // pick the first layer that has a preset assigned. Use the
-          // layer name as the chip label until tile-preset name
-          // resolution lands.
+          // pick the first layer that has a preset assigned. Prefer
+          // the preset's display name when the registry knows it;
+          // fall back to the layer name otherwise.
           for (let i = order.length - 1; i >= 0; i--) {
             const lid = order[i]!;
-            if (cellAtSel.layers[lid]) {
-              const layerRow =
-                MOCK_LAYERS.find((l) => l.id === lid) ??
-                customLayers.find((l) => l.id === lid);
-              label = layerRow?.name ?? lid;
+            const pid = cellAtSel.layers[lid];
+            if (pid) {
+              const presetName = presetRegistry[pid]?.name;
+              if (presetName) {
+                label = presetName;
+              } else {
+                const layerRow =
+                  MOCK_LAYERS.find((l) => l.id === lid) ??
+                  customLayers.find((l) => l.id === lid);
+                label = layerRow?.name ?? lid;
+              }
               break;
             }
           }
@@ -664,6 +679,7 @@ export function MapCanvasPanel(): React.JSX.Element {
     selected,
     dims.w,
     dims.h,
+    presetRegistry,
   ]);
 
   // ---- Pointer handlers --------------------------------------------

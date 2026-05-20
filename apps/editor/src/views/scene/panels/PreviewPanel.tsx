@@ -13,6 +13,7 @@ import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import { useSceneStore } from "../../../state/useSceneStore";
 import { useLayerStore } from "../../../state/useLayerStore";
+import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
 import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
@@ -287,6 +288,10 @@ export function PreviewPanel(): React.JSX.Element {
   const settings = useSceneStore((s) => s.settings);
   const visibility = useLayerStore((s) => s.visibility);
   const order = useLayerStore((s) => s.order);
+  // Per-preset color registry. Box materials are keyed by preset id +
+  // colored from the registry so two presets on the same layer tint
+  // distinguishably; layer color is the fallback for unknown ids.
+  const presetRegistry = useTilePresetRegistryStore((s) => s.presets);
 
   // Container-size state drives the "Too small" + "Hide toolbar" toggles.
   // We track it in React state so render-paths can react to it; the
@@ -452,6 +457,14 @@ export function PreviewPanel(): React.JSX.Element {
       }
     }
 
+    // Flush the material pool so a registry repopulation (new pack
+    // imported, hydrated colors changed) doesn't render cells at the
+    // previous pack's stale colors. The pool is per-rebuild now; that's
+    // fine — a 4096-cell grid creates at most ~dozens of distinct
+    // (layer, preset) keys, not thousands.
+    for (const m of handle.materialPool.values()) m.dispose();
+    handle.materialPool.clear();
+
     const halfW = dims.w / 2 - 0.5;
     const halfH = dims.h / 2 - 0.5;
 
@@ -468,14 +481,20 @@ export function PreviewPanel(): React.JSX.Element {
         const presetId = cell.layers[layerId];
         if (!presetId) continue;
 
-        // Material pool — shared by `${layerId}:${presetId}`. Color
-        // today is layer-driven (a future enhancement can swap in
-        // per-preset tints without changing the keying scheme).
+        // Material pool — shared by `${layerId}:${presetId}`. Color is
+        // sourced from the tile-preset registry when available so two
+        // presets on the same layer tint distinguishably; falls back
+        // to the layer color when the registry has no entry yet
+        // (hydration race, stale cell, etc.).
         const matKey = `${layerId}:${presetId}`;
         let mat = handle.materialPool.get(matKey);
         if (!mat) {
+          const presetColor = presetRegistry[presetId]?.color;
+          const colorNum = presetColor
+            ? hexStringToNumber(presetColor)
+            : colorForLayer(layerId);
           mat = new THREE.MeshStandardMaterial({
-            color: colorForLayer(layerId),
+            color: colorNum,
             roughness: 0.7,
             metalness: 0.05,
             wireframe: wireframeRef.current,
@@ -494,7 +513,7 @@ export function PreviewPanel(): React.JSX.Element {
         handle.sceneGroup.add(mesh);
       }
     }
-  }, [cells, visibility, order, dims.w, dims.h, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+  }, [cells, visibility, order, dims.w, dims.h, presetRegistry, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
 
   // ----- Ambient intensity from scene settings -----------------------
   React.useEffect(() => {
