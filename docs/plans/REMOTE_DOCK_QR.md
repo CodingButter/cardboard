@@ -152,6 +152,72 @@ file when D9 lands). The sidecar evaluates on cold-launch and
 includes the tier in the WebRTC peer-handshake metadata under a
 `deviceTier` field on its `usePairedPeersStore` entry.
 
+### Device identity (name + color + icon)
+
+Each sidecar carries a user-configured identity so multiple devices
+of the same tier are instantly distinguishable. "Workshop Tablet"
+with the orange flame is obviously different from "Couch iPad" with
+the blue star, even though both are tablets.
+
+**Identity lives on the device, not the desktop session.** The
+sidecar PWA writes it to its OWN IDB (`sidecar.identity`). When the
+same iPad connects to your home Mac, your work laptop, or a
+friend's PC, it carries the same name + color + icon every time.
+Travels with the hardware, not the host. The desktop's PairedPeer
+entry is just a mirror of what the device announced — never the
+canonical source.
+
+Stored locally on the sidecar in IDB (`sidecar.identity`), sent in
+the WebRTC peer-handshake metadata, mirrored into the desktop's
+`PairedPeer` entry:
+
+```ts
+interface SidecarIdentity {
+  name: string;          // user-configured, e.g. "Workshop Tablet"
+  color: string;         // hex from curated palette, e.g. "#f59e0b"
+  icon: string;          // lucide icon name from curated set
+}
+
+interface PairedPeer {
+  id: string;
+  deviceTier: "mobile" | "tablet" | "desktop";
+  identity: SidecarIdentity;
+  currentKind: SemanticPanelKind;
+  currentLayout?: LayoutId;
+  status: "connecting" | "connected" | "reconnecting" | "ended";
+  connectedAt: number;
+  lastSeenAt: number;
+}
+```
+
+**First-launch setup wizard** on the sidecar PWA. Name field, color
+swatch picker (8-12 curated colors), icon picker grouped:
+- **Device-type icons** — `Tablet`, `Smartphone`, `Monitor`, `Laptop`,
+  `Gamepad2`, `PenTool`.
+- **Abstract markers** — `Star`, `Heart`, `Flame`, `Bolt`, `Leaf`,
+  `Diamond`, `Crown`, `Anchor`, `Compass`.
+
+Skip-able. Defaults if skipped: `name = "Tablet #N"` (or "Phone #N",
+"Desktop #N"), `color` randomly chosen from the palette, `icon`
+defaulted per tier (`Tablet`/`Smartphone`/`Monitor`).
+
+Editable later from sidecar Settings.
+
+**Where the identity appears:**
+- **Drag-to-device-icon chips in the sidebar.** Each chip uses the
+  device's `color` for its background tint + the chosen `icon`. On
+  hover, shows the `name` as a Tooltip.
+- **Remote Dock Controller dock.** Card header shows the colored
+  icon + name. Status indicator (connected / reconnecting) keys off
+  the same color.
+- **Recent-sessions list on the sidecar.** Other devices the user
+  has paired in the past show with their identities — quick visual
+  recognition for re-pairing.
+- **Live-demo broadcast mode.** When the same panel is broadcast to
+  N devices, the desktop's confirmation chip shows the device icons
+  side by side so you can see at a glance which devices are
+  receiving.
+
 ### Drag-to-device-icon sidebar UX
 
 When the user drags a panel header tab in the editor, the left
