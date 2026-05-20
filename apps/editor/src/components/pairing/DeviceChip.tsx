@@ -94,6 +94,10 @@ export function DeviceChip({
   const iconName = identity?.icon ?? "Smartphone";
   const tier = entry.deviceTier ?? "device";
   const connected = entry.status === "connected";
+  // M2: the chip carries a small accent stripe when a panel is
+  // currently mounted on this device. The sidecar's `unmountPanel`
+  // (back button) clears `mountedKind`, which clears the stripe.
+  const mounted = Boolean(entry.mountedKind);
 
   const handleDragOver = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -225,6 +229,7 @@ export function DeviceChip({
         data-drag-active={dragActive ? "true" : undefined}
         data-drop-over={isOver ? "true" : undefined}
         data-flash={flash}
+        data-mounted={mounted ? "true" : undefined}
         onDragOver={handleDragOver}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -248,6 +253,17 @@ export function DeviceChip({
         }}
       >
         <LucideByName name={iconName} className="w-4 h-4" color={color} />
+        {/* M2: top-edge stripe lit when a panel is currently mounted
+         *  on this sidecar. Sized small + tinted from identity color so
+         *  it reads as "this chip has cargo" without competing with the
+         *  status pip in the corner. */}
+        {mounted && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-0.5 left-1 right-1 h-[2px] rounded-full"
+            style={{ backgroundColor: color }}
+          />
+        )}
         {/* Tiny status pip in the bottom-right corner. Emerald when
          *  connected; amber when connecting; zinc when ended. */}
         <span

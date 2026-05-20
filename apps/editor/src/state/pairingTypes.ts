@@ -68,4 +68,20 @@ export type WireMessage =
       hint?: "left" | "right" | "bottom";
       state?: unknown;
     }
+  /**
+   * Sidecar → desktop: "I dismissed the mounted panel."
+   *
+   * Mirror of `unmountPanel` in `sidecar/lib/peerTransport.ts`. The
+   * desktop receives this when the user taps the sidecar's back button
+   * on a mounted panel; the chip's mounted-indicator clears in
+   * response. The `panelKind` field echoes back whatever was mounted so
+   * the desktop can verify it's clearing the right slot. M2 only
+   * carries the active singleton; multi-pane wiring comes later with
+   * the tablet-tier work.
+   */
+  | {
+      kind: "unmountPanel";
+      panelKind: SemanticPanelKind;
+      reason?: "user" | "error";
+    }
   | { kind: "disconnect"; reason?: string };

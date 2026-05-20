@@ -58,6 +58,19 @@ export interface DesktopPairingActions {
   ) => void;
   /** Drop a paired-peer entry entirely (used after a clean disconnect). */
   removePairedPeer: (id: string) => void;
+  /**
+   * Set the `mountedKind` for an existing paired peer. Used by the
+   * desktop's `sendMountPanel` to optimistically reflect what was just
+   * sent so the chip's mounted-indicator lights up without waiting for
+   * a round-trip. No-op if the peer entry doesn't exist.
+   */
+  setPairedPeerMount: (id: string, panelKind: string) => void;
+  /**
+   * Clear `mountedKind` for an existing paired peer. Used when the
+   * sidecar sends `unmountPanel` (the user dismissed the panel) or
+   * when the connection ends. No-op if the entry doesn't exist.
+   */
+  clearPairedPeerMount: (id: string) => void;
   /** Reset everything — used by `destroyDesktopPeer` in tests / HMR. */
   reset: () => void;
 }
@@ -96,6 +109,28 @@ export const useDesktopPairingStore = createSyncedStore<
         const next = { ...s.pairedPeers };
         delete next[id];
         return { pairedPeers: next };
+      }),
+    setPairedPeerMount: (id, panelKind) =>
+      set((s) => {
+        const existing = s.pairedPeers[id];
+        if (!existing) return {};
+        return {
+          pairedPeers: {
+            ...s.pairedPeers,
+            [id]: { ...existing, mountedKind: panelKind },
+          },
+        };
+      }),
+    clearPairedPeerMount: (id) =>
+      set((s) => {
+        const existing = s.pairedPeers[id];
+        if (!existing) return {};
+        return {
+          pairedPeers: {
+            ...s.pairedPeers,
+            [id]: { ...existing, mountedKind: null },
+          },
+        };
       }),
     reset: () => set({ ...initialState }),
   }),

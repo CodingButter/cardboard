@@ -237,6 +237,16 @@ function handleInbound(remoteId: string, raw: unknown): void {
       });
       return;
     }
+    case "unmountPanel": {
+      // The sidecar dismissed the mounted panel. Clear our mirror of
+      // the mounted-kind so the chip's visual reflects an empty slot.
+      // We don't validate `panelKind` matches what we last sent — a
+      // race where the desktop sent a new mountPanel just before the
+      // sidecar's unmountPanel landed should still clear the slot;
+      // worst case the next desktop-side send re-mounts.
+      useDesktopPairingStore.getState().clearPairedPeerMount(remoteId);
+      return;
+    }
     case "ping":
     case "pong":
     case "storeWrite":
@@ -285,6 +295,14 @@ export function sendMountPanel(
   };
   try {
     entry.conn.send(msg);
+    // Optimistically mirror the mounted-kind into the store so the
+    // chip's "mounted" indicator lights up immediately. The sidecar's
+    // `unmountPanel` (or a `disconnect`) clears it; if the send itself
+    // throws we fall through to the catch block and leave the store
+    // untouched.
+    useDesktopPairingStore
+      .getState()
+      .setPairedPeerMount(remoteId, payload.panelKind);
     return true;
   } catch (err) {
     // eslint-disable-next-line no-console

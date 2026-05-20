@@ -7,10 +7,12 @@ import {
   connect as transportConnect,
   disconnect as transportDisconnect,
   onMessage,
+  send as transportSend,
   useTransportStore,
   type WireMessage,
   type TransportStatus,
 } from "../lib/peerTransport";
+import { MountedPanelScreen } from "./MountedPanelScreen";
 
 /**
  * ConnectingScreen — shown when the URL carries a `peer` id.
@@ -87,6 +89,20 @@ export function ConnectingScreen({
 
   const [lastInbound, setLastInbound] = React.useState<InboundEcho | null>(null);
 
+  /**
+   * Mounted panel state — populated when the desktop sends a
+   * `mountPanel` WireMessage. When this is non-null the screen swaps
+   * to `<MountedPanelScreen>`. The back button on that screen calls
+   * `dismissMountedPanel`, which sends `unmountPanel` upstream and
+   * clears the state. M2 only supports one panel at a time; later
+   * tablet-tier work can swap this for an array.
+   */
+  const [mountedPanel, setMountedPanel] = React.useState<{
+    panelKind: string;
+    label: string;
+    initialState?: unknown;
+  } | null>(null);
+
   // Dial the transport on mount + every time the URL params change.
   // Tearing down on unmount returns us cleanly to idle so the next
   // navigation starts fresh.
@@ -113,8 +129,9 @@ export function ConnectingScreen({
     };
   }, [params.peer, params.kind, params.layout, identity]);
 
-  // Subscribe to inbound messages — D10 just logs them into a dev
-  // banner so the smoke test can confirm the channel is bidirectional.
+  // Subscribe to inbound messages — D10 logs into a dev banner; M2
+  // additionally acts on `mountPanel` to swap the screen and on
+  // `disconnect` to clear any mounted panel.
   React.useEffect(() => {
     return onMessage((msg) => {
       setLastInbound({
@@ -122,6 +139,46 @@ export function ConnectingScreen({
         at: Date.now(),
         preview: previewMessage(msg),
       });
+      switch (msg.kind) {
+        case "mountPanel":
+          setMountedPanel({
+            panelKind: msg.panelKind,
+            label: msg.label,
+            initialState: msg.state,
+          });
+          break;
+        case "disconnect":
+          // Channel going down — drop mounted state so a fresh
+          // connection lands on the identity screen, not on a stale
+          // panel.
+          setMountedPanel(null);
+          break;
+        // hello / welcome / storeWrite / ping / pong / unmountPanel —
+        // either inapplicable on sidecar inbound (unmountPanel is
+        // sidecar→desktop only) or handled elsewhere.
+        default:
+          break;
+      }
+    });
+  }, []);
+
+  /**
+   * Dismiss the mounted panel — round-trips an `unmountPanel`
+   * WireMessage to the desktop so the chip can clear its mounted
+   * indicator. Local state is cleared regardless of whether send
+   * succeeds (best-effort cleanup; the desktop also clears on
+   * `disconnect`).
+   */
+  const dismissMountedPanel = React.useCallback(() => {
+    setMountedPanel((current) => {
+      if (current) {
+        transportSend({
+          kind: "unmountPanel",
+          panelKind: current.panelKind,
+          reason: "user",
+        });
+      }
+      return null;
     });
   }, []);
 
@@ -129,6 +186,21 @@ export function ConnectingScreen({
     transportDisconnect();
     onCancel();
   }, [onCancel]);
+
+  // Mounted-panel swap — when the desktop sends a `mountPanel` and the
+  // channel is alive, swap the entire screen. The identity-screen UI
+  // returns once `dismissMountedPanel` (back button) fires.
+  if (mountedPanel && status === "connected") {
+    return (
+      <MountedPanelScreen
+        identity={identity}
+        panelKind={mountedPanel.panelKind}
+        label={mountedPanel.label}
+        initialState={mountedPanel.initialState}
+        onDismiss={dismissMountedPanel}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen w-full bg-[#0a0a0c] text-zinc-100 flex flex-col">
@@ -402,6 +474,8 @@ function previewMessage(msg: WireMessage): string {
       return msg.reason ?? "no reason";
     case "mountPanel":
       return `${msg.panelKind} (${msg.label})`;
+    case "unmountPanel":
+      return `${msg.panelKind} (${msg.reason ?? "user"})`;
     case "ping":
     case "pong":
       return "";

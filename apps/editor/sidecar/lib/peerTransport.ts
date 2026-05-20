@@ -106,6 +106,22 @@ export type WireMessage =
       hint?: "left" | "right" | "bottom";
       state?: unknown;
     }
+  /**
+   * Sidecar → desktop: "I dismissed the mounted panel."
+   *
+   * Fired when the user taps the sidecar's back/close button on a
+   * mounted panel. The desktop uses this to clear the chip's "mounted"
+   * indicator + free up the slot. `panelKind` echoes back whatever was
+   * mounted so the desktop can verify it cleared the right slot (a
+   * tablet sidecar with multiple panes might fire this per pane in the
+   * future). M2 only carries the active singleton; multi-pane wiring
+   * comes with the tablet-tier work.
+   */
+  | {
+      kind: "unmountPanel";
+      panelKind: SemanticPanelKind;
+      reason?: "user" | "error";
+    }
   | { kind: "disconnect"; reason?: string };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +174,30 @@ export function onMessage(fn: MessageListener): () => void {
   listeners.add(fn);
   return () => {
     listeners.delete(fn);
+  };
+}
+
+/**
+ * TEST HOOK — inject a synthetic inbound `WireMessage` as if it had
+ * arrived over the data channel. Used by the smoke-test pipeline to
+ * exercise the mount/unmount UI without actually pairing over PeerJS
+ * Cloud (which would require a live remote peer). Production code
+ * never calls this; the only consumer is the `window.__sidecarDebug`
+ * shim below.
+ */
+function dispatchInboundForTest(raw: unknown): void {
+  dispatchInbound(raw);
+}
+
+function forceConnectedForTest(): void {
+  setState({ status: "connected", errorMessage: null, reconnectAttempt: 0 });
+}
+
+if (typeof window !== "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__sidecarDebug = {
+    dispatchInbound: dispatchInboundForTest,
+    forceConnected: forceConnectedForTest,
   };
 }
 
