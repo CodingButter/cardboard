@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Cardboard SideCar</title>
+    <meta name="theme-color" content="#0a0a0c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SideCar" />
+    <!--
+      Manifest link is injected at runtime by index.tsx (same pattern as
+      apps/editor/index.html) so Bun's HTML bundler doesn't try to
+      resolve the manifest path at build time. The manifest scope is
+      "./" so it's bound to /sidecar/ in both dev and production.
+    -->
+    <script src="./index.tsx" type="module" defer></script>
+  </head>
+  <body class="bg-[#0a0a0c]">
+    <div id="root"></div>
+  </body>
+</html>

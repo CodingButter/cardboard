@@ -45,6 +45,6 @@
       "UI/*": ["../../packages/engine/src/UI/*"]
     }
   },
-  "include": ["index.tsx", "server.ts", "src/**/*", "scripts/**/*"],
+  "include": ["index.tsx", "server.ts", "src/**/*", "scripts/**/*", "sidecar/**/*"],
   "exclude": ["node_modules", "public", "dist"]
 }

@@ -1,7 +1,9 @@
 /// <reference types="bun" />
 import index from "./index.html";
+import sidecarIndex from "./sidecar/index.html";
 
 const PUBLIC_DIR = `${import.meta.dir}/public`;
+const SIDECAR_DIR = `${import.meta.dir}/sidecar`;
 // EDITOR_IFRAME.md §11 — proxy `/play/*` to the live `apps/game/dist/`
 // directory so the iframe always loads the freshest game build (kept
 // up to date by the root `bun dev` watcher running `bun build --watch`
@@ -38,10 +40,66 @@ function pwaHeaders(pathname: string): HeadersInit | undefined {
   return undefined;
 }
 
+/**
+ * Sidecar PWA assets — same content-type/cache rules as the editor's
+ * own PWA, but the SW's allowed scope is constrained to `/sidecar/`
+ * so it can't reach outside the sidecar route.
+ */
+function sidecarPwaHeaders(pathname: string): HeadersInit | undefined {
+  if (pathname === "/sidecar/manifest.webmanifest") {
+    return {
+      "content-type": "application/manifest+json; charset=utf-8",
+      "cache-control": "no-cache",
+    };
+  }
+  if (pathname === "/sidecar/sw.js") {
+    return {
+      "content-type": "application/javascript; charset=utf-8",
+      "cache-control": "no-cache",
+      "service-worker-allowed": "/sidecar/",
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Transpile the sidecar's `sw.ts` to JS on demand so the service
+ * worker can be authored alongside the rest of the sidecar (`.ts`,
+ * editor-consistent) without a separate build step. Result is
+ * cached in-process — the file is small and changes rarely.
+ */
+let _sidecarSwJsCache: string | null = null;
+async function getSidecarSwJs(): Promise<string> {
+  if (_sidecarSwJsCache !== null) return _sidecarSwJsCache;
+  const swSource = await Bun.file(`${SIDECAR_DIR}/sw.ts`).text();
+  const transpiler = new Bun.Transpiler({ loader: "ts", target: "browser" });
+  _sidecarSwJsCache = transpiler.transformSync(swSource);
+  return _sidecarSwJsCache;
+}
+
 const server = Bun.serve({
   port: Number(process.env.PORT) || 3001,
   routes: {
     "/": index,
+    // SideCar PWA shell — REMOTE_DOCK_QR.md §5 / D9. Same Bun HTML
+    // import as the editor itself; URL params route inside the React
+    // app (cold-launch vs connecting). Match `/sidecar` (no slash) so
+    // bare visits redirect cleanly.
+    "/sidecar": sidecarIndex,
+    "/sidecar/": sidecarIndex,
+    "/sidecar/index.html": sidecarIndex,
+    "/sidecar/manifest.webmanifest": async () => {
+      const file = Bun.file(`${SIDECAR_DIR}/manifest.webmanifest`);
+      return new Response(file, {
+        headers: sidecarPwaHeaders("/sidecar/manifest.webmanifest"),
+      });
+    },
+    "/sidecar/sw.js": async () => {
+      const js = await getSidecarSwJs();
+      return new Response(js, {
+        headers: sidecarPwaHeaders("/sidecar/sw.js"),
+      });
+    },
     "/*": async (req) => {
       const { pathname } = new URL(req.url);
 
