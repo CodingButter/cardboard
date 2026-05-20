@@ -81,6 +81,31 @@ the apg pack-chain we already shipped. We didn't design a
 marketplace; we stumbled into one because pack-chain is the universal
 extension point.
 
+### Two scopes per pack: runtime + editor
+
+A single pack manifest can declare contributions to BOTH the
+runtime AND the editor. Production builds strip the editor
+contributions and any dev-only items; dev-mode injection includes
+them. One pack format, one mental model.
+
+| Scope | What you contribute |
+|---|---|
+| **Runtime** | Components, scripts, prefabs, asset blobs. Loaded by the engine; runs in the game. Ships in production exports unless flagged dev-only. |
+| **Editor** | Custom dock panels, custom inspectors, dock layouts, command palette entries, keybindings. Loaded by the editor; runs in the editor UI. Stripped from production exports. |
+
+A pack might contribute to either, or both. The interesting cases
+are the PAIRED contributions — runtime + editor working together as
+one coherent feature:
+
+- **Scripting language extension** — runtime: an interpreter for a
+  new script kind; editor: a code-editor panel for that language.
+- **Level-design AI helper** — runtime: AI fillers that generate
+  content; editor: a "Generate" button + preview panel.
+- **Telemetry pack** — runtime: instrumentation hooks; editor: a
+  dashboard panel visualizing captured data.
+- **Cheat system** — runtime: input watcher + preset scripts;
+  editor: Cheat Code Manager panel.
+
 ### Extension packs contribute ALL four primitive kinds
 
 Extension packs aren't just dev tools that watch from the side —
