@@ -1,28 +1,56 @@
+// P3 batch D-light migration. Moved from
+// `apps/editor/src/views/scene/panels/MapCanvasPanel.tsx` into the
+// core-editor-pack with no behavioural changes.
+//
+// State source: Wave 3.3 + Wave 3.4 — reads / writes via the eight
+// Wave-3 stores plus the history dispatcher + the tile-texture cache,
+// all externalised through `@cardboard/editor-shell`. Bundling
+// duplicate copies of any of these into the pack would isolate the
+// pack-side state from the host (broken BroadcastChannel sync, lost
+// texture epoch bumps, disconnected undo/redo) — see
+// CORE_EDITOR_PACK.md §6 gotcha #2.
+//
+// `SceneTabContextPicker` is also externalised — its `useActiveScene`
+// hook reads from the host's React Context, so a bundled duplicate
+// would resolve to the default empty value.
+//
+// `PaintOp` and `HistoryEntry` / `CustomLayer` are types only — Bun
+// erases them at compile, so they can come from the shell sources
+// directly without affecting the runtime bundle.
 import React from "react";
 import { Eye, EyeOff, Map as MapIcon, Plus } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import { SceneTabContextPicker } from "../SceneTabContextPicker";
-import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
-import { useSceneStore, cellKey } from "../../../state/useSceneStore";
-import { useLayerStore, type CustomLayer } from "../../../state/useLayerStore";
-import { useSelectionStore } from "../../../state/useSelectionStore";
-import { useToolStore } from "../../../state/useToolStore";
-import { useDiagnosticsStore } from "../../../state/useDiagnosticsStore";
-import { useHistoryStore, type HistoryEntry } from "../../../state/useHistoryStore";
-import { useBrushStore } from "../../../state/useBrushStore";
-import { useTilePresetStore } from "../../../state/useTilePresetStore";
-import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
+// Type-only imports — pack-builder erases at compile time. The relative
+// path crosses the pack boundary but never reaches the runtime bundle.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { CustomLayer } from "../../../apps/editor/src/state/useLayerStore";
+import type { HistoryEntry } from "../../../apps/editor/src/state/useHistoryStore";
+import type { PaintOp } from "../../../apps/editor/src/state/historyDispatcher";
+// Bundled — presentational primitive with no singleton/context
+// dependency, safe to ship inside the pack.
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import { MOCK_LAYERS, type LayerRow } from "./scene-fixtures";
+// Externalised — all of these are Wave-3 synced stores OR the
+// history dispatcher OR the tile-texture cache wrapper OR the
+// scene-picker composite. They MUST resolve to the host's singletons
+// / React context to avoid the duplicate-state hazard.
 import {
+  registerCommand,
+  useSceneStore,
+  cellKey,
+  useLayerStore,
+  useSelectionStore,
+  useToolStore,
+  useDiagnosticsStore,
+  useHistoryStore,
+  useBrushStore,
+  useTilePresetStore,
+  useTilePresetRegistryStore,
   undoOnce,
   redoOnce,
-  type PaintOp,
-} from "../../../state/historyDispatcher";
-import {
-  ensureLoaded as ensureTextureLoaded,
-  getTextureBitmap,
-} from "../../../state/tileTextureCache";
+  loadTileTexture,
+  getTileTextureSync,
+  SceneTabContextPicker,
+} from "@cardboard/editor-shell";
 
 /**
  * MapCanvasPanel — the Scene page's primary top-down map canvas.
@@ -515,7 +543,7 @@ export function MapCanvasPanel(): React.JSX.Element {
         const ph = rowEdges[y + 1]! - py;
         const entry = presetRegistry[presetId];
         const texPath = entry?.texture;
-        const bitmap = texPath ? getTextureBitmap(texPath) : undefined;
+        const bitmap = texPath ? getTileTextureSync(presetId, texPath) : undefined;
         if (bitmap) {
           // Cached + decoded — blit it.
           ctx.drawImage(bitmap, px, py, pw, ph);
@@ -528,7 +556,7 @@ export function MapCanvasPanel(): React.JSX.Element {
           // an async load. `bitmap === null` means "known-failed" so
           // we DON'T retry on every paint.
           if (bitmap === undefined && texPath && projectId) {
-            ensureTextureLoaded(projectId, texPath);
+            loadTileTexture(projectId, presetId, texPath);
           }
         }
       }

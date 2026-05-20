@@ -369,6 +369,11 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const useToolStore = __mod.useToolStore;
               export const EmptyState = __mod.EmptyState;
               export const PanelRenderer = __mod.PanelRenderer;
+              export const undoOnce = __mod.undoOnce;
+              export const redoOnce = __mod.redoOnce;
+              export const loadTileTexture = __mod.loadTileTexture;
+              export const getTileTextureSync = __mod.getTileTextureSync;
+              export const SceneTabContextPicker = __mod.SceneTabContextPicker;
             `,
           }));
         },

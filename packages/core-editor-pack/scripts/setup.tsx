@@ -57,6 +57,8 @@ import { SceneSettingsPanel, MANIFEST as SCENE_SETTINGS_MANIFEST } from "../pane
 import { AssetReferencesPanel, MANIFEST as ASSET_REFERENCES_MANIFEST } from "../panels/AssetReferencesPanel";
 import { BrushPanel, MANIFEST as BRUSH_MANIFEST } from "../panels/BrushPanel";
 import { ToolPalettePanel, MANIFEST as TOOL_PALETTE_MANIFEST } from "../panels/ToolPalettePanel";
+// P3 batch D-light — the Scene workspace's centerpiece painter.
+import { MapCanvasPanel, MANIFEST as MAP_CANVAS_MANIFEST } from "../panels/MapCanvasPanel";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // Compose each panel def the same way MapView's old static `PANELS`
@@ -136,6 +138,16 @@ export default function setup(ctx: EditorPackContext): () => void {
     ctx.registerPanel({
       ...TOOL_PALETTE_MANIFEST,
       component: ToolPalettePanel,
+    }),
+    // P3 batch D-light — MapCanvasPanel registered with `surface: false`
+    // + `headerless: true` (matches the flags MapView previously
+    // used). The painter fills the dock area flush — no card chrome
+    // around the canvas, no panel header bar stealing pixels.
+    ctx.registerPanel({
+      ...MAP_CANVAS_MANIFEST,
+      component: MapCanvasPanel,
+      surface: false,
+      headerless: true,
     }),
   ];
 

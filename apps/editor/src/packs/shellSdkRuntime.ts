@@ -36,8 +36,48 @@ import { useSceneStore, cellKey } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
 import { useBrushStore } from "../state/useBrushStore";
 import { useToolStore } from "../state/useToolStore";
+import { undoOnce, redoOnce } from "../state/historyDispatcher";
+import {
+  ensureLoaded as ensureTextureLoaded,
+  getTextureBitmap,
+} from "../state/tileTextureCache";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
+import { SceneTabContextPicker } from "../views/scene/SceneTabContextPicker";
+
+/**
+ * P3 batch D-light — narrow public surface over `tileTextureCache`.
+ *
+ * The cache itself keys by raw texture path. Exposing the raw helpers
+ * would let third-party pack code mutate the global cache by name
+ * (`getTextureBitmap("foo.jpg")` succeeds whether or not the preset
+ * registry knows that path). The wrapper enforces the "caller must
+ * already own a preset id" contract — packs can't reach into the
+ * cache for arbitrary assets, only for textures bound to a preset
+ * they're aware of. `presetId` is informational at this layer (a
+ * future revision can validate it against the registry); the
+ * `texturePath` is the actual cache key the underlying helpers use.
+ *
+ * Signature deliberately mirrors what a third-party pack would write
+ * if it had to author the loader from scratch — pack id + preset id
+ * + path is the trio every pack-supplied painter would track.
+ */
+function loadTileTexture(
+  packId: string,
+  _presetId: string,
+  texturePath: string,
+): void {
+  // `packId` doubles as the projectId for now — the cache is keyed
+  // against the active editor project, which is exactly the pack
+  // scope packs care about.
+  ensureTextureLoaded(packId, texturePath);
+}
+function getTileTextureSync(
+  _presetId: string,
+  texturePath: string,
+): ImageBitmap | null | undefined {
+  return getTextureBitmap(texturePath);
+}
 
 /**
  * The runtime surface published into the `globalThis` slot. Pack-shipped
@@ -133,6 +173,38 @@ export const shellSdk = {
   // Any third-party pack that wants JSON-authored panels reaches for
   // the same renderer.
   PanelRenderer,
+  // P3 batch D-light — `undoOnce` / `redoOnce` walk the history store
+  // cursor + replay paint/erase ops into the scene store. MapCanvas
+  // wires Ctrl+Z / Ctrl+Shift+Z commands to these. Any pack that
+  // emits paintable history entries (custom painter, prefab-stamper,
+  // selection-based bulk edit) needs the same dispatcher entry points
+  // — without them the pack would have to duplicate the fan-out
+  // through `useHistoryStore` → `useSceneStore`, which silently
+  // drifts when the dispatcher logic grows new entry types.
+  undoOnce,
+  redoOnce,
+  // P3 batch D-light — narrow public surface over the
+  // `tileTextureCache` singleton. Bound to the host's IDB-backed
+  // asset store + the host's registry epoch, so pack-side callers MUST
+  // route through the singleton (a duplicated cache inside the pack
+  // bundle would never see the registry's `texturesEpoch` tick and
+  // canvases would render the color fallback forever).
+  // `loadTileTexture` is fire-and-forget (kicks an async load that
+  // bumps the epoch when the bitmap arrives); `getTileTextureSync`
+  // is the per-cell hot-path lookup. The narrow signature gates
+  // access by `presetId` so packs can't poke arbitrary asset paths
+  // through the cache.
+  loadTileTexture,
+  getTileTextureSync,
+  // P3 batch D-light — `SceneTabContextPicker` is a presentational
+  // composite that reads `scenes` / `activeScene` from the host's
+  // `<ActiveSceneProvider/>` context. Bundling a duplicate into a
+  // pack would give it a different React context identity and the
+  // hook would resolve to the default (empty) value — the picker
+  // would render disabled regardless of the actual scene list. Any
+  // pack-shipped surface that wants the same picker reaches for the
+  // shared component, same as `EmptyState` / `PanelRenderer`.
+  SceneTabContextPicker,
 } as const;
 
 export type ShellSdk = typeof shellSdk;

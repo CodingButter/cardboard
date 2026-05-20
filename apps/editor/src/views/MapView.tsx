@@ -13,10 +13,7 @@ import { WorkspaceRail } from "../components/dock/WorkspacePanel";
 // ToolPalettePanel migrated to the core-editor-pack (P3 batch D).
 // BrushPanel migrated to the core-editor-pack (P3 batch D).
 // TilePresetPanel migrated to the core-editor-pack (P3 batch B).
-import {
-  MapCanvasPanel,
-  MANIFEST as MAP_CANVAS_MANIFEST,
-} from "./scene/panels/MapCanvasPanel";
+// MapCanvasPanel migrated to the core-editor-pack (P3 batch D-light).
 import {
   PreviewPanel,
   MANIFEST as PREVIEW_MANIFEST,
@@ -99,7 +96,9 @@ const PANELS: readonly DockPanelDef[] = [
   // ToolPalettePanel — contributed via the core-editor-pack (P3 batch D).
   // BrushPanel — contributed via the core-editor-pack (P3 batch D).
   // TilePresetPanel — contributed via the core-editor-pack (P3 batch B).
-  { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false, headerless: true },
+  // MapCanvasPanel — contributed via the core-editor-pack (P3 batch
+  // D-light; registered with `surface: false, headerless: true` so
+  // the painter fills the dock area flush).
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
   // LayersPanel — contributed via the core-editor-pack (P3 batch B).
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
