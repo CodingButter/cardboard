@@ -1,0 +1,337 @@
+{
+  "id": "editor-pack-demo.brush-migrated",
+  "title": "Brush (pack-shipped)",
+  "category": "Tools",
+  "dockKind": "dockable-window",
+  "state": {},
+  "rootOptions": {
+    "padding": 0,
+    "bare": true
+  },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 1,
+    "className": "h-full w-full min-h-0 overflow-y-auto",
+    "children": [
+      {
+        "type": "Layout",
+        "direction": "grid",
+        "gap": 1,
+        "columnsMinPx": 54,
+        "columnsMaxPx": 64,
+        "childHeightPx": 60,
+        "childFlex": "1",
+        "children": [
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Single" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Single" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Single-cell point brush — paints one cell at a time."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.brush.kind",
+              "activeValue": "brush-single",
+              "text": "Single",
+              "icon": "Dot",
+              "iconSize": 18,
+              "onClick": { "script": "scene.brush.set.brush-single" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Square 3x3" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Square 3x3" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Square footprint brush — paints an N×N block centered on the cursor (size controls N)."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.brush.kind",
+              "activeValue": "brush-square-3",
+              "text": "Square 3x3",
+              "icon": "Square",
+              "iconSize": 18,
+              "onClick": { "script": "scene.brush.set.brush-square-3" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Circle 5" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Circle 5" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Circular footprint brush — paints a disc of radius `size` centered on the cursor."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.brush.kind",
+              "activeValue": "brush-circle-5",
+              "text": "Circle 5",
+              "icon": "Circle",
+              "iconSize": 18,
+              "onClick": { "script": "scene.brush.set.brush-circle-5" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Line" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Line" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Line brush — click + drag to paint a straight line of cells between the press and release points."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.brush.kind",
+              "activeValue": "brush-line",
+              "text": "Line",
+              "icon": "Slash",
+              "iconSize": 18,
+              "onClick": { "script": "scene.brush.set.brush-line" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Rectangle" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Rectangle" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Rectangle brush — click + drag to fill an axis-aligned rectangle between the press and release points."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.brush.kind",
+              "activeValue": "brush-rect",
+              "text": "Rectangle",
+              "icon": "RectangleHorizontal",
+              "iconSize": 18,
+              "onClick": { "script": "scene.brush.set.brush-rect" }
+            }
+          }
+        ]
+      },
+      {
+        "type": "Text",
+        "variant": "label",
+        "text": "Size"
+      },
+      {
+        "type": "Layout",
+        "direction": "row",
+        "align": "stretch",
+        "gap": 1,
+        "className": "max-w-[260px]",
+        "children": [
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Decrease size" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Decrease Brush Size" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Steps the brush size down by 1 (minimum 1)."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "Button",
+              "shape": "icon",
+              "icon": "Minus",
+              "iconSize": 14,
+              "ariaLabel": "Decrease brush size",
+              "disabledWhen": { "bind": "store.brush.size", "atMost": 1 },
+              "onClick": { "script": "scene.brush.sizeDown" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Brush size" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Brush Size" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Drag to set the brush radius (1–20). Determines how many cells are affected during paint and erase ops."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "Slider",
+              "bind": "store.brush.size",
+              "min": 1,
+              "max": 20,
+              "step": 1,
+              "ariaLabel": "Brush size",
+              "fill": true
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Type a value" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Brush Size" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Click to type a brush size (1–20). The slider, −/+ buttons, and palette commands all map to the same underlying size."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "NumberInput",
+              "bind": "store.brush.size",
+              "min": 1,
+              "max": 20,
+              "step": 1,
+              "widthPx": 48,
+              "ariaLabel": "Brush size value"
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "top",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Increase size" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Increase Brush Size" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Steps the brush size up by 1 (maximum 20)."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "Button",
+              "shape": "icon",
+              "icon": "Plus",
+              "iconSize": 14,
+              "ariaLabel": "Increase brush size",
+              "disabledWhen": { "bind": "store.brush.size", "atLeast": 20 },
+              "onClick": { "script": "scene.brush.sizeUp" }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

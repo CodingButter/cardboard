@@ -29,17 +29,24 @@
 import React from "react";
 import {
   Brush,
+  Circle,
   Crosshair,
+  Dot,
   Eraser,
   Hammer,
   Layers,
+  Minus,
   MousePointer2,
   PaintBucket,
   Pipette,
+  Plus,
   PlusSquare,
+  RectangleHorizontal,
+  Slash,
   Square,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { NumberInput } from "../components/ui/NumberInput";
 import { ScrollRow } from "../components/ui/ScrollRow";
 import { TextInput } from "../components/ui/TextInput";
 import { Tooltip } from "../components/ui/Tooltip";
@@ -60,8 +67,10 @@ import type {
   InputNode,
   LayoutNode,
   NodeSpec,
+  NumberInputNode,
   PanelSpec,
   ScrollRowNode,
+  SliderNode,
   SpacerNode,
   StorePath,
   TextFormat,
@@ -95,6 +104,15 @@ const ICON_REGISTRY: Record<
   PaintBucket,
   PlusSquare,
   Hammer,
+  // Added for the BrushPanel migration — every icon referenced by
+  // MOCK_BRUSHES (Dot / Circle / Slash / RectangleHorizontal) plus
+  // the size stepper buttons (Minus / Plus).
+  Dot,
+  Circle,
+  Slash,
+  RectangleHorizontal,
+  Minus,
+  Plus,
 };
 
 // ---------------------------------------------------------------------------
@@ -428,12 +446,139 @@ function InputRenderer({ node }: { node: InputNode }): React.JSX.Element {
   );
 }
 
+function NumberInputRenderer({
+  node,
+}: {
+  node: NumberInputNode;
+}): React.JSX.Element {
+  const { value, binding } = useStoreBinding(node.bind);
+  // Coerce the bound value into a finite number for the primitive. The
+  // shell `<NumberInput>` always presents the user a number and treats
+  // NaN as "restore previous committed value", so coercing is safe.
+  const numericValue =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : Number(value);
+  const displayValue = Number.isFinite(numericValue) ? numericValue : 0;
+  // Fixed-width affordance — the brush-size readout is 40px so it
+  // visually clusters with the +/- buttons + slider. Without `widthPx`
+  // the input fills its flex parent (which is what the SceneSettings
+  // numeric rows want).
+  const style: React.CSSProperties | undefined =
+    node.widthPx ? { width: `${node.widthPx}px` } : undefined;
+  // `shrink-0` keeps the readout from collapsing inside a flex row
+  // whose siblings are larger (e.g. the slider's `flex-1` consumes
+  // remaining space).
+  const wrapperClass = node.widthPx ? "shrink-0" : "flex-1 min-w-0";
+  const input = (
+    <div className={wrapperClass} style={style}>
+      <NumberInput
+        value={displayValue}
+        min={node.min}
+        max={node.max}
+        step={node.step ?? 1}
+        precision={node.precision}
+        showSteppers={node.showSteppers}
+        unit={node.unit}
+        aria-label={node.ariaLabel ?? node.label}
+        onChange={(next) => binding.set(next)}
+      />
+    </div>
+  );
+  if (!node.label) return input;
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-zinc-400">{node.label}</span>
+      {input}
+    </label>
+  );
+}
+
+function SliderRenderer({ node }: { node: SliderNode }): React.JSX.Element {
+  const { value, binding } = useStoreBinding(node.bind);
+  const numericValue =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : Number(value);
+  const displayValue = Number.isFinite(numericValue) ? numericValue : node.min;
+  const fill = node.fill ?? true;
+  // The shell does not export a dedicated `<Slider>` primitive yet
+  // (brush-size was the first caller). Emitting `<input type="range">`
+  // directly with the same `accent-amber-500` styling matches the
+  // original BrushPanel TSX one-for-one — when a primitive lands, this
+  // is the swap site.
+  const wrapper = fill ? "flex-1 min-w-0 flex items-center" : "flex items-center";
+  return (
+    <div className={wrapper}>
+      <input
+        type="range"
+        min={node.min}
+        max={node.max}
+        step={node.step ?? 1}
+        value={displayValue}
+        aria-label={node.ariaLabel}
+        onChange={(e) => {
+          const parsed = Number.parseFloat(e.target.value);
+          if (Number.isFinite(parsed)) binding.set(parsed);
+        }}
+        className="w-full accent-amber-500"
+      />
+    </div>
+  );
+}
+
 function ButtonRenderer({ node }: { node: ButtonNode }): React.JSX.Element {
+  // ALWAYS call the binding hook (even when disabledWhen is undefined)
+  // so hook order stays stable across renders. The sentinel path reads
+  // a stable scalar so we don't trigger extra re-renders.
+  const disabledBindPath = node.disabledWhen?.bind ?? "store.selection.selected";
+  const { value: disabledValue } = useStoreBinding(disabledBindPath);
+  const disabled = React.useMemo(() => {
+    const dw = node.disabledWhen;
+    if (!dw) return false;
+    const n = typeof disabledValue === "number" ? disabledValue : Number(disabledValue);
+    if (!Number.isFinite(n)) return false;
+    if (typeof dw.atMost === "number" && n <= dw.atMost) return true;
+    if (typeof dw.atLeast === "number" && n >= dw.atLeast) return true;
+    return false;
+  }, [node.disabledWhen, disabledValue]);
   const onClick = React.useCallback(() => {
     void invokeScript(node.onClick);
   }, [node.onClick]);
+  const Icon = node.icon ? ICON_REGISTRY[node.icon] : undefined;
+  const shape = node.shape ?? "default";
+  if (shape === "icon") {
+    // Icon-only square — mirrors the BrushPanel +/- stepper visual.
+    // Doesn't use the shell `<Button>` primitive because it doesn't
+    // expose a "square 28px" mode; we render a bare `<button>` with
+    // the same Tailwind class stack the original BrushPanel used.
+    const active = !disabled;
+    return (
+      <button
+        type="button"
+        aria-label={node.ariaLabel ?? node.text ?? ""}
+        disabled={disabled}
+        onClick={onClick}
+        className={[
+          "h-7 w-7 shrink-0 rounded",
+          "flex items-center justify-center",
+          "border transition-colors",
+          active
+            ? "bg-transparent border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)"
+            : "bg-transparent border-(--color-border) text-(--color-fg-muted) opacity-50 cursor-not-allowed",
+        ].join(" ")}
+      >
+        {Icon ? <Icon size={node.iconSize ?? 14} /> : null}
+      </button>
+    );
+  }
   return (
-    <Button variant={node.variant ?? "secondary"} onClick={onClick}>
+    <Button
+      variant={node.variant ?? "secondary"}
+      onClick={onClick}
+      disabled={disabled}
+      leadingIcon={Icon ? <Icon size={node.iconSize ?? 12} /> : undefined}
+    >
       {node.text}
     </Button>
   );
@@ -617,6 +762,10 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <TextRenderer node={node} />;
     case "Input":
       return <InputRenderer node={node} />;
+    case "NumberInput":
+      return <NumberInputRenderer node={node} />;
+    case "Slider":
+      return <SliderRenderer node={node} />;
     case "Button":
       return <ButtonRenderer node={node} />;
     case "Spacer":

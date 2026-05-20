@@ -173,12 +173,101 @@ export interface InputNode {
   placeholder?: string;
 }
 
+/**
+ * NumberInput — two-way bound numeric input with optional bounds.
+ *
+ * Added for the BrushPanel migration where the brush-size editor must
+ * accept typed values clamped to 1..20. Maps to the shell's
+ * `<NumberInput>` primitive (mono right-aligned input on the
+ * `.input-number` surface class), kept narrow with `widthPx` so the
+ * brush-size row reads as a single-character readout next to the
+ * stepper buttons.
+ *
+ * Distinct from `Slider`: NumberInput renders the type-able number
+ * field; Slider renders the drag-to-set range. Both bind to the same
+ * store path when a panel exposes both (see brush-size row).
+ */
+export interface NumberInputNode {
+  type: "NumberInput";
+  /** Two-way binding — must point at a numeric store path. */
+  bind: StorePath;
+  /** Minimum value. The shell primitive clamps on commit. */
+  min?: number;
+  /** Maximum value. The shell primitive clamps on commit. */
+  max?: number;
+  /** Step granularity for ArrowUp/ArrowDown keypress. Defaults to 1. */
+  step?: number;
+  /** Decimal precision when serialising the number back to text. */
+  precision?: number;
+  /** Optional label rendered above the input. Omit for inline use. */
+  label?: string;
+  /** Accessibility label. Defaults to `label`. */
+  ariaLabel?: string;
+  /** Fixed width in pixels. When set, the input renders at that exact
+   *  width (e.g. 40px for the brush-size readout). When omitted, the
+   *  input fills its flex parent. */
+  widthPx?: number;
+  /** Render +/- stepper buttons inside the input. */
+  showSteppers?: boolean;
+  /** Unit suffix (e.g. "px", "deg"). */
+  unit?: string;
+}
+
+/**
+ * Slider — two-way bound range input.
+ *
+ * Added for the BrushPanel migration. The shell does not export a
+ * dedicated `<Slider>` primitive (the brush panel was the first
+ * caller); the renderer emits a bare `<input type="range">` styled to
+ * match the original TSX panel (`accent-amber-500` + `w-full`).
+ * If a `<Slider>` primitive lands in `components/ui/`, the renderer's
+ * `SliderRenderer` should swap to it without changing this spec.
+ */
+export interface SliderNode {
+  type: "Slider";
+  /** Two-way binding — must point at a numeric store path. */
+  bind: StorePath;
+  /** Minimum value. Required. */
+  min: number;
+  /** Maximum value. Required. */
+  max: number;
+  /** Step granularity. Defaults to 1. */
+  step?: number;
+  /** Accessibility label. */
+  ariaLabel?: string;
+  /** Apply `flex-1 min-w-0` so the slider absorbs slack inside a flex
+   *  row. Defaults to true — the typical brush-row pattern. */
+  fill?: boolean;
+}
+
 export interface ButtonNode {
   type: "Button";
-  text: string;
+  /** Visible label. Optional when `shape: "icon"` + an `icon` is set. */
+  text?: string;
   onClick: ScriptRef;
   /** Variant maps to the shell `<Button variant>` prop. Defaults to "secondary". */
   variant?: "primary" | "secondary" | "ghost" | "danger" | "success";
+  /** Optional lucide-name icon. With `shape: "icon"`, renders a square
+   *  icon-only button (28×28) matching the BrushPanel +/- stepper
+   *  pattern. With the default `shape: "default"`, renders before the
+   *  label (Button.leadingIcon). */
+  icon?: string;
+  /** Icon size in pixels. Defaults to 14 for icon-shape, 12 for default. */
+  iconSize?: number;
+  /** Visual shape. Defaults to "default" (the shell `<Button>` primitive). */
+  shape?: "default" | "icon";
+  /** Accessibility label for icon-shape buttons. Defaults to `text`. */
+  ariaLabel?: string;
+  /** Optional bind path that disables the button when its bound value
+   *  satisfies a comparison. Phase 1b shape — only used by the brush
+   *  stepper buttons to grey out at min/max. */
+  disabledWhen?: {
+    bind: StorePath;
+    /** Disabled iff resolved value <= this. */
+    atMost?: number;
+    /** Disabled iff resolved value >= this. */
+    atLeast?: number;
+  };
 }
 
 export interface SpacerNode {
@@ -313,6 +402,8 @@ export type NodeSpec =
   | HeadingNode
   | TextNode
   | InputNode
+  | NumberInputNode
+  | SliderNode
   | ButtonNode
   | SpacerNode
   | ConditionalNode

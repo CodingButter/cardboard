@@ -28,10 +28,12 @@ import { useSceneStore } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
 import { useLayerStore } from "../state/useLayerStore";
 import { useToolStore } from "../state/useToolStore";
+import { useBrushStore } from "../state/useBrushStore";
 import { useCommandStore } from "../state/useCommandStore";
 import demoSpec from "./test-fixtures/demo-selection-info.json";
 import selectionInfoSpec from "./specs/selection-info.json";
 import toolPaletteSpec from "./specs/tool-palette.json";
+import brushSpec from "./specs/brush.json";
 import type { NodeSpec, PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,10 @@ function resetStores() {
     activeTool: "select",
     activeSubTool: {},
     activeMode: "map",
+  });
+  useBrushStore.setState({
+    kind: "brush-single",
+    size: 1,
   });
 }
 
@@ -716,5 +722,262 @@ describe("ToolPalette JSON spec", () => {
     const s = useToolStore.getState();
     expect(s.activeTool).toBe("select");
     expect(s.activeSubTool.select).toBe("select-polygon");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useBrushStore binding — Phase 1b store extension (BrushPanel migration)
+// ---------------------------------------------------------------------------
+
+describe("resolveBinding — brush store", () => {
+  test("reads kind + size from the brush store", () => {
+    const k = resolveBinding("store.brush.kind");
+    expect(k.storeName).toBe("brush");
+    expect(k.get()).toBe("brush-single");
+
+    const s = resolveBinding("store.brush.size");
+    expect(s.get()).toBe(1);
+
+    useBrushStore.getState().setKind("brush-line");
+    useBrushStore.getState().setSize(7);
+    expect(k.get()).toBe("brush-line");
+    expect(s.get()).toBe(7);
+  });
+
+  test("writes brush.size through the store action (clamped)", () => {
+    const b = resolveBinding("store.brush.size");
+    expect(b.set(5)).toBe(true);
+    expect(useBrushStore.getState().size).toBe(5);
+    // Out-of-range writes clamp via the store action.
+    expect(b.set(999)).toBe(true);
+    expect(useBrushStore.getState().size).toBe(20);
+    expect(b.set(-3)).toBe(true);
+    expect(useBrushStore.getState().size).toBe(1);
+  });
+
+  test("coerces numeric strings on size writes", () => {
+    const b = resolveBinding("store.brush.size");
+    expect(b.set("8")).toBe(true);
+    expect(useBrushStore.getState().size).toBe(8);
+  });
+
+  test("writes brush.kind through the store action", () => {
+    const b = resolveBinding("store.brush.kind");
+    expect(b.set("brush-rect")).toBe(true);
+    expect(useBrushStore.getState().kind).toBe("brush-rect");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New node-types (Phase 1b — BrushPanel)
+// ---------------------------------------------------------------------------
+
+describe("New node-types (Phase 1b — BrushPanel)", () => {
+  test("NumberInput node accepts bind + min/max/step + widthPx", () => {
+    const node: NodeSpec = {
+      type: "NumberInput",
+      bind: "store.brush.size",
+      min: 1,
+      max: 20,
+      step: 1,
+      widthPx: 48,
+      ariaLabel: "Brush size value",
+    };
+    expect(node.type).toBe("NumberInput");
+    expect(node.min).toBe(1);
+    expect(node.max).toBe(20);
+    expect(node.widthPx).toBe(48);
+  });
+
+  test("Slider node accepts bind + min/max + step + fill", () => {
+    const node: NodeSpec = {
+      type: "Slider",
+      bind: "store.brush.size",
+      min: 1,
+      max: 20,
+      step: 1,
+      ariaLabel: "Brush size",
+      fill: true,
+    };
+    expect(node.type).toBe("Slider");
+    expect(node.fill).toBe(true);
+  });
+
+  test("Button node accepts shape: 'icon' + icon + disabledWhen", () => {
+    const node: NodeSpec = {
+      type: "Button",
+      shape: "icon",
+      icon: "Minus",
+      iconSize: 14,
+      ariaLabel: "Decrease brush size",
+      disabledWhen: { bind: "store.brush.size", atMost: 1 },
+      onClick: { script: "scene.brush.sizeDown" },
+    };
+    expect(node.type).toBe("Button");
+    expect(node.shape).toBe("icon");
+    expect(node.disabledWhen?.atMost).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Brush JSON spec — Phase 1b migration target
+// ---------------------------------------------------------------------------
+
+describe("Brush JSON spec", () => {
+  test("loads as a PanelSpec with id 'brush'", () => {
+    const spec = brushSpec as PanelSpec;
+    expect(spec.id).toBe("brush");
+    expect(spec.title).toBe("Brush");
+    expect(spec.dockKind).toBe("dockable-window");
+    expect(spec.root.type).toBe("Layout");
+  });
+
+  test("includes one ToggleButton tile per MOCK_BRUSHES entry (5)", () => {
+    const spec = brushSpec as PanelSpec;
+    let tileCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "ToggleButton" && obj.shape === "tile") tileCount++;
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(tileCount).toBe(5);
+  });
+
+  test("contains exactly one Slider node bound to brush.size", () => {
+    const spec = brushSpec as PanelSpec;
+    let sliderCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Slider" && obj.bind === "store.brush.size") {
+        sliderCount++;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(sliderCount).toBe(1);
+  });
+
+  test("contains exactly one NumberInput node bound to brush.size", () => {
+    const spec = brushSpec as PanelSpec;
+    let count = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "NumberInput" && obj.bind === "store.brush.size") {
+        count++;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(count).toBe(1);
+  });
+
+  test("contains +/- icon Buttons gated by atMost/atLeast disabledWhen", () => {
+    const spec = brushSpec as PanelSpec;
+    let minusGate = false;
+    let plusGate = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Button" && obj.shape === "icon") {
+        const dw = obj.disabledWhen as
+          | { bind?: string; atMost?: number; atLeast?: number }
+          | undefined;
+        if (dw?.bind === "store.brush.size" && dw.atMost === 1) {
+          minusGate = true;
+        }
+        if (dw?.bind === "store.brush.size" && dw.atLeast === 20) {
+          plusGate = true;
+        }
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(minusGate).toBe(true);
+    expect(plusGate).toBe(true);
+  });
+
+  test("every script-ref onClick points at a known scene.brush.* command id", () => {
+    const spec = brushSpec as PanelSpec;
+    const scripts: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Button" || obj.type === "ToggleButton") {
+        const oc = obj.onClick as { script?: unknown } | undefined;
+        if (oc && typeof oc.script === "string") scripts.push(oc.script);
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const s of scripts) {
+      expect(s.startsWith("scene.brush.")).toBe(true);
+    }
+  });
+
+  test("every binding path in the spec resolves without throwing", () => {
+    const spec = brushSpec as PanelSpec;
+    const paths: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if ((k === "bind" || k === "when") && typeof v === "string") {
+          paths.push(v);
+        }
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => resolveBinding(p).get()).not.toThrow();
+    }
+  });
+
+  test("invoking scene.brush.set.brush-line via the registry changes kind", async () => {
+    useCommandStore.getState().register({
+      id: "scene.brush.set.brush-line",
+      title: "Set Brush: Line",
+      run: () => {
+        useBrushStore.getState().setKind("brush-line");
+      },
+    });
+    expect(useBrushStore.getState().kind).toBe("brush-single");
+    await invokeScript({ script: "scene.brush.set.brush-line" });
+    expect(useBrushStore.getState().kind).toBe("brush-line");
+  });
+
+  test("invoking scene.brush.sizeUp steps size", async () => {
+    useCommandStore.getState().register({
+      id: "scene.brush.sizeUp",
+      title: "Increase Brush Size",
+      run: () => {
+        useBrushStore.getState().sizeUp();
+      },
+    });
+    expect(useBrushStore.getState().size).toBe(1);
+    await invokeScript({ script: "scene.brush.sizeUp" });
+    expect(useBrushStore.getState().size).toBe(2);
   });
 });

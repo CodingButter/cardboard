@@ -37,6 +37,7 @@ import {
 } from "../state/useSelectionStore";
 import { useLayerStore, type LayerState } from "../state/useLayerStore";
 import { useToolStore, type ToolState } from "../state/useToolStore";
+import { useBrushStore, type BrushState } from "../state/useBrushStore";
 
 /**
  * Tagged union of every store the resolver can read from. Adding a
@@ -45,7 +46,12 @@ import { useToolStore, type ToolState } from "../state/useToolStore";
  *   2. Adding an entry to STORE_REGISTRY below.
  *   3. Optionally adding write paths to WRITERS.
  */
-export type KnownStoreName = "scene" | "selection" | "layer" | "tool";
+export type KnownStoreName =
+  | "scene"
+  | "selection"
+  | "layer"
+  | "tool"
+  | "brush";
 
 /** Strip the optional `$store.` / `store.` prefix. */
 function stripStorePrefix(raw: string): string {
@@ -159,6 +165,13 @@ export const STORE_REGISTRY: Record<
   // `scene.tool.subTool.select.<parent>.<id>` commands registered by
   // the ToolPalette panel host, NOT through the resolver.
   tool: useToolStore as unknown as UseBoundStore<StoreApi<unknown>>,
+  // BrushPanel binds against `store.brush.kind` (tile pressed state)
+  // and `store.brush.size` (slider + number input value). The kind
+  // selectors route through `scene.brush.set.<id>` commands the
+  // BrushPanel host registers — read-only here. The size, however,
+  // has a writer registered below so the slider/number-input can
+  // round-trip through the panel-renderer's two-way binding.
+  brush: useBrushStore as unknown as UseBoundStore<StoreApi<unknown>>,
 };
 
 function isKnownStore(name: string): name is KnownStoreName {
@@ -202,6 +215,21 @@ const WRITERS: Record<string, Writer> = {
     const n = Number(value);
     if (Number.isFinite(n))
       useSceneStore.getState().setSettings({ ambient: n });
+  },
+  // Brush size — Slider + NumberInput nodes round-trip through here.
+  // Coerce numeric strings + delegate to the store action so the
+  // existing 1..20 clamp + sync persistence stay authoritative.
+  "brush.size": (value) => {
+    const n = Number(value);
+    if (Number.isFinite(n)) useBrushStore.getState().setSize(n);
+  },
+  // Brush kind — accept any string. Validation against MOCK_BRUSHES
+  // lives in the BrushPanel host (it gates the per-brush command
+  // registration on findBrush). Writing an unknown kind here is a
+  // no-op as far as the panel UI is concerned, since the tile grid
+  // only has buttons for known ids.
+  "brush.kind": (value) => {
+    if (typeof value === "string") useBrushStore.getState().setKind(value);
   },
 };
 
@@ -293,9 +321,13 @@ export function resolveBinding(path: string): ResolvedBinding {
 export function getStoreHook(
   storeName: KnownStoreName,
 ): UseBoundStore<
-  StoreApi<SceneState | SelectionState | LayerState | ToolState>
+  StoreApi<
+    SceneState | SelectionState | LayerState | ToolState | BrushState
+  >
 > {
   return STORE_REGISTRY[storeName] as UseBoundStore<
-    StoreApi<SceneState | SelectionState | LayerState | ToolState>
+    StoreApi<
+      SceneState | SelectionState | LayerState | ToolState | BrushState
+    >
   >;
 }

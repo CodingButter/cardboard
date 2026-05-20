@@ -7,6 +7,7 @@
   "editorPanels": [
     "panels/selection-info.json",
     "panels/selection-info-migrated.json",
-    "panels/tool-palette-migrated.json"
+    "panels/tool-palette-migrated.json",
+    "panels/brush-migrated.json"
   ]
 }
