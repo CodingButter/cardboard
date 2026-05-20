@@ -4,5 +4,8 @@
   "version": "0.0.1",
   "engine": "two_5_d@0.1",
   "scope": ["editor"],
-  "editorPanels": ["panels/selection-info.json"]
+  "editorPanels": [
+    "panels/selection-info.json",
+    "panels/selection-info-migrated.json"
+  ]
 }

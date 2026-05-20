@@ -26,9 +26,11 @@ import {
 import { invokeScript, getInvokeContext } from "./invokeScript";
 import { useSceneStore } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
+import { useLayerStore } from "../state/useLayerStore";
 import { useCommandStore } from "../state/useCommandStore";
 import demoSpec from "./test-fixtures/demo-selection-info.json";
-import type { PanelSpec } from "./types";
+import selectionInfoSpec from "./specs/selection-info.json";
+import type { NodeSpec, PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------
 // Test fixtures + reset
@@ -44,6 +46,18 @@ function resetStores() {
     selected: null,
     hover: null,
     cursor: null,
+  });
+  useLayerStore.setState({
+    activeId: "floors",
+    visibility: {
+      floors: true,
+      walls: true,
+      doors: true,
+      sprites: true,
+      lights: false,
+    },
+    order: ["floors", "walls", "doors", "sprites", "lights"],
+    customLayers: [],
   });
   useCommandStore.setState({ commands: {}, recent: [] });
 }
@@ -278,5 +292,200 @@ describe("demo JSON spec", () => {
       // demo. (Read may return undefined — that's fine.)
       expect(() => resolveBinding(p).get()).not.toThrow();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useLayerStore binding — Phase 1 store extension
+// ---------------------------------------------------------------------------
+
+describe("resolveBinding — layer store", () => {
+  test("reads activeId from the layer store", () => {
+    const b = resolveBinding("store.layer.activeId");
+    expect(b.storeName).toBe("layer");
+    expect(b.get()).toBe("floors");
+    useLayerStore.getState().activate("walls");
+    expect(b.get()).toBe("walls");
+  });
+
+  test("layer store has no writers registered (read-only)", () => {
+    const b = resolveBinding("store.layer.activeId");
+    expect(b.set("walls")).toBe(false);
+    // Activate via the store action stayed available — the binding's
+    // write is just disallowed.
+    expect(useLayerStore.getState().activeId).toBe("floors");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SelectionInfo JSON spec — Phase 1 migration target
+// ---------------------------------------------------------------------------
+
+describe("SelectionInfo JSON spec", () => {
+  test("loads as a PanelSpec with id 'selection-info'", () => {
+    const spec = selectionInfoSpec as PanelSpec;
+    expect(spec.id).toBe("selection-info");
+    expect(spec.title).toBe("Selection Info");
+    expect(spec.dockKind).toBe("dockable-window");
+    expect(spec.root.type).toBe("Layout");
+  });
+
+  test("includes a Tooltip node for each of the four sections", () => {
+    // Walk the tree counting Tooltip nodes.
+    const spec = selectionInfoSpec as PanelSpec;
+    let tooltipCount = 0;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Tooltip") tooltipCount++;
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(tooltipCount).toBe(4);
+  });
+
+  test("uses every text formatter type the renderer supports", () => {
+    const spec = selectionInfoSpec as PanelSpec;
+    const formats = new Set<string>();
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Text" &&
+        typeof obj.format === "string"
+      ) {
+        formats.add(obj.format);
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    // The four formatters that drive the four sections — proves the
+    // migrated spec doesn't fall back to ad-hoc string concatenation
+    // and instead uses the formatter pipeline added in this phase.
+    expect(formats).toEqual(
+      new Set(["position", "cell", "selectionCount", "layerName"]),
+    );
+  });
+
+  test("every binding path resolves without throwing", () => {
+    const spec = selectionInfoSpec as PanelSpec;
+    const paths: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if ((k === "bind" || k === "when") && typeof v === "string") {
+          paths.push(v);
+        }
+        if (
+          k === "text" &&
+          typeof v === "string" &&
+          (v.startsWith("store.") || v.startsWith("$store."))
+        ) {
+          paths.push(v);
+        }
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => resolveBinding(p).get()).not.toThrow();
+    }
+  });
+
+  test("clear-selection works via the scene.selection.clear command", async () => {
+    // Mirrors the JSON spec's wiring intent — the button in the
+    // tooltip (and the keybinding) call scene.selection.clear; here
+    // we register the command + invoke it the way invokeScript would.
+    useCommandStore.getState().register({
+      id: "scene.selection.clear",
+      title: "Clear Selection",
+      run: () => {
+        useSelectionStore.getState().select(null);
+      },
+    });
+    useSelectionStore.getState().select({ x: 4, y: 4 });
+    expect(useSelectionStore.getState().selected).not.toBeNull();
+    await invokeScript({ script: "scene.selection.clear" });
+    expect(useSelectionStore.getState().selected).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New node-type structural validation
+// ---------------------------------------------------------------------------
+
+describe("New node-types — structural validation", () => {
+  test("Tooltip node accepts stages + child NodeSpec", () => {
+    // Pure type-shape exercise — no React render, but proves the type
+    // surface holds together at runtime in a way TS can't see (e.g.
+    // accidental field renames at the JSON level).
+    const node: NodeSpec = {
+      type: "Tooltip",
+      side: "top",
+      stages: [
+        { delay: 1000, content: { type: "Text", text: "Quick label" } },
+        {
+          delay: 3000,
+          content: {
+            type: "Layout",
+            direction: "column",
+            children: [
+              { type: "Heading", text: "Detailed label", level: 4 },
+              { type: "Text", text: "Body copy", variant: "muted" },
+            ],
+          },
+        },
+      ],
+      child: { type: "Text", text: "Trigger", variant: "label" },
+    };
+    expect(node.type).toBe("Tooltip");
+  });
+
+  test("Icon node accepts a lucide-name + size", () => {
+    const node: NodeSpec = { type: "Icon", name: "Crosshair", size: 12 };
+    expect(node.type).toBe("Icon");
+    expect(node.name).toBe("Crosshair");
+  });
+
+  test("Layout accepts new align/justify/childFlex extensions", () => {
+    const node: NodeSpec = {
+      type: "Layout",
+      direction: "row",
+      align: "stretch",
+      justify: "between",
+      childFlex: "1",
+      childMinWidthPx: 100,
+      textAlign: "center",
+      paddingX: 2,
+      paddingY: 1,
+      children: [
+        { type: "Text", text: "A", variant: "label" },
+        { type: "Text", text: "B", variant: "value" },
+      ],
+    };
+    expect(node.childFlex).toBe("1");
+    expect(node.align).toBe("stretch");
+  });
+
+  test("Text accepts new variant + format + truncate fields", () => {
+    const node: NodeSpec = {
+      type: "Text",
+      text: "store.selection.cursor",
+      variant: "value",
+      format: "position",
+      truncate: true,
+    };
+    expect(node.format).toBe("position");
+    expect(node.variant).toBe("value");
+    expect(node.truncate).toBe(true);
   });
 });

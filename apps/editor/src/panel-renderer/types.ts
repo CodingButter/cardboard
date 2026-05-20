@@ -74,6 +74,23 @@ export interface LayoutNode {
   gap?: number;
   /** Optional padding in 0.25rem units; defaults to 0 (no padding). */
   padding?: number;
+  /** Horizontal padding override (0.25rem units). */
+  paddingX?: number;
+  /** Vertical padding override (0.25rem units). */
+  paddingY?: number;
+  /** Cross-axis alignment of children. Maps to CSS `align-items`. */
+  align?: "start" | "center" | "stretch" | "end" | "baseline";
+  /** Main-axis distribution. Maps to CSS `justify-content`. */
+  justify?: "start" | "center" | "between" | "end" | "around";
+  /** Apply `flex: 1 1 0; min-width: 0` to each direct child. Lets a
+   *  row Layout distribute children evenly across its width — the
+   *  status-bar pattern (SelectionInfoPanel). */
+  childFlex?: "1" | "auto";
+  /** Per-child text alignment (inherited via CSS `text-align`). */
+  textAlign?: "left" | "center" | "right";
+  /** Minimum width per child in pixels. Currently used together with
+   *  `childFlex: "1"` to set `min-w: <px>` on each child wrapper. */
+  childMinWidthPx?: number;
   children: NodeSpec[];
 }
 
@@ -85,12 +102,48 @@ export interface HeadingNode {
   level?: 1 | 2 | 3 | 4;
 }
 
+/**
+ * Named formatters that transform a resolved binding value to a string
+ * before rendering. Each formatter accepts a specific input shape:
+ *
+ *   • "position"        — `{ x: number; y: number } | null` → `"(x.xx, y.yy)"` or `"—"`
+ *   • "cell"            — `{ x: number; y: number } | null` → `"(x, y)"` or `"—"`
+ *   • "selectionCount"  — `{ x: number; y: number } | null` → `"1 cell"` / `"0 cells"`
+ *   • "layerName"       — `string`     → display name from `useLayerStore.activeId`
+ *                                        (resolves MOCK_LAYERS + customLayers; falls
+ *                                        back to the raw id)
+ *
+ * Adding a formatter is a one-line addition to the FORMATTERS map in
+ * `PanelRenderer.tsx`; the renderer is the only place that knows the
+ * formatter shapes.
+ */
+export type TextFormat = "position" | "cell" | "selectionCount" | "layerName";
+
+/**
+ * Semantic Text variants — these map to canonical typography slots
+ * rather than raw className strings, so styling stays centralised.
+ *
+ *   • "default" → body copy at text-sm
+ *   • "muted"   → body copy in the muted-fg colour
+ *   • "label"   → uppercase 10px tracking-wider muted-fg (status-bar label)
+ *   • "value"   — font-mono tabular-nums 11px (status-bar value)
+ */
+export type TextVariant = "default" | "muted" | "label" | "value";
+
 export interface TextNode {
   type: "Text";
   /** Static string or a store-path binding. */
   text: string | StorePath;
-  /** Render the text in a muted colour (for secondary copy). */
+  /** Render the text in a muted colour (for secondary copy).
+   *  @deprecated Prefer `variant: "muted"` — kept as alias. */
   muted?: boolean;
+  /** Semantic typography variant. Defaults to "default". */
+  variant?: TextVariant;
+  /** Apply a named formatter to the resolved binding value before
+   *  rendering. Static text passes through unchanged when set. */
+  format?: TextFormat;
+  /** Truncate overflowing text with an ellipsis (single line). */
+  truncate?: boolean;
 }
 
 export interface InputNode {
@@ -124,6 +177,49 @@ export interface ConditionalNode {
 }
 
 /**
+ * Tooltip wrapper — wraps exactly one child NodeSpec with progressive
+ * hover stages. Matches the shell `<Tooltip stages={...}>` primitive
+ * one-to-one. Each stage's `content` is itself a `NodeSpec`, so the
+ * tooltip body can be a Layout / Heading / Text composition rendered
+ * by the recursive walker.
+ *
+ * Phase 1 only supports multi-stage progressive reveal (matches the
+ * production SelectionInfoPanel's two-stage label → detailed pattern).
+ * Adding a single-stage `content` shorthand is a Phase-2 nicety.
+ */
+export interface TooltipStageSpec {
+  /** Delay in ms after hover-start when this stage's content appears. */
+  delay: number;
+  /** Content rendered at this stage. */
+  content: NodeSpec;
+}
+
+export interface TooltipNode {
+  type: "Tooltip";
+  /** Side relative to the trigger. Defaults to "top". */
+  side?: "top" | "bottom" | "left" | "right";
+  /** Stages in ascending-delay order (the shell primitive's contract). */
+  stages: TooltipStageSpec[];
+  /** The trigger element. Exactly one child — the shell primitive
+   *  wraps a single React element. */
+  child: NodeSpec;
+}
+
+/**
+ * Lucide icon by name — a small allowlist of icons keeps the renderer
+ * import-size predictable. To extend the allowlist, add the icon to
+ * the `ICON_REGISTRY` map in `PanelRenderer.tsx`. Unknown names render
+ * nothing + log a warning.
+ */
+export interface IconNode {
+  type: "Icon";
+  /** lucide-react component name (e.g. "Crosshair"). */
+  name: string;
+  /** Icon size in pixels. Defaults to 12 to match status-bar usage. */
+  size?: number;
+}
+
+/**
  * Discriminated union of every node type the Phase 0 renderer
  * understands. Adding a new node type is a four-step process:
  *   1. Add the interface above.
@@ -141,7 +237,9 @@ export type NodeSpec =
   | InputNode
   | ButtonNode
   | SpacerNode
-  | ConditionalNode;
+  | ConditionalNode
+  | TooltipNode
+  | IconNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire
@@ -168,6 +266,26 @@ export type DockKind =
  * A complete panel spec — what a JSON file exports. The renderer
  * consumes one of these and produces a React subtree.
  */
+/**
+ * Optional outer-wrapper overrides — JSON authors can tune the
+ * top-level container the renderer wraps the root node in. Defaults
+ * mirror the Phase 0 behaviour (`flex flex-col gap-2 p-3 h-full
+ * overflow-auto`). Status-bar style panels (SelectionInfo) opt out of
+ * the default padding + `flex-col` baseline so the root Layout's own
+ * `direction: "row"` controls the layout flush against the dock edge.
+ */
+export interface PanelRootOptions {
+  /** Padding in 0.25rem units; defaults to 3 (12px). Pass `0` for flush. */
+  padding?: number;
+  /** Horizontal padding in 0.25rem units; overrides `padding` on the X axis. */
+  paddingX?: number;
+  /** Vertical padding in 0.25rem units; overrides `padding` on the Y axis. */
+  paddingY?: number;
+  /** Disable the default outer `flex flex-col`. The root NodeSpec then
+   *  controls all layout. Defaults to false (legacy behaviour). */
+  bare?: boolean;
+}
+
 export interface PanelSpec {
   id: string;
   title: string;
@@ -188,5 +306,7 @@ export interface PanelSpec {
   dockKind: DockKind;
   /** Optional per-panel local state slice (Phase 0: accepted, not wired). */
   state?: Record<string, PanelLocalStateSpec>;
+  /** Optional outer-wrapper tuning — see `PanelRootOptions`. */
+  rootOptions?: PanelRootOptions;
   root: NodeSpec;
 }

@@ -35,6 +35,7 @@ import {
   useSelectionStore,
   type SelectionState,
 } from "../state/useSelectionStore";
+import { useLayerStore, type LayerState } from "../state/useLayerStore";
 
 /**
  * Tagged union of every store the resolver can read from. Adding a
@@ -43,7 +44,7 @@ import {
  *   2. Adding an entry to STORE_REGISTRY below.
  *   3. Optionally adding write paths to WRITERS.
  */
-export type KnownStoreName = "scene" | "selection";
+export type KnownStoreName = "scene" | "selection" | "layer";
 
 /** Strip the optional `$store.` / `store.` prefix. */
 function stripStorePrefix(raw: string): string {
@@ -147,6 +148,10 @@ export const STORE_REGISTRY: Record<
 > = {
   scene: useSceneStore as unknown as UseBoundStore<StoreApi<unknown>>,
   selection: useSelectionStore as unknown as UseBoundStore<StoreApi<unknown>>,
+  // Read-only for now — no writer entries below. The status-bar
+  // SelectionInfo panel needs `store.layer.activeId` for the active-
+  // layer name readout.
+  layer: useLayerStore as unknown as UseBoundStore<StoreApi<unknown>>,
 };
 
 function isKnownStore(name: string): name is KnownStoreName {
@@ -280,8 +285,8 @@ export function resolveBinding(path: string): ResolvedBinding {
  */
 export function getStoreHook(
   storeName: KnownStoreName,
-): UseBoundStore<StoreApi<SceneState | SelectionState>> {
+): UseBoundStore<StoreApi<SceneState | SelectionState | LayerState>> {
   return STORE_REGISTRY[storeName] as UseBoundStore<
-    StoreApi<SceneState | SelectionState>
+    StoreApi<SceneState | SelectionState | LayerState>
   >;
 }

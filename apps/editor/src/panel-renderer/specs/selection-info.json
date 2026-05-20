@@ -1,0 +1,266 @@
+{
+  "id": "selection-info",
+  "title": "Selection Info",
+  "category": "Inspector",
+  "dockKind": "dockable-window",
+  "state": {},
+  "rootOptions": {
+    "paddingX": 2,
+    "paddingY": 1,
+    "bare": true
+  },
+  "root": {
+    "type": "Layout",
+    "direction": "row",
+    "align": "stretch",
+    "childFlex": "1",
+    "childMinWidthPx": 100,
+    "gap": 0,
+    "children": [
+      {
+        "type": "Tooltip",
+        "side": "top",
+        "stages": [
+          {
+            "delay": 1000,
+            "content": {
+              "type": "Text",
+              "text": "Cursor Position"
+            }
+          },
+          {
+            "delay": 3000,
+            "content": {
+              "type": "Layout",
+              "direction": "column",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "Heading",
+                  "level": 4,
+                  "text": "Cursor Position"
+                },
+                {
+                  "type": "Text",
+                  "variant": "muted",
+                  "text": "Current mouse coordinates in scene-space units (continuous, sub-cell precision)."
+                },
+                {
+                  "type": "Text",
+                  "variant": "value",
+                  "text": "store.selection.cursor",
+                  "format": "position"
+                }
+              ]
+            }
+          }
+        ],
+        "child": {
+          "type": "Layout",
+          "direction": "column",
+          "justify": "center",
+          "textAlign": "center",
+          "paddingX": 2,
+          "gap": 0,
+          "children": [
+            {
+              "type": "Text",
+              "variant": "label",
+              "text": "Position"
+            },
+            {
+              "type": "Text",
+              "variant": "value",
+              "text": "store.selection.cursor",
+              "format": "position",
+              "truncate": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "Tooltip",
+        "side": "top",
+        "stages": [
+          {
+            "delay": 1000,
+            "content": {
+              "type": "Text",
+              "text": "Hovered Cell"
+            }
+          },
+          {
+            "delay": 3000,
+            "content": {
+              "type": "Layout",
+              "direction": "column",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "Heading",
+                  "level": 4,
+                  "text": "Hovered Cell"
+                },
+                {
+                  "type": "Text",
+                  "variant": "muted",
+                  "text": "Integer grid coordinates of the cell under the cursor."
+                },
+                {
+                  "type": "Text",
+                  "variant": "value",
+                  "text": "store.selection.hover",
+                  "format": "cell"
+                }
+              ]
+            }
+          }
+        ],
+        "child": {
+          "type": "Layout",
+          "direction": "column",
+          "justify": "center",
+          "textAlign": "center",
+          "paddingX": 2,
+          "gap": 0,
+          "children": [
+            {
+              "type": "Text",
+              "variant": "label",
+              "text": "Cell"
+            },
+            {
+              "type": "Text",
+              "variant": "value",
+              "text": "store.selection.hover",
+              "format": "cell",
+              "truncate": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "Tooltip",
+        "side": "top",
+        "stages": [
+          {
+            "delay": 1000,
+            "content": {
+              "type": "Text",
+              "text": "Active Layer"
+            }
+          },
+          {
+            "delay": 3000,
+            "content": {
+              "type": "Layout",
+              "direction": "column",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "Heading",
+                  "level": 4,
+                  "text": "Active Layer"
+                },
+                {
+                  "type": "Text",
+                  "variant": "muted",
+                  "text": "Layer that paint, erase, and selection operations currently target."
+                },
+                {
+                  "type": "Text",
+                  "variant": "value",
+                  "text": "store.layer.activeId",
+                  "format": "layerName"
+                }
+              ]
+            }
+          }
+        ],
+        "child": {
+          "type": "Layout",
+          "direction": "column",
+          "justify": "center",
+          "textAlign": "center",
+          "paddingX": 2,
+          "gap": 0,
+          "children": [
+            {
+              "type": "Text",
+              "variant": "label",
+              "text": "Layer"
+            },
+            {
+              "type": "Text",
+              "variant": "value",
+              "text": "store.layer.activeId",
+              "format": "layerName",
+              "truncate": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "Tooltip",
+        "side": "top",
+        "stages": [
+          {
+            "delay": 1000,
+            "content": {
+              "type": "Text",
+              "text": "Selection"
+            }
+          },
+          {
+            "delay": 3000,
+            "content": {
+              "type": "Layout",
+              "direction": "column",
+              "gap": 1,
+              "children": [
+                {
+                  "type": "Heading",
+                  "level": 4,
+                  "text": "Selection"
+                },
+                {
+                  "type": "Text",
+                  "variant": "muted",
+                  "text": "Summary of the current selection — count of selected cells or entities."
+                },
+                {
+                  "type": "Text",
+                  "variant": "value",
+                  "text": "store.selection.selected",
+                  "format": "selectionCount"
+                }
+              ]
+            }
+          }
+        ],
+        "child": {
+          "type": "Layout",
+          "direction": "column",
+          "justify": "center",
+          "textAlign": "center",
+          "paddingX": 2,
+          "gap": 0,
+          "children": [
+            {
+              "type": "Text",
+              "variant": "label",
+              "text": "Selection"
+            },
+            {
+              "type": "Text",
+              "variant": "value",
+              "text": "store.selection.selected",
+              "format": "selectionCount",
+              "truncate": true
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

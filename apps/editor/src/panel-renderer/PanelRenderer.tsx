@@ -27,9 +27,13 @@
  */
 
 import React from "react";
+import { Crosshair, MousePointer2, Layers, Square } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { TextInput } from "../components/ui/TextInput";
+import { Tooltip } from "../components/ui/Tooltip";
 import { cn } from "../lib/cn";
+import { MOCK_LAYERS } from "../views/scene/scene-fixtures";
+import { useLayerStore } from "../state/useLayerStore";
 import { invokeScript } from "./invokeScript";
 import {
   getStoreHook,
@@ -40,14 +44,111 @@ import type {
   ButtonNode,
   ConditionalNode,
   HeadingNode,
+  IconNode,
   InputNode,
   LayoutNode,
   NodeSpec,
   PanelSpec,
   SpacerNode,
   StorePath,
+  TextFormat,
   TextNode,
+  TextVariant,
+  TooltipNode,
 } from "./types";
+
+// ---------------------------------------------------------------------------
+// Icon registry — small lucide allowlist to keep the renderer's import
+// surface bounded. Add an icon to the allowlist by:
+//   1. Importing it from lucide-react at the top of this file.
+//   2. Adding it to ICON_REGISTRY below by its canonical lucide name.
+// Unknown names log a warning + render nothing.
+// ---------------------------------------------------------------------------
+
+const ICON_REGISTRY: Record<
+  string,
+  React.ComponentType<{ size?: number }>
+> = {
+  Crosshair,
+  MousePointer2,
+  Layers,
+  Square,
+};
+
+// ---------------------------------------------------------------------------
+// Text formatters — applied to a resolved binding value before render.
+// Adding a formatter is a one-line addition here (+ a TextFormat literal
+// in types.ts). Each formatter takes the resolved value (any shape) and
+// returns a string. Unknown shapes degrade gracefully — they fall back
+// to the em-dash "—" rather than throwing.
+// ---------------------------------------------------------------------------
+
+type Formatter = (value: unknown) => string;
+
+const FORMATTERS: Record<TextFormat, Formatter> = {
+  // `(x.xx, y.yy)` or `—` when there's no cursor. Mirrors the original
+  // SelectionInfoPanel's `formatPosition` helper.
+  position: (value) => {
+    if (value == null) return "—";
+    if (
+      typeof value === "object" &&
+      typeof (value as { x?: unknown }).x === "number" &&
+      typeof (value as { y?: unknown }).y === "number"
+    ) {
+      const p = value as { x: number; y: number };
+      return `(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`;
+    }
+    return "—";
+  },
+  // `(x, y)` for integer cell coords, or `—` when there's no hovered cell.
+  cell: (value) => {
+    if (value == null) return "—";
+    if (
+      typeof value === "object" &&
+      typeof (value as { x?: unknown }).x === "number" &&
+      typeof (value as { y?: unknown }).y === "number"
+    ) {
+      const p = value as { x: number; y: number };
+      return `(${p.x}, ${p.y})`;
+    }
+    return "—";
+  },
+  // "1 cell" / "0 cells" — phase 0 only supports single-cell selection.
+  selectionCount: (value) => (value ? "1 cell" : "0 cells"),
+  // Resolve an activeLayerId to its display name. Reads MOCK_LAYERS +
+  // useLayerStore.customLayers; falls back to the raw id (or em-dash
+  // when the id is empty). The formatter is called every render from
+  // within useResolvedText, so the layer-store subscription is
+  // established via React.useSyncExternalStore through the host hook
+  // — the renderer's `useStoreBinding(node.text)` already subscribes
+  // to `useLayerStore` when the binding's storeName is `layer`.
+  layerName: (value) => {
+    if (typeof value !== "string" || value.length === 0) return "—";
+    for (const l of MOCK_LAYERS) {
+      if (l.id === value) return l.name;
+    }
+    const custom = useLayerStore.getState().customLayers;
+    for (const c of custom) {
+      if (c.id === value) return c.name;
+    }
+    return value;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Variant class maps — semantic typography slots. Centralised here so
+// callsites can't drift; tweaking the spec-wide "label" or "value"
+// styling is a one-line edit.
+// ---------------------------------------------------------------------------
+
+const TEXT_VARIANT_CLASS: Record<TextVariant, string> = {
+  default: "text-sm text-zinc-300",
+  muted: "text-sm text-zinc-500",
+  label:
+    "text-[10px] uppercase tracking-wider text-(--color-fg-muted) leading-tight",
+  value:
+    "font-mono tabular-nums text-[11px] leading-tight text-(--color-fg-primary)",
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,15 +199,28 @@ function useStoreBinding(path: string): {
  * the resolved current value coerced to string. If it's a static
  * string, returns it verbatim. Wrapped as a hook because the binding
  * path needs `useStoreBinding`.
+ *
+ * When `format` is supplied AND the input is a binding, the resolved
+ * value is run through the matching formatter (see `FORMATTERS`) before
+ * the string-coercion fallback. Static text passes through unchanged.
  */
-function useResolvedText(text: string): string {
+function useResolvedText(text: string, format?: TextFormat): string {
   // ALWAYS call the hook to keep hook order stable across renders —
   // pass a sentinel path when the input is static. The sentinel reads
   // a stable value (just `useSelectionStore.selected`) and is then
   // discarded by the branch below.
   const isBinding = isBindingPath(text);
   const { value } = useStoreBinding(isBinding ? text : "store.selection.selected");
+  // The `layerName` formatter reads from `useLayerStore` as well as the
+  // primary bound store. Subscribe to layer-store changes so the
+  // formatted readout re-renders when the layer roster updates.
+  // Subscribing unconditionally keeps hook order stable.
+  useLayerStore((s) => s);
   if (!isBinding) return text;
+  if (format) {
+    const fn = FORMATTERS[format];
+    if (fn) return fn(value);
+  }
   if (value == null) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") {
@@ -126,6 +240,24 @@ function useResolvedText(text: string): string {
 // Per-node renderers
 // ---------------------------------------------------------------------------
 
+/** CSS `align-items` value for each Layout.align option. */
+const ALIGN_CSS: Record<NonNullable<LayoutNode["align"]>, string> = {
+  start: "flex-start",
+  center: "center",
+  stretch: "stretch",
+  end: "flex-end",
+  baseline: "baseline",
+};
+
+/** CSS `justify-content` value for each Layout.justify option. */
+const JUSTIFY_CSS: Record<NonNullable<LayoutNode["justify"]>, string> = {
+  start: "flex-start",
+  center: "center",
+  between: "space-between",
+  end: "flex-end",
+  around: "space-around",
+};
+
 function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
   // Numeric gap/padding are emitted as INLINE STYLE rather than
   // `gap-${n}` / `p-${n}` Tailwind classes. Reason: Tailwind's JIT
@@ -139,20 +271,51 @@ function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
   // 0.25rem (4px) per integer, so `n * 4` matches the Tailwind scale.
   const gap = node.gap ?? 2;
   const padding = node.padding ?? 0;
+  // `align` / `justify` / `textAlign` map to plain CSS via the lookup
+  // tables above — no Tailwind class involved, so JIT-scanner gaps
+  // don't bite. `childFlex: "1"` is the load-bearing Selection-Info
+  // pattern: every direct child gets `flex: 1 1 0; min-width: 0` so
+  // the row distributes evenly across the panel width.
+  // Axis-specific padding overrides the symmetric `padding` so callers
+  // can express `px-2 py-1.5`-style styling without an escape hatch.
+  const padX = node.paddingX ?? padding;
+  const padY = node.paddingY ?? padding;
+  const style: React.CSSProperties = {
+    gap: `${gap * 4}px`,
+    ...(padX > 0 ? { paddingLeft: `${padX * 4}px`, paddingRight: `${padX * 4}px` } : {}),
+    ...(padY > 0 ? { paddingTop: `${padY * 4}px`, paddingBottom: `${padY * 4}px` } : {}),
+    ...(node.align ? { alignItems: ALIGN_CSS[node.align] } : {}),
+    ...(node.justify ? { justifyContent: JUSTIFY_CSS[node.justify] } : {}),
+    ...(node.textAlign ? { textAlign: node.textAlign } : {}),
+  };
+  const childStyle: React.CSSProperties | undefined =
+    node.childFlex === "1"
+      ? {
+          flex: "1 1 0",
+          minWidth: node.childMinWidthPx ? `${node.childMinWidthPx}px` : 0,
+        }
+      : undefined;
   return (
     <div
       className={cn(
         "flex",
         node.direction === "row" ? "flex-row" : "flex-col",
       )}
-      style={{
-        gap: `${gap * 4}px`,
-        ...(padding > 0 ? { padding: `${padding * 4}px` } : {}),
-      }}
+      style={style}
     >
-      {node.children.map((child, i) => (
-        <NodeRenderer key={i} node={child} />
-      ))}
+      {node.children.map((child, i) =>
+        childStyle ? (
+          // Wrap each child in a sized cell so `flex: 1 1 0` applies
+          // even to nodes whose own renderers don't accept a style
+          // prop (most of them). The wrapper is `display: contents`-
+          // free — it IS the flex item.
+          <div key={i} style={childStyle}>
+            <NodeRenderer node={child} />
+          </div>
+        ) : (
+          <NodeRenderer key={i} node={child} />
+        ),
+      )}
     </div>
   );
 }
@@ -176,16 +339,22 @@ function HeadingRenderer({ node }: { node: HeadingNode }): React.JSX.Element {
 }
 
 function TextRenderer({ node }: { node: TextNode }): React.JSX.Element {
-  const text = useResolvedText(node.text);
+  const text = useResolvedText(node.text, node.format);
+  // Resolve the effective variant. `variant` wins; `muted: true` is a
+  // back-compat alias that maps to `variant: "muted"`. Default is
+  // "default" body copy.
+  const variant: TextVariant =
+    node.variant ?? (node.muted ? "muted" : "default");
+  const variantClass = TEXT_VARIANT_CLASS[variant];
   return (
-    <p
+    <span
       className={cn(
-        "text-sm",
-        node.muted ? "text-zinc-500" : "text-zinc-300",
+        variantClass,
+        node.truncate && "truncate block min-w-0",
       )}
     >
       {text}
-    </p>
+    </span>
   );
 }
 
@@ -236,6 +405,46 @@ function SpacerRenderer({ node }: { node: SpacerNode }): React.JSX.Element {
   );
 }
 
+function TooltipRenderer({
+  node,
+}: {
+  node: TooltipNode;
+}): React.JSX.Element {
+  // Map the JSON stages onto the shell primitive's expected shape —
+  // each stage's content is rendered through the recursive NodeRenderer
+  // so authors can compose Layout/Text/Heading inside a tooltip body.
+  const stages = React.useMemo(
+    () =>
+      node.stages.map((s) => ({
+        delay: s.delay,
+        content: <NodeRenderer node={s.content} />,
+      })),
+    [node.stages],
+  );
+  // The shell `<Tooltip>` requires a SINGLE React element child. Wrap
+  // the recursive render in a fragment-friendly span so child node
+  // types that emit fragments still satisfy the cloneElement contract.
+  return (
+    <Tooltip side={node.side ?? "top"} stages={stages} wrapperClassName="block">
+      <span className="contents">
+        <NodeRenderer node={node.child} />
+      </span>
+    </Tooltip>
+  );
+}
+
+function IconRenderer({ node }: { node: IconNode }): React.JSX.Element | null {
+  const Comp = ICON_REGISTRY[node.name];
+  if (!Comp) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[PanelRenderer] unknown icon "${node.name}" — add it to ICON_REGISTRY`,
+    );
+    return null;
+  }
+  return <Comp size={node.size ?? 12} />;
+}
+
 function ConditionalRenderer({
   node,
 }: {
@@ -277,6 +486,10 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <SpacerRenderer node={node} />;
     case "Conditional":
       return <ConditionalRenderer node={node} />;
+    case "Tooltip":
+      return <TooltipRenderer node={node} />;
+    case "Icon":
+      return <IconRenderer node={node} />;
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.
@@ -301,8 +514,29 @@ export function PanelRenderer({
 }: {
   spec: PanelSpec;
 }): React.JSX.Element {
+  // Resolve outer-wrapper options. Defaults preserve Phase 0 behaviour
+  // (`flex flex-col gap-2 p-3`); the new rootOptions overrides let
+  // status-bar style panels go flush.
+  const opts = spec.rootOptions ?? {};
+  const bare = opts.bare === true;
+  const padDefault = opts.padding ?? 3;
+  const padX = opts.paddingX ?? padDefault;
+  const padY = opts.paddingY ?? padDefault;
+  const style: React.CSSProperties = {
+    paddingLeft: `${padX * 4}px`,
+    paddingRight: `${padX * 4}px`,
+    paddingTop: `${padY * 4}px`,
+    paddingBottom: `${padY * 4}px`,
+  };
   return (
-    <div className="flex flex-col gap-2 p-3 h-full overflow-auto" data-panel-id={spec.id}>
+    <div
+      className={cn(
+        "h-full overflow-auto text-(--color-fg-primary)",
+        !bare && "flex flex-col gap-2",
+      )}
+      style={style}
+      data-panel-id={spec.id}
+    >
       <NodeRenderer node={spec.root} />
     </div>
   );
