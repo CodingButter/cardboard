@@ -11,15 +11,19 @@ import {
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { useSceneStore } from "../../../state/useSceneStore";
+import { useLayerStore } from "../../../state/useLayerStore";
+import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
  * PreviewPanel — Three.js 3D preview of the current scene.
  *
- * Visual target: the small 3D PREVIEW region in `Editor Design/Map.png`
- * — a thumbnail-sized render of the scene-in-progress. For Wave 1 the
- * scene is hardcoded placeholder geometry (floor + a few wall cubes +
- * a directional light); Wave 2 will swap that for the real scene's
- * tile/wall data.
+ * Wave 3.3.13 wiring: geometry is derived from `useSceneStore.cells`,
+ * filtered by `useLayerStore.visibility`, and stacked per `useLayerStore.order`.
+ * Each painted cell becomes a `BoxGeometry(1, height, 1)` cube; the cell
+ * `(x, y)` maps to world `(x, *, y)` (Y is up in Three.js — the cell-grid
+ * Y axis is the floor-plane SECOND axis, i.e. Three's Z). Scene-wide
+ * ambient comes from `useSceneStore.settings.ambient`.
  *
  * Interaction:
  *   - Left-mouse drag inside the canvas orbits the camera (manual
@@ -31,9 +35,9 @@ import { registerCommand } from "../../../state/useCommandStore";
  *     command so the palette + keybindings can drive it too.
  *
  * Persistence (per-page localStorage):
- *   - `cardboard.scene.preview.camDistance` (number, default 5)
- *   - `cardboard.scene.preview.camYaw`      (number, default π/4)
- *   - `cardboard.scene.preview.camPitch`    (number, default -π/6)
+ *   - `cardboard.scene.preview.camDistance` (number, auto-fit on first mount)
+ *   - `cardboard.scene.preview.camYaw`      (number, default π/5)
+ *   - `cardboard.scene.preview.camPitch`    (number, default π/5)
  *
  * Writes are debounced behind `mouseup` / `wheelend` so the panel
  * doesn't thrash localStorage every animation frame.
@@ -57,16 +61,17 @@ const LS_CAM_DISTANCE = "cardboard.scene.preview.camDistance";
 const LS_CAM_YAW = "cardboard.scene.preview.camYaw";
 const LS_CAM_PITCH = "cardboard.scene.preview.camPitch";
 
-const DEFAULT_DISTANCE = 7;
+// Default distance is a sentinel — `null` means "auto-fit on first
+// mount from dims". Once the user interacts (drag/zoom/reset) we
+// persist a concrete number under LS_CAM_DISTANCE and that wins.
 const DEFAULT_YAW = Math.PI / 5;
-// Positive pitch = camera elevation above target (the math below uses
-// `d * sin(pitch) + targetY` for py, so positive lifts the camera up).
-// A ~35° elevation tilts the camera down enough to put the floor in
-// frame while still letting the back wall + corridor depth read.
+// Positive pitch = camera elevation above target. ~36° tilts the
+// camera down enough to put the floor in frame while still letting
+// depth read on a flat grid.
 const DEFAULT_PITCH = Math.PI / 5;
 
 const MIN_DISTANCE = 2;
-const MAX_DISTANCE = 25;
+const MAX_DISTANCE = 250;
 const ZOOM_STEP = 0.75;
 // Clamp pitch so the camera never flips through poles.
 const MIN_PITCH = -Math.PI / 2 + 0.05;
@@ -93,6 +98,18 @@ function readLSNumber(key: string, fallback: number): number {
   }
 }
 
+function readLSNumberOrNull(key: string): number | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(key);
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 function writeLSNumber(key: string, value: number): void {
   try {
     if (typeof window === "undefined") return;
@@ -102,9 +119,48 @@ function writeLSNumber(key: string, value: number): void {
   }
 }
 
+/**
+ * Compute the auto-fit camera distance for a given grid size.
+ * A 64×64 grid wants the camera ~50 units back so the whole grid is
+ * in frame; a small grid wants something closer. The 0.8 multiplier
+ * was tuned to leave a little headroom around the grid edges.
+ */
+function autoFitDistance(w: number, h: number): number {
+  return clampDistance(Math.max(w, h) * 0.8);
+}
+
+// ---------------------------------------------------------------------------
+// Layer color helper — falls back to MOCK_LAYERS for built-ins.
+// ---------------------------------------------------------------------------
+
+const LAYER_COLOR_FALLBACK: Record<string, number> = (() => {
+  const out: Record<string, number> = {};
+  for (const l of MOCK_LAYERS) {
+    out[l.id] = hexStringToNumber(l.color);
+  }
+  return out;
+})();
+
+const DEFAULT_LAYER_COLOR = 0xb88a4a; // warm wood/amber tone — matches old corridor
+
+function hexStringToNumber(s: string): number {
+  // Accept `#RRGGBB` only — fall back to the warm wood color on parse fail.
+  const m = /^#([0-9a-f]{6})$/i.exec(s);
+  if (!m) return DEFAULT_LAYER_COLOR;
+  const hex = m[1];
+  if (!hex) return DEFAULT_LAYER_COLOR;
+  return Number.parseInt(hex, 16);
+}
+
+function colorForLayer(layerId: string): number {
+  return LAYER_COLOR_FALLBACK[layerId] ?? DEFAULT_LAYER_COLOR;
+}
+
 // ---------------------------------------------------------------------------
 // Three.js scene builder — produces a disposable handle the React layer
-// can mount / unmount.
+// can mount / unmount. Geometry rebuilds live OUTSIDE this function: it
+// only sets up the chrome (camera, lights, renderer, floor + grid
+// containers) and exposes a `sceneGroup` for cell meshes to attach to.
 // ---------------------------------------------------------------------------
 
 interface PreviewSceneHandle {
@@ -112,8 +168,16 @@ interface PreviewSceneHandle {
   renderer: THREE.WebGLRenderer;
   camera: THREE.PerspectiveCamera;
   grid: THREE.GridHelper;
-  /** All materials that participate in the wireframe toggle. */
-  wireframeMaterials: THREE.MeshStandardMaterial[];
+  ambient: THREE.AmbientLight;
+  /** Container group for store-derived cell meshes. Rebuilt on
+   *  `cells`/`visibility`/`order` change. */
+  sceneGroup: THREE.Group;
+  /** Container group for the floor plane. Rebuilt on `dims` change so
+   *  the floor stays sized to the level. */
+  floorGroup: THREE.Group;
+  /** Material pool keyed by `${layerId}:${presetId}`. Shared across
+   *  rebuilds so we don't churn GPU resources on every paint. */
+  materialPool: Map<string, THREE.MeshStandardMaterial>;
   dispose: () => void;
 }
 
@@ -123,65 +187,16 @@ function buildPreviewScene(): PreviewSceneHandle {
   // tone so the preview reads as part of the same room.
   scene.background = new THREE.Color(0x1a1814);
 
-  // --- Floor -------------------------------------------------------------
-  const floorGeo = new THREE.PlaneGeometry(20, 20);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x3a3027,
-    roughness: 0.9,
-    metalness: 0.0,
-  });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0;
-  scene.add(floor);
-
-  // --- Walls (corridor-shape placeholder) --------------------------------
-  // Hardcoded "back wall + two side walls + a center pillar" arrangement,
-  // hinting at a corridor / room corner. Wave 2 swaps this for real
-  // scene-derived geometry.
-  const wallSpec: Array<[number, number, number, number, number, number]> = [
-    // [x, y, z, width, height, depth]
-    // Back wall — two segments forming the far end of the corridor.
-    [-1.5, 0.75, -3.5, 1.5, 1.5, 1],
-    [1.5, 0.75, -3.5, 1.5, 1.5, 1],
-    // Left side wall — runs along the corridor.
-    [-2.5, 0.75, -1.5, 1, 1.5, 2],
-    // Right side wall — mirror.
-    [2.5, 0.75, -1.5, 1, 1.5, 2],
-    // Center pillar — gives the camera something interesting to look at.
-    [0.0, 0.5, -1.5, 0.6, 1.0, 0.6],
-  ];
-  const wallColor = 0xb88a4a; // warm wood/amber tone
-  const wireframeMaterials: THREE.MeshStandardMaterial[] = [floorMat];
-  for (const [x, y, z, w, h, d] of wallSpec) {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    const mat = new THREE.MeshStandardMaterial({
-      color: wallColor,
-      roughness: 0.7,
-      metalness: 0.05,
-    });
-    const cube = new THREE.Mesh(geo, mat);
-    cube.position.set(x, y, z);
-    scene.add(cube);
-    wireframeMaterials.push(mat);
-  }
-
-  // Back wall plane behind the corridor — a flat backdrop so the camera
-  // never sees through to the void at the far end.
-  const backWallGeo = new THREE.PlaneGeometry(12, 4);
-  const backWallMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2118,
-    roughness: 0.95,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-  });
-  const backWall = new THREE.Mesh(backWallGeo, backWallMat);
-  backWall.position.set(0, 2, -6);
-  scene.add(backWall);
-  wireframeMaterials.push(backWallMat);
+  // --- Container groups --------------------------------------------------
+  const sceneGroup = new THREE.Group();
+  scene.add(sceneGroup);
+  const floorGroup = new THREE.Group();
+  scene.add(floorGroup);
 
   // --- Lights ------------------------------------------------------------
-  // Softer ambient — the warm key light below carries the dungeon tone.
+  // Ambient intensity is overwritten from `settings.ambient` in an effect;
+  // 0.45 here is a sensible default for the first render before the
+  // store-driven sync hook fires.
   const ambient = new THREE.AmbientLight(0xffffff, 0.45);
   scene.add(ambient);
   // Cool overhead-ish key light, slight blue tinge to balance the warm fill.
@@ -194,6 +209,8 @@ function buildPreviewScene(): PreviewSceneHandle {
   scene.add(warmFill);
 
   // --- Grid (hidden by default; toggled via command) ---------------------
+  // Sized at construction; rebuilt by the dims effect when level
+  // dimensions change.
   const grid = new THREE.GridHelper(20, 20, 0x666b78, 0x3a3f4b);
   grid.position.y = 0.001; // avoid z-fighting with the floor plane
   grid.visible = false;
@@ -209,19 +226,21 @@ function buildPreviewScene(): PreviewSceneHandle {
   );
   renderer.setSize(256, 256, false);
 
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  // Far plane bumped to comfortably contain a 64×64 grid at ~50 units back.
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
   camera.position.set(0, 2, 5);
   camera.lookAt(0, 0.75, 0);
 
+  const materialPool = new Map<string, THREE.MeshStandardMaterial>();
+
   const dispose = (): void => {
     renderer.dispose();
-    // Geometries / materials in the placeholder scene are small but we
-    // walk the tree anyway so future additions don't leak.
+    // Walk the tree for geometry (geometry is per-mesh — pooled meshes
+    // still hold their own geometry). Materials live in the pool, so we
+    // dispose them once via the pool below.
     scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose();
-        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-        for (const m of mats) m.dispose();
       } else if (obj instanceof THREE.GridHelper) {
         obj.geometry.dispose();
         const mat = obj.material as THREE.Material | THREE.Material[];
@@ -229,9 +248,21 @@ function buildPreviewScene(): PreviewSceneHandle {
         for (const m of mats) m.dispose();
       }
     });
+    for (const m of materialPool.values()) m.dispose();
+    materialPool.clear();
   };
 
-  return { scene, renderer, camera, grid, wireframeMaterials, dispose };
+  return {
+    scene,
+    renderer,
+    camera,
+    grid,
+    ambient,
+    sceneGroup,
+    floorGroup,
+    materialPool,
+    dispose,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +275,19 @@ export function PreviewPanel(): React.JSX.Element {
   const handleRef = React.useRef<PreviewSceneHandle | null>(null);
   const rafRef = React.useRef<number | null>(null);
 
+  // --- Store subscriptions ----------------------------------------------
+  // Wave 3.3.13: everything geometry-related comes from the scene store;
+  // visibility + order come from the layer store. We do NOT subscribe
+  // to `useTilePresetStore` — material color is derived from layerId
+  // (with `${layerId}:${presetId}` keying the material pool, which still
+  // lets future per-preset tints land without touching this subscription
+  // surface).
+  const dims = useSceneStore((s) => s.dims);
+  const cells = useSceneStore((s) => s.cells);
+  const settings = useSceneStore((s) => s.settings);
+  const visibility = useLayerStore((s) => s.visibility);
+  const order = useLayerStore((s) => s.order);
+
   // Container-size state drives the "Too small" + "Hide toolbar" toggles.
   // We track it in React state so render-paths can react to it; the
   // canvas itself is sized via direct Three calls inside the
@@ -254,8 +298,12 @@ export function PreviewPanel(): React.JSX.Element {
   });
 
   // --- Camera orbital state (lives in refs — no React rerenders per frame).
+  // Distance has a `null` sentinel meaning "auto-fit from dims on first
+  // mount"; once the user reset/zoom/dragged we persist a concrete number.
   const distanceRef = React.useRef<number>(
-    clampDistance(readLSNumber(LS_CAM_DISTANCE, DEFAULT_DISTANCE)),
+    clampDistance(
+      readLSNumberOrNull(LS_CAM_DISTANCE) ?? autoFitDistance(dims.w, dims.h),
+    ),
   );
   const yawRef = React.useRef<number>(readLSNumber(LS_CAM_YAW, DEFAULT_YAW));
   const pitchRef = React.useRef<number>(
@@ -279,9 +327,8 @@ export function PreviewPanel(): React.JSX.Element {
     const d = distanceRef.current;
     const yaw = yawRef.current;
     const pitch = pitchRef.current;
-    // Standard spherical → cartesian. Target is the cube cluster
-    // centroid (~origin, slightly above the floor).
-    const targetY = 0.75;
+    // Target is the center of the grid floor, just above the floor plane.
+    const targetY = 0.5;
     const cy = Math.cos(pitch);
     const px = d * cy * Math.sin(yaw);
     const py = d * Math.sin(pitch) + targetY;
@@ -313,7 +360,6 @@ export function PreviewPanel(): React.JSX.Element {
     handle.camera.aspect = size.w / size.h;
     handle.camera.updateProjectionMatrix();
     handle.grid.visible = gridVisibleRef.current;
-    applyWireframe(handle.wireframeMaterials, wireframeRef.current);
     updateCameraFromOrbit();
 
     const renderLoop = (): void => {
@@ -339,6 +385,126 @@ export function PreviewPanel(): React.JSX.Element {
     // size.w/h are part of the gate above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+
+  // ----- Floor + grid rebuild on dims change -------------------------
+  // Floor PlaneGeometry is sized to dims so it always sits exactly under
+  // the painted cells. Grid is rebuilt at the same time so its divisions
+  // match the cell count.
+  React.useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+
+    // Dispose the old floor + old grid before swapping in new ones.
+    for (const child of handle.floorGroup.children.slice()) {
+      handle.floorGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        for (const m of mats) m.dispose();
+      }
+    }
+
+    const floorGeo = new THREE.PlaneGeometry(dims.w, dims.h);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x3a3027,
+      roughness: 0.9,
+      metalness: 0.0,
+      wireframe: wireframeRef.current,
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0, 0);
+    handle.floorGroup.add(floor);
+
+    // Replace the grid helper with one sized to the level.
+    handle.scene.remove(handle.grid);
+    handle.grid.geometry.dispose();
+    const gridMat = handle.grid.material as THREE.Material | THREE.Material[];
+    const gridMats = Array.isArray(gridMat) ? gridMat : [gridMat];
+    for (const m of gridMats) m.dispose();
+    const maxDim = Math.max(dims.w, dims.h);
+    const newGrid = new THREE.GridHelper(maxDim, maxDim, 0x666b78, 0x3a3f4b);
+    newGrid.position.y = 0.001;
+    newGrid.visible = gridVisibleRef.current;
+    handle.scene.add(newGrid);
+    handle.grid = newGrid;
+  }, [dims.w, dims.h, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+
+  // ----- Cell-mesh rebuild on scene/layer change ---------------------
+  // Geometry rebuild is keyed on the store slices the cells depend on.
+  // We iterate the sparse `cells` map, stack one BoxGeometry per
+  // (cell, layer) where the layer is visible and has a preset assigned.
+  // Coord mapping: cell (x, y) → world (x - dims.w/2 + 0.5, height/2, y - dims.h/2 + 0.5).
+  // The dims/2 offset centers the grid on the camera target so cell (0, 0)
+  // doesn't land at world (0, 0). Three.js Y is UP: the cell-grid Y axis
+  // is the floor-plane SECOND axis, i.e. Three's Z.
+  React.useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+
+    // Dispose previous cell meshes (geometry only — materials are pooled).
+    for (const child of handle.sceneGroup.children.slice()) {
+      handle.sceneGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+      }
+    }
+
+    const halfW = dims.w / 2 - 0.5;
+    const halfH = dims.h / 2 - 0.5;
+
+    for (const key in cells) {
+      const cell = cells[key];
+      if (!cell) continue;
+      const [xs, ys] = key.split(",");
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      for (const layerId of order) {
+        if (visibility[layerId] === false) continue;
+        const presetId = cell.layers[layerId];
+        if (!presetId) continue;
+
+        // Material pool — shared by `${layerId}:${presetId}`. Color
+        // today is layer-driven (a future enhancement can swap in
+        // per-preset tints without changing the keying scheme).
+        const matKey = `${layerId}:${presetId}`;
+        let mat = handle.materialPool.get(matKey);
+        if (!mat) {
+          mat = new THREE.MeshStandardMaterial({
+            color: colorForLayer(layerId),
+            roughness: 0.7,
+            metalness: 0.05,
+            wireframe: wireframeRef.current,
+          });
+          handle.materialPool.set(matKey, mat);
+        }
+        // Keep pooled materials in sync with the current wireframe flag.
+        mat.wireframe = wireframeRef.current;
+
+        const h = Math.max(cell.height, 1);
+        const geo = new THREE.BoxGeometry(1, h, 1);
+        const mesh = new THREE.Mesh(geo, mat);
+        // Cell (x, y) → world (x, *, y). Y in Three is UP; cell-grid
+        // y is the SECOND floor-plane axis (Three's Z).
+        mesh.position.set(x - halfW, h / 2, y - halfH);
+        handle.sceneGroup.add(mesh);
+      }
+    }
+  }, [cells, visibility, order, dims.w, dims.h, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+
+  // ----- Ambient intensity from scene settings -----------------------
+  React.useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    // settings.ambient is 0..1 — Three's AmbientLight intensity is the
+    // same convention (a multiplier on the light's color contribution).
+    // settings.fog deferred until THREE.FogExp2 plumbing lands.
+    handle.ambient.intensity = settings.ambient;
+  }, [settings.ambient, size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
 
   // ----- ResizeObserver ----------------------------------------------
   React.useEffect(() => {
@@ -440,14 +606,18 @@ export function PreviewPanel(): React.JSX.Element {
 
   // ----- Action handlers ---------------------------------------------
   const resetCamera = React.useCallback(() => {
-    distanceRef.current = DEFAULT_DISTANCE;
+    // Reset distance to the auto-fit value for the CURRENT dims — a
+    // user reset on a 64×64 grid should land back at the "whole grid
+    // visible" pose, not the old 7-unit default.
+    const fit = autoFitDistance(dims.w, dims.h);
+    distanceRef.current = fit;
     yawRef.current = DEFAULT_YAW;
     pitchRef.current = DEFAULT_PITCH;
-    writeLSNumber(LS_CAM_DISTANCE, DEFAULT_DISTANCE);
+    writeLSNumber(LS_CAM_DISTANCE, fit);
     writeLSNumber(LS_CAM_YAW, DEFAULT_YAW);
     writeLSNumber(LS_CAM_PITCH, DEFAULT_PITCH);
     updateCameraFromOrbit();
-  }, [updateCameraFromOrbit]);
+  }, [updateCameraFromOrbit, dims.w, dims.h]);
 
   const zoomIn = React.useCallback(() => {
     distanceRef.current = clampDistance(distanceRef.current - ZOOM_STEP);
@@ -471,7 +641,27 @@ export function PreviewPanel(): React.JSX.Element {
   const toggleWireframe = React.useCallback(() => {
     wireframeRef.current = !wireframeRef.current;
     const handle = handleRef.current;
-    if (handle) applyWireframe(handle.wireframeMaterials, wireframeRef.current);
+    if (handle) {
+      // Apply to pooled materials.
+      for (const m of handle.materialPool.values()) {
+        m.wireframe = wireframeRef.current;
+        m.needsUpdate = true;
+      }
+      // Apply to the floor's material (it's not pooled — one-off).
+      handle.floorGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          const mats = Array.isArray(obj.material)
+            ? obj.material
+            : [obj.material];
+          for (const mm of mats) {
+            if (mm instanceof THREE.MeshStandardMaterial) {
+              mm.wireframe = wireframeRef.current;
+              mm.needsUpdate = true;
+            }
+          }
+        }
+      });
+    }
     forceRerender();
   }, []);
 
@@ -635,23 +825,13 @@ export function PreviewPanel(): React.JSX.Element {
 // ---------------------------------------------------------------------------
 
 function clampDistance(d: number): number {
-  if (!Number.isFinite(d)) return DEFAULT_DISTANCE;
+  if (!Number.isFinite(d)) return MIN_DISTANCE;
   return Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, d));
 }
 
 function clampPitch(p: number): number {
   if (!Number.isFinite(p)) return DEFAULT_PITCH;
   return Math.min(MAX_PITCH, Math.max(MIN_PITCH, p));
-}
-
-function applyWireframe(
-  mats: THREE.MeshStandardMaterial[],
-  wireframe: boolean,
-): void {
-  for (const m of mats) {
-    m.wireframe = wireframe;
-    m.needsUpdate = true;
-  }
 }
 
 interface PreviewIconButtonProps {
