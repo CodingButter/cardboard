@@ -235,14 +235,16 @@ A new tab in the Editor Settings modal:
 
 The order matters. Each phase has a clear "what unblocks after this."
 
-| Phase | Task | Deliverable | Unblocks |
+| Phase | Task | Deliverable | Status |
 |---|---|---|---|
-| **0 — Wiring** | #21 | JSON schema + renderer + store-path resolver + script-ref invoker + ONE test panel. **No migration of existing panels.** | Validates the renderer end-to-end before touching prod panels. |
-| **1 — Migrate existing** | #22 | TSX → JSON one panel at a time, simplest first: SelectionInfo → Tooltip → QuickTools → … → MapCanvas. | Proves the JSON renderer covers real-world panel surface. Backfills missing primitives. |
-| **2 — Libs + extensions** | #20 + #18 | Pack-bundled libraries with content-hash dedup; Extensions tab UI; install/enable/disable flow. | Third parties can ship packs that depend on npm modules. |
-| **3 — Visual builder** | #23 | Drag-and-drop panel-builder UI that outputs JSON. Lives as an editor pack itself. | Non-coders can author panels. Authoring loop closes. |
-| **4 — Core pack extraction** | #19 | Move current `apps/editor/src/views/` + `panels/` into `packages/core-editor-pack/`. `apps/editor/` shrinks to shell. | Shell is provably reusable — the Cardboard editor is now one of its consumers. |
-| **5 — Performance Profiler demo pack** | #24 | `packages/demo-performance-profiler/` installs via Extensions, contributes a panel via the dock-add modal, renders a live chart. | The proof point. See §9. |
+| **0a — Renderer wiring** | #21 | JSON schema + renderer + store-path resolver + script-ref invoker + one test spec. **No migration of existing panels.** | ✅ Shipped 2026-05-20 — `apps/editor/src/panel-renderer/` + `?renderer-demo` route. Renderer mechanism proven. |
+| **0b — Renderer-as-DockPanelDef** | #21 follow-up | Wrap the JSON renderer as a real `DockPanelDef` registered in MapView so the JSON-authored panel docks alongside hand-written panels (not a standalone route). | ✅ Shipped 2026-05-20 (`a18174c`) — `JsonDemoPanel.tsx` + Inspector category card in DocksModal. |
+| **1a — First editor pack + loader** | #19 first cut | New `packages/cardboard-editor-pack-demo/` workspace ships a manifest + `panels/selection-info.json`. Editor-side `editorPackLoader.ts` walks the manifest at startup and registers panels into the live DockPanelDef registry. In-tree `JsonDemoPanel.tsx` deleted — panel comes from the pack. This is the **dogfooding proof point**: once the panel appears in the DocksModal sourced from a pack, the platform proof-by-construction starts. | ⏳ In progress — agent dispatched 2026-05-20. |
+| **1b — Migrate existing panels (TSX → JSON)** | #22 | SelectionInfo → Tooltip → QuickTools → … → MapCanvas, one panel per commit. | Pending; unblocked by 1a. |
+| **2 — Libs + extensions** | #20 + #18 | Pack-bundled libraries with content-hash dedup; Extensions tab UI; install/enable/disable flow; real `.apg` unzip replacing the Phase-1a static-import shortcut. | Pending; foundational for marketplace. |
+| **3 — Visual builder** | #23 | Drag-and-drop panel-builder UI that outputs JSON. Lives as an editor pack itself. | Pending; closes the non-coder authoring loop. |
+| **4 — Core pack extraction** | #19 full | Move current `apps/editor/src/views/` + `panels/` into `packages/core-editor-pack/`. `apps/editor/` shrinks to shell. | Pending; the big restructure. |
+| **5 — Performance Profiler demo pack** | #24 | `packages/demo-performance-profiler/` installs via Extensions, bundles chart.js, contributes a panel, renders a live chart. See §9. | Pending; the marketplace milestone. |
 
 Phase 5 is the milestone. Until then this is internal refactor;
 after it, **the platform exists**.
