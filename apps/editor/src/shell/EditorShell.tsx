@@ -49,6 +49,7 @@ import {
 } from "../state/useCommandStore";
 import { registerSetting } from "../state/useSettingsStore";
 import { useFileIndex, classifyAssetPath } from "../state/useFileIndex";
+import { hydrateStoresFromIdb } from "../state/hydration";
 import { matchKeybinding } from "../lib/keybinding";
 
 /**
@@ -290,6 +291,34 @@ export function EditorShell() {
         setAssets(as);
       } catch {
         // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, refreshTick]);
+
+  // P0 fix: pull scene + layer + tile-preset slices out of IDB into
+  // the wave-3 Zustand stores whenever the project changes (or the
+  // shell's refresh tick advances after an import). Without this,
+  // panels that migrated off MOCK_ fixtures (MapCanvas, LayersPanel,
+  // TilePresetPanel, SceneSettingsPanel, MinimapPanel, PreviewPanel)
+  // render empty because pack-load writes only to IDB and nothing
+  // bridges back. See `apps/editor/src/state/hydration.ts` for the
+  // helper's responsibilities + deferred items (IDB write-back is NOT
+  // part of this pass).
+  React.useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await hydrateStoresFromIdb(projectId);
+        if (cancelled) return;
+      } catch (err) {
+        // Log and swallow — a single bad scene shouldn't poison the
+        // shell. Panels fall back to their initial Zustand state.
+        // eslint-disable-next-line no-console
+        console.error("[EditorShell] hydrateStoresFromIdb failed", err);
       }
     })();
     return () => {
