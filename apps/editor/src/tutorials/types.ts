@@ -56,6 +56,33 @@ export interface TutorialStep {
 }
 
 /**
+ * Preconditions a tutorial needs satisfied before it can be started.
+ * Today these are implicit in the callsite that surfaces the launcher
+ * (e.g. the Prefabs EmptyState lives inside a project view, so the
+ * prefabs-intro tutorial transitively needs a project open). Making
+ * them explicit on the spec means:
+ *
+ *   - The runtime can refuse `startTutorial(slug)` cleanly with a
+ *     human-readable reason instead of the steps targeting selectors
+ *     that aren't mounted.
+ *   - The EmptyState launcher can hide or disable the "Start tutorial"
+ *     button when the preconditions aren't met, surfacing the reason
+ *     via Tooltip rather than silently breaking on click.
+ *
+ * Additive — tutorials without `requires` work unchanged.
+ */
+export interface TutorialRequirements {
+  /** True → tutorial requires an active project (a non-null
+   *  `useRoute().projectId`). Useful for any walkthrough that targets
+   *  selectors inside a project-scoped view. */
+  project?: boolean;
+  /** Pack ids that must be enabled in `useEditorPacksStore`. Useful
+   *  for walkthroughs that target panels contributed by an optional
+   *  pack (e.g. the Visual Builder's Panel Builder). */
+  pack?: readonly string[];
+}
+
+/**
  * Top-level tutorial record. T1 requires `id`, `title`, and `steps`;
  * the rest are optional and reserved for T2+ wiring.
  */
@@ -74,6 +101,9 @@ export interface TutorialDef {
   next?: string | null;
   /** Slugs that must be completed first (reserved for T2+). */
   prerequisites?: string[];
+  /** Preconditions checked by `canStart(slug)` and the EmptyState
+   *  launcher gate. Optional and additive. See `TutorialRequirements`. */
+  requires?: TutorialRequirements;
   /** The walkthrough. T1 supports 1 ≤ steps.length ≤ 30. */
   steps: TutorialStep[];
 }

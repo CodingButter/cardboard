@@ -4,6 +4,7 @@
   "title": "Prefabs: 90-second tour",
   "description": "Meet the entity list, the component editor, the live JSON, and the 3-D preview.",
   "estimatedSeconds": 90,
+  "requires": { "project": true },
   "steps": [
     {
       "id": "intro",

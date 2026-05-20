@@ -4,6 +4,7 @@
   "title": "Panel Builder: visual UI authoring",
   "description": "Drag nodes from the palette, drop them onto the canvas, then edit their properties in the inspector.",
   "estimatedSeconds": 75,
+  "requires": { "pack": ["cardboard-visual-builder-pack"] },
   "steps": [
     {
       "id": "intro",

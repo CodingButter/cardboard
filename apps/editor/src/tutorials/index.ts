@@ -55,11 +55,13 @@ export {
   emitTutorialEvent,
   getRuntimeState,
   subscribe,
+  canStart,
 } from "./runtime";
 export type {
   TutorialDef,
   TutorialStep,
   TutorialResult,
+  TutorialRequirements,
   RuntimeState,
 } from "./types";
 export { TutorialOverlayHost } from "./TutorialOverlay";

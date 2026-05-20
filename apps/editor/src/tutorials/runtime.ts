@@ -24,6 +24,7 @@
  *     T2's settings-tab integration.
  */
 
+import { useEditorPacksStore } from "../state/useEditorPacksStore";
 import type {
   AdvanceCondition,
   RuntimeState,
@@ -143,6 +144,99 @@ export function listTutorials(): TutorialDef[] {
   return Array.from(registry.values()).sort((a, b) =>
     a.id.localeCompare(b.id),
   );
+}
+
+// ---------------------------------------------------------------------
+// Precondition gate — `canStart(slug)`
+// ---------------------------------------------------------------------
+
+/**
+ * Result of `canStart()`. `ok:true` → the tutorial can run; `ok:false`
+ * → blocked, with a human-readable `reason` suitable for surfacing in
+ * an EmptyState launcher tooltip.
+ */
+export interface CanStartResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Probe the current active-project id. The runtime is a vanilla
+ * module (not a React hook), so we parse `window.location.hash`
+ * directly — same shape as `lib/router.ts#parseHash`. Tests can
+ * override via `_setProjectIdProbe()` below.
+ */
+function defaultProjectIdProbe(): string | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash ?? "";
+  const cleaned = hash.replace(/^#\/?/, "");
+  if (cleaned === "" || cleaned === "/") return null;
+  const segments = cleaned.split("/").filter(Boolean);
+  if (segments[0] === "p" && segments[1]) return segments[1];
+  return null;
+}
+
+/**
+ * Probe whether a pack is enabled. Defaults to the editor-packs store;
+ * tests override via `_setPackEnabledProbe()`.
+ */
+function defaultPackEnabledProbe(id: string): boolean {
+  try {
+    const entry = useEditorPacksStore.getState().packs[id];
+    return Boolean(entry?.enabled);
+  } catch {
+    return false;
+  }
+}
+
+let projectIdProbe: () => string | null = defaultProjectIdProbe;
+let packEnabledProbe: (id: string) => boolean = defaultPackEnabledProbe;
+
+/** Test-seam — override the active-project probe. */
+export function _setProjectIdProbe(probe: (() => string | null) | null): void {
+  projectIdProbe = probe ?? defaultProjectIdProbe;
+}
+
+/** Test-seam — override the pack-enabled probe. */
+export function _setPackEnabledProbe(
+  probe: ((id: string) => boolean) | null,
+): void {
+  packEnabledProbe = probe ?? defaultPackEnabledProbe;
+}
+
+/**
+ * Synchronously check whether the named tutorial can be started right
+ * now. Cheap by design — no async, no IO beyond reading the editor
+ * packs store + `window.location.hash`. Callers:
+ *
+ *   - `EmptyState` uses this to hide / disable the "Start tutorial"
+ *     button and surface the reason in its tooltip.
+ *   - Future: `startTutorial()` could refuse at the source, but T5
+ *     keeps the gate UI-side only so existing callsites (Help menu,
+ *     Settings tab) keep working unchanged.
+ *
+ * Returns `{ ok: true }` when the tutorial id isn't registered — the
+ * downstream code already handles unknown slugs cleanly (the launcher
+ * is hidden by `hasTutorial()`), so we don't double-gate here.
+ */
+export function canStart(slug: string): CanStartResult {
+  const def = registry.get(slug);
+  if (!def) return { ok: true };
+  const req = def.requires;
+  if (!req) return { ok: true };
+  if (req.project === true) {
+    if (!projectIdProbe()) {
+      return { ok: false, reason: "Open a project first" };
+    }
+  }
+  if (req.pack && req.pack.length > 0) {
+    for (const id of req.pack) {
+      if (!packEnabledProbe(id)) {
+        return { ok: false, reason: `Enable the ${id} pack first` };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------
@@ -468,6 +562,7 @@ export const tutorialsApi = Object.freeze({
   reset: resetTutorial,
   emit: emitTutorialEvent,
   advance: advanceStep,
+  canStart,
   subscribe,
   getState: getRuntimeState,
   _register: registerTutorial,

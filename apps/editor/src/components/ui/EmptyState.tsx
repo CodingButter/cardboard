@@ -3,10 +3,12 @@ import { Play } from "lucide-react";
 import { cn } from "../../lib/cn";
 import logoUrl from "../../assets/logo.png" with { type: "file" };
 import {
+  canStart,
   hasTutorial,
   isCompleted,
   startTutorial,
 } from "../../tutorials/runtime";
+import { Tooltip } from "./Tooltip";
 
 /**
  * EmptyState — §4.24.
@@ -55,11 +57,19 @@ export function EmptyState({
   logoSrc = logoUrl,
   className,
 }: EmptyStateProps): React.JSX.Element {
-  const showTutorialButton =
+  const isLaunchableSlug =
     typeof tutorial === "string" &&
     tutorial.length > 0 &&
     hasTutorial(tutorial) &&
     !isCompleted(tutorial);
+  // `canStart` is a cheap synchronous probe — see runtime.ts. Returns
+  // `{ ok: true }` for unknown slugs, so it's safe to call eagerly.
+  const startCheck = isLaunchableSlug
+    ? canStart(tutorial as string)
+    : { ok: false as const };
+  const showTutorialButton = isLaunchableSlug;
+  const tutorialBlockedReason =
+    isLaunchableSlug && !startCheck.ok ? (startCheck.reason ?? null) : null;
   return (
     <div
       className={cn(
@@ -96,23 +106,49 @@ export function EmptyState({
         {(action || showTutorialButton) && (
           <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             {action}
-            {showTutorialButton && (
-              <button
-                type="button"
-                onClick={() => {
-                  void startTutorial(tutorial!);
-                }}
-                data-tutorial-launcher={tutorial}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border border-amber-500/60",
-                  "px-3 py-1.5 text-sm font-medium text-amber-300 hover:bg-amber-500/10",
-                  "transition-colors",
-                )}
-              >
-                <Play size={14} aria-hidden="true" />
-                Start tutorial
-              </button>
-            )}
+            {showTutorialButton &&
+              (tutorialBlockedReason ? (
+                <Tooltip
+                  stages={[
+                    {
+                      delay: 400,
+                      content: <span>{tutorialBlockedReason}</span>,
+                    },
+                  ]}
+                >
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    data-tutorial-launcher={tutorial}
+                    data-tutorial-blocked={tutorialBlockedReason}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border border-zinc-700",
+                      "px-3 py-1.5 text-sm font-medium text-zinc-500",
+                      "cursor-not-allowed opacity-60",
+                    )}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    Start tutorial
+                  </button>
+                </Tooltip>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void startTutorial(tutorial!);
+                  }}
+                  data-tutorial-launcher={tutorial}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border border-amber-500/60",
+                    "px-3 py-1.5 text-sm font-medium text-amber-300 hover:bg-amber-500/10",
+                    "transition-colors",
+                  )}
+                >
+                  <Play size={14} aria-hidden="true" />
+                  Start tutorial
+                </button>
+              ))}
           </div>
         )}
       </div>

@@ -9,6 +9,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  _setPackEnabledProbe,
+  _setProjectIdProbe,
+  canStart,
   emitTutorialEvent,
   getRuntimeState,
   hasTutorial,
@@ -172,6 +175,70 @@ describe("state machine", () => {
     expect(r1.status).toBe("stopped");
     stopTutorial();
     await second;
+  });
+});
+
+describe("canStart precondition gate", () => {
+  afterEach(() => {
+    // Restore default probes after each test so leakage doesn't
+    // contaminate the rest of the suite.
+    _setProjectIdProbe(null);
+    _setPackEnabledProbe(null);
+  });
+
+  test("returns ok for tutorials with no `requires` block", () => {
+    registerTutorial(DEMO);
+    expect(canStart(DEMO.id)).toEqual({ ok: true });
+  });
+
+  test("returns ok for unknown slugs (no double-gate)", () => {
+    expect(canStart("does-not-exist")).toEqual({ ok: true });
+  });
+
+  test("blocks when `requires.project` is true and no project is open", () => {
+    _setProjectIdProbe(() => null);
+    registerTutorial({
+      ...DEMO,
+      id: "needs-project",
+      requires: { project: true },
+    });
+    const result = canStart("needs-project");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("Open a project first");
+  });
+
+  test("passes when `requires.project` is true and a project is open", () => {
+    _setProjectIdProbe(() => "demo-project");
+    registerTutorial({
+      ...DEMO,
+      id: "needs-project-ok",
+      requires: { project: true },
+    });
+    expect(canStart("needs-project-ok")).toEqual({ ok: true });
+  });
+
+  test("blocks when a required pack is disabled", () => {
+    _setPackEnabledProbe((id) => id === "other-pack");
+    registerTutorial({
+      ...DEMO,
+      id: "needs-pack",
+      requires: { pack: ["cardboard-visual-builder-pack"] },
+    });
+    const result = canStart("needs-pack");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(
+      "Enable the cardboard-visual-builder-pack pack first",
+    );
+  });
+
+  test("passes when every required pack is enabled", () => {
+    _setPackEnabledProbe(() => true);
+    registerTutorial({
+      ...DEMO,
+      id: "needs-pack-ok",
+      requires: { pack: ["a", "b"] },
+    });
+    expect(canStart("needs-pack-ok")).toEqual({ ok: true });
   });
 });
 
