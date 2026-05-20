@@ -3,7 +3,9 @@ import { Grid3x3, Map, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
-import { MOCK_LAYERS, MOCK_SCENE_SETTINGS } from "../scene-fixtures";
+import { useLayerStore } from "../../../state/useLayerStore";
+import { useSceneStore } from "../../../state/useSceneStore";
+import { MOCK_LAYERS } from "../scene-fixtures";
 
 /**
  * MinimapPanel — opt-in compact overview of the whole scene.
@@ -36,13 +38,15 @@ import { MOCK_LAYERS, MOCK_SCENE_SETTINGS } from "../scene-fixtures";
 const LS_SHOW_GRID = "cardboard.scene.minimap.showGrid";
 const LS_SHOW_VIEWPORT = "cardboard.scene.minimap.showViewport";
 const LS_ZOOM = "cardboard.scene.minimap.zoom";
-/** LS key the LayersPanel writes layer-visibility to. We READ it here
- *  so the minimap respects layer toggles. JSON `Record<string, boolean>`. */
-const LS_LAYER_VISIBILITY = "cardboard.scene.layers.visibility";
-/** Poll interval (ms) for the layer-visibility LS key. Same-tab LS
- *  writes don't fire `storage` events, so we poll. 500ms is the budget
- *  the spec calls out and is well below human-perceptible "stale" UI. */
-const LAYER_VIS_POLL_MS = 500;
+
+/** Layer color palette derived from MOCK_LAYERS so the minimap renders
+ *  each layer's cells in its panel-defined color. Once tile presets gain
+ *  a real per-preset color field, this can be replaced with a preset
+ *  lookup keyed by the cell's preset id. */
+// TODO: when tile presets gain a 'color' field, prefer preset color over layer color.
+const LAYER_COLOR: Record<string, string> = Object.fromEntries(
+  MOCK_LAYERS.map((l) => [l.id, l.color]),
+);
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3.0;
@@ -80,66 +84,17 @@ function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 }
 
-/** Hard-coded decorative "tiles" — purely for visual interest. Coords
- *  are in scene-cell space; `w`/`h` are cell-sized. Each tile is tagged
- *  with a `layerId` matching MOCK_LAYERS so the minimap can hide it
- *  when that layer is toggled off in LayersPanel. Wave 3 deletes this
- *  in favor of the real scene tile grid (which already carries layer
- *  membership intrinsically). */
-interface FakeTile {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: string;
-  /** MOCK_LAYERS id this tile belongs to. Hidden when the layer is off. */
-  layerId: "floors" | "walls" | "doors" | "sprites" | "lights";
-}
-const FAKE_TILES: readonly FakeTile[] = [
-  { x: 6, y: 8, w: 6, h: 4, color: "#f59e0b", layerId: "floors" }, // amber — floor
-  { x: 18, y: 12, w: 3, h: 3, color: "#38bdf8", layerId: "walls" }, // sky — wall
-  { x: 28, y: 6, w: 8, h: 2, color: "#10b981", layerId: "doors" }, // green — door
-  { x: 44, y: 20, w: 4, h: 8, color: "#a78bfa", layerId: "sprites" }, // violet — sprite
-  { x: 10, y: 34, w: 10, h: 6, color: "#ef4444", layerId: "lights" }, // red — light
-  { x: 36, y: 40, w: 6, h: 6, color: "#f59e0b", layerId: "floors" }, // amber — floor
-  { x: 52, y: 48, w: 8, h: 6, color: "#38bdf8", layerId: "walls" }, // sky — wall
-];
-
-/** Default visibility map computed from MOCK_LAYERS. Used when the LS
- *  key is missing/corrupted so the minimap renders sensibly on first
- *  load (before the user has ever opened LayersPanel). */
-function defaultLayerVisibility(): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const l of MOCK_LAYERS) out[l.id] = l.visible;
-  return out;
-}
-
-/** Read + parse the layer-visibility LS key, falling back to defaults
- *  on any error (missing key, malformed JSON, wrong type). */
-function readLayerVisibility(): Record<string, boolean> {
-  const raw = readLS(LS_LAYER_VISIBILITY);
-  if (raw == null) return defaultLayerVisibility();
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed)
-    ) {
-      const out: Record<string, boolean> = {};
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === "boolean") out[k] = v;
-      }
-      // Merge with defaults so layers absent from storage still resolve.
-      return { ...defaultLayerVisibility(), ...out };
-    }
-  } catch {
-    /* fall through */
-  }
-  return defaultLayerVisibility();
-}
-
 export function MinimapPanel(): React.JSX.Element {
+  // Scene + layer subscriptions. Cells is the whole-map record —
+  // justified for a minimap (every paint potentially affects what we
+  // render, and 64×64 = 4096 cells is bounded). Layer subscriptions are
+  // split so a visibility flip doesn't invalidate `order` and vice
+  // versa. The old 500ms LS poller is strictly inferior to this.
+  const dims = useSceneStore((s) => s.dims);
+  const cells = useSceneStore((s) => s.cells);
+  const visibility = useLayerStore((s) => s.visibility);
+  const order = useLayerStore((s) => s.order);
+
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
@@ -165,50 +120,12 @@ export function MinimapPanel(): React.JSX.Element {
     return clampZoom(parsed);
   });
 
-  // Layer-visibility map mirrored from the LS key the LayersPanel
-  // writes. Same-tab LS writes don't fire `storage` events so we poll
-  // at LAYER_VIS_POLL_MS — cheap (one getItem + one shallow compare)
-  // and well within human latency. Re-renders only happen when the
-  // resolved map actually differs.
-  const [layerVisibility, setLayerVisibility] = React.useState<
-    Record<string, boolean>
-  >(() => readLayerVisibility());
-
-  React.useEffect(() => {
-    // Cross-tab updates: still pick these up via `storage`.
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === LS_LAYER_VISIBILITY) {
-        setLayerVisibility(readLayerVisibility());
-      }
-    };
-    window.addEventListener("storage", onStorage);
-
-    // Same-tab updates: poll. Only commits to state on actual change.
-    const id = window.setInterval(() => {
-      const next = readLayerVisibility();
-      setLayerVisibility((prev) => {
-        const prevKeys = Object.keys(prev);
-        const nextKeys = Object.keys(next);
-        if (prevKeys.length !== nextKeys.length) return next;
-        for (const k of nextKeys) {
-          if (prev[k] !== next[k]) return next;
-        }
-        return prev;
-      });
-    }, LAYER_VIS_POLL_MS);
-
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.clearInterval(id);
-    };
-  }, []);
-
   // Viewport center, in scene-cell coords. Click-to-recenter writes
   // here; "Center Minimap" command resets it to the scene midpoint.
   // The viewport size (in cells) is a fixed fraction of the scene —
   // big enough to be visible at any zoom, small enough to leave room
-  // around it. Wave 3 replaces with real MapCanvas camera state.
-  const dims = MOCK_SCENE_SETTINGS.dimensions;
+  // around it.
+  // TODO(wave): migrate to useViewportStore when MapCanvas gains pan/zoom.
   const [viewport, setViewport] = React.useState<{ cx: number; cy: number }>(
     () => ({ cx: dims.w / 2, cy: dims.h / 2 }),
   );
@@ -298,19 +215,24 @@ export function MinimapPanel(): React.JSX.Element {
     ctx.fillStyle = "#1a1814";
     ctx.fillRect(offX, offY, gridW, gridH);
 
-    // Fake tiles. Drawn before the grid so the grid lattice reads
-    // on top — keeps cell boundaries legible inside filled regions.
-    // Tiles on hidden layers are skipped — mirrors LayersPanel state.
-    for (const t of FAKE_TILES) {
-      if (layerVisibility[t.layerId] === false) continue;
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(
-        offX + t.x * cell,
-        offY + t.y * cell,
-        t.w * cell,
-        t.h * cell,
-      );
+    // Real scene cells, painted back-to-front per `order` so upper
+    // layers visually occlude lower ones. Hidden layers are skipped —
+    // mirrors LayersPanel state via the store. Drawn before the grid
+    // so the lattice reads on top, keeping cell boundaries legible
+    // inside filled regions.
+    ctx.globalAlpha = 0.85;
+    for (const layerId of order) {
+      if (visibility[layerId] === false) continue;
+      const layerColor = LAYER_COLOR[layerId] ?? "#888";
+      ctx.fillStyle = layerColor;
+      for (const key in cells) {
+        const cellRecord = cells[key];
+        if (!cellRecord || !cellRecord.layers[layerId]) continue;
+        const [xs, ys] = key.split(",");
+        const x = +xs!;
+        const y = +ys!;
+        ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -378,7 +300,9 @@ export function MinimapPanel(): React.JSX.Element {
     viewport.cy,
     dims.w,
     dims.h,
-    layerVisibility,
+    visibility,
+    order,
+    cells,
   ]);
 
   // ---- Handlers ----------------------------------------------------
