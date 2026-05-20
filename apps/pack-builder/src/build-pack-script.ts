@@ -396,6 +396,17 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const importPackFromUrl = __mod.importPackFromUrl;
               export const assetUrl = __mod.assetUrl;
               export const useStatusBar = __mod.useStatusBar;
+              // Task #17 — PreviewPanel engine-toggle dependencies.
+              // Modal / Button / Tooltip are presentational primitives
+              // routed through the host SDK so the Expand modal stacks
+              // above dockview correctly + future theme refactors land
+              // once instead of per-pack. GAME_RUNNER_URL is the host-
+              // resolved play-runtime URL; PreviewPanel embeds it in
+              // an iframe src for the engine-rendered preview branch.
+              export const Modal = __mod.Modal;
+              export const Button = __mod.Button;
+              export const Tooltip = __mod.Tooltip;
+              export const GAME_RUNNER_URL = __mod.GAME_RUNNER_URL;
             `,
           }));
         },

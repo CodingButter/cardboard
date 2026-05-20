@@ -95,6 +95,19 @@ import { importPackFromBlob, importPackFromUrl } from "../lib/importPack";
 import { assetUrl } from "../lib/assetUrl";
 import { useStatusBar } from "../shell/StatusBarContext";
 import type { StatusBarSection } from "../components/ui/StatusBar";
+// Task #17 — preview-panel engine toggle. Pack-shipped PreviewPanel
+// needs the Modal primitive (for the Expand modal) + the canonical
+// game-runner URL (for the engine iframe src). Modal is host-side
+// because it portals into the editor's z-index 1000 layer above
+// dockview; bundling a duplicate would render under the dock's drop
+// overlays. GAME_RUNNER_URL is a runtime-resolved string that knows
+// whether the editor is staged under `/cardboard/editor/` or
+// served standalone — the value differs between deployments and
+// must come from the host.
+import { Modal } from "../components/ui/Modal";
+import { Button } from "../components/ui/Button";
+import { Tooltip } from "../components/ui/Tooltip";
+import { GAME_RUNNER_URL } from "../lib/gameRunnerUrl";
 
 /**
  * P3 batch D-light — narrow public surface over `tileTextureCache`.
@@ -274,6 +287,25 @@ export const shellSdk = {
   importPackFromUrl,
   assetUrl,
   useStatusBar,
+  // Task #17 — Modal/Button/Tooltip exposed so pack-shipped panels
+  // (PreviewPanel's Expand modal) can compose host-side dialogs
+  // without re-implementing portal/dock-z-index handling. Each is
+  // presentational but the Modal portal MUST live in the host's DOM
+  // tree to stack above dockview's drop overlays (z-index 999). Tooltip
+  // and Button are already used by pack-shipped panels via direct
+  // import; routing them through the SDK lets them participate in any
+  // future theme/runtime customisation without forcing per-panel
+  // updates.
+  Modal,
+  Button,
+  Tooltip,
+  // Task #17 — GAME_RUNNER_URL resolves to the editor-origin path that
+  // serves the game runtime (`/play/` in dev, `/cardboard/play/` under
+  // GitHub Pages). PreviewPanel's engine-rendered branch points its
+  // iframe at `<GAME_RUNNER_URL>?source=editor&projectId=…`. The
+  // host owns this resolution because it depends on `window.location`
+  // semantics that aren't part of the pack runtime's contract.
+  GAME_RUNNER_URL,
 } as const;
 
 export type ShellSdk = typeof shellSdk;

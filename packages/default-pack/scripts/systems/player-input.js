@@ -70,6 +70,30 @@ export default (api) => {
     );
   };
 
+  /**
+   * Task #17 — PreviewPanel preview-controls slot. The editor iframe
+   * boot path (apps/game/src/editor-bridge.ts) seeds
+   * `window.__cardboardEditorPreviewControls = { fly, god }` from
+   * URL params + `set-controls` messages. Standalone game runs never
+   * touch the slot so `previewControls()` returns the all-false
+   * default and the gameplay loop is byte-identical to pre-#17.
+   *
+   *   god  → bypass `canStandAt` wall collision (clip through walls).
+   *   fly  → also bypass gravity/jump/crouch; vertical position is
+   *           driven by Q (up) / E (down) instead. Implies god in
+   *           practice since the player floats above the floor.
+   */
+  const previewControls = () => {
+    const slot =
+      typeof window !== "undefined"
+        ? window.__cardboardEditorPreviewControls
+        : null;
+    if (slot && typeof slot === "object") {
+      return { fly: !!slot.fly, god: !!slot.god };
+    }
+    return { fly: false, god: false };
+  };
+
   api.registerSystem((world, deltaTime) => {
     // Note: the engine's `Game.update` already gates mod-registered
     // systems behind "no modal open" via `if (!this.modals.any())
@@ -110,6 +134,12 @@ export default (api) => {
     const aimSens = cfg.reticle.sensitivity * aimSign;
     const playerRadius = cfg.player.radius;
 
+    // Task #17 — sample the preview-controls slot once per frame.
+    // Standalone game runs see `{ fly: false, god: false }` and run
+    // the unchanged code path; the editor PreviewPanel toggles flip
+    // these on/off via `set-controls` postMessages.
+    const ctrls = previewControls();
+
     world.each(
       C.PlayerInput, C.Position, C.Facing, C.Movement,
       (entity, input, position, facing, movement) => {
@@ -129,7 +159,23 @@ export default (api) => {
         const maxZ = headroom - 0.62;
         const forcedCrouch = maxZ < 0;
 
-        if (onGround) {
+        if (ctrls.fly) {
+          // Fly mode — no gravity, no jump arc. Vertical drives off
+          // jump (held = climb) and crouch (held = descend). Zero
+          // velocity each frame so toggling fly off mid-air doesn't
+          // leave the player accelerating downward.
+          const VFLY = 4.0;
+          const upHeld = api.input.isBindingPressed(input.bindings.jump);
+          const downHeld = api.input.isBindingPressed(input.bindings.crouch);
+          let dz = 0;
+          if (upHeld) dz += VFLY * deltaTime;
+          if (downHeld) dz -= VFLY * deltaTime;
+          movement.z += dz;
+          movement.vz = 0;
+          // God mode (implicit in fly) skips the head-bonk clamp so
+          // the player can ascend through ceilings.
+          if (!ctrls.god && movement.z > maxZ) movement.z = maxZ;
+        } else if (onGround) {
           const wantCrouch = movement.crouching || forcedCrouch;
           const target = wantCrouch ? CROUCH_Z : 0;
           const t = Math.min(1, CROUCH_LERP * deltaTime);
@@ -256,14 +302,17 @@ export default (api) => {
         }
 
         // Axis-separated collision; hanging headers above headZ pass.
+        // Task #17 — when god (or fly, which implies god) is on we
+        // skip the wall checks so the player clips through geometry.
         const camZNow = cam?.cameraZ ?? 0.5;
         const headZ = camZNow + 0.12;
         let newX = position.x;
         let newY = position.y;
-        if (dx !== 0 && canStandAt(position.x + dx, newY, playerRadius, headZ)) {
+        const skipCollision = ctrls.god || ctrls.fly;
+        if (dx !== 0 && (skipCollision || canStandAt(position.x + dx, newY, playerRadius, headZ))) {
           newX = position.x + dx;
         }
-        if (dy !== 0 && canStandAt(newX, position.y + dy, playerRadius, headZ)) {
+        if (dy !== 0 && (skipCollision || canStandAt(newX, position.y + dy, playerRadius, headZ))) {
           newY = position.y + dy;
         }
         const newPosition =

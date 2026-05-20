@@ -12,6 +12,14 @@
  *    - pause                   → Game.stop
  *    - resume                  → Game.start
  *    - reset                   → location.reload (iframe rebuilds)
+ *    - set-controls { fly, god } → toggle preview-controls flags
+ *      (task #17 — PreviewPanel engine toggle). Both flags
+ *      default to false; setting `fly: true` lets WASD push the
+ *      camera through the world without ground-plane gravity;
+ *      `god: true` skips wall collision so the player clips
+ *      through geometry. Flags live on a global window slot the
+ *      pack-side input system reads at the top of each frame —
+ *      see `packages/default-pack/scripts/systems/player-input.js`.
  *
  *  Iframe → editor:
  *    - ready { projectId, scene }
@@ -41,8 +49,26 @@ interface GameWithSceneOps extends Game {
 
 const INSTALLED = Symbol.for("two_5_d.editorBridgeInstalled");
 
+/**
+ * Window slot the pack-side player-input system reads each frame.
+ * Task #17 — PreviewPanel preview controls. Set by `set-controls`
+ * messages from the editor (and also seeded at boot from URL params
+ * `?flyMode=true` / `?godMode=true` so screenshots / share links can
+ * pre-arm the modes). The pack reads via `window.__cardboardEditorPreviewControls`
+ * — see player-input.js. The slot is intentionally untyped at the
+ * `Window` level so pack code (vanilla JS) doesn't need a type
+ * augmentation just to consume it.
+ */
+interface PreviewControlsSlot {
+  fly: boolean;
+  god: boolean;
+}
+
+const PREVIEW_CONTROLS_GLOBAL = "__cardboardEditorPreviewControls";
+
 interface InstalledWindow extends Window {
   [INSTALLED]?: true;
+  [PREVIEW_CONTROLS_GLOBAL]?: PreviewControlsSlot;
 }
 
 /**
@@ -63,6 +89,19 @@ export function installEditorBridge(
   const w = window as InstalledWindow;
   if (w[INSTALLED]) return;
   w[INSTALLED] = true;
+
+  // Seed preview-controls slot from URL params so the engine respects
+  // `?flyMode=true` / `?godMode=true` even before any postMessage
+  // arrives. The PreviewPanel embeds the iframe with these params on
+  // every src rebuild; the postMessage handler below mutates the same
+  // slot in place when the user toggles a control mid-session.
+  if (!w[PREVIEW_CONTROLS_GLOBAL]) {
+    const params = new URLSearchParams(window.location.search);
+    w[PREVIEW_CONTROLS_GLOBAL] = {
+      fly: params.get("flyMode") === "true",
+      god: params.get("godMode") === "true",
+    };
+  }
 
   function post(msg: Record<string, unknown>): void {
     // `*` is safe because we are same-origin with the editor
@@ -107,6 +146,19 @@ export function installEditorBridge(
           // process. Editor sends this when the user hits a "Reset"
           // button or manifest changes in I3.
           window.location.reload();
+          break;
+        }
+        case "set-controls": {
+          // Task #17 — toggle preview controls (fly / god) without
+          // reloading. The pack-side input system reads the slot at
+          // the top of each frame so the change applies on the next
+          // tick. Missing keys leave the previous value intact —
+          // editor only toggles one at a time but partial updates
+          // are valid.
+          const slot = w[PREVIEW_CONTROLS_GLOBAL] ?? { fly: false, god: false };
+          if (typeof data.fly === "boolean") slot.fly = data.fly;
+          if (typeof data.god === "boolean") slot.god = data.god;
+          w[PREVIEW_CONTROLS_GLOBAL] = slot;
           break;
         }
         // load-project, script-changed, manifest-changed, set-mode

@@ -27,9 +27,13 @@ import * as THREE from "three";
 import {
   AlertTriangle,
   Box,
+  Cuboid,
+  Expand,
   Grid3x3,
   Maximize2,
+  Plane,
   RotateCcw,
+  Shield,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -42,12 +46,17 @@ import type { DockPanelDef } from "../../../apps/editor/src/components/dock/Dock
 import { Button } from "../../../apps/editor/src/components/ui/Button";
 import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
 // Externalised — Wave-3 synced stores + `EmptyState` + the wrapped
-// tile-texture cache. `useDiagnosticsStore.getState()` replaces the
-// shell-side `useDiagnosticsStore.getState()` sugar (the SDK exposes the hook,
-// not the imperative wrapper, so this panel calls
-// `.getState()` directly).
+// tile-texture cache + Modal/GAME_RUNNER_URL (task #17 — engine
+// toggle + Expand modal). Modal is host-routed because its portal
+// stacks above dockview's drop overlays at z-index 1000 — a bundled
+// duplicate would render under the dock chrome. GAME_RUNNER_URL is
+// resolved by the host based on the editor's deploy base (
+// `/play/` in dev, `/cardboard/play/` under GitHub Pages) and can't
+// be hard-coded in the pack.
 import {
   EmptyState,
+  GAME_RUNNER_URL,
+  Modal,
   registerCommand,
   useDiagnosticsStore,
   useLayerStore,
@@ -958,7 +967,7 @@ function PreviewPanelInner(): React.JSX.Element {
   return (
     <div
       ref={containerRef}
-      data-panel="preview"
+      data-panel-content="preview-topdown"
       className="relative h-full w-full overflow-hidden"
     >
       {tooSmall ? (
@@ -1080,6 +1089,7 @@ interface PreviewIconButtonProps {
   tooltipLabel: string;
   tooltipDescription: string;
   pressed?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }
@@ -1088,6 +1098,7 @@ function PreviewIconButton({
   tooltipLabel,
   tooltipDescription,
   pressed,
+  disabled,
   onClick,
   children,
 }: PreviewIconButtonProps): React.JSX.Element {
@@ -1113,13 +1124,16 @@ function PreviewIconButton({
         type="button"
         aria-label={tooltipLabel}
         aria-pressed={pressed ?? undefined}
+        disabled={disabled}
         onClick={onClick}
         className={[
           "flex items-center justify-center w-6 h-6 rounded",
           "border transition-colors",
-          pressed
-            ? "bg-amber-500 border-amber-500 text-zinc-950"
-            : "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+          disabled
+            ? "bg-zinc-900/40 border-(--color-border-strong) text-(--color-fg-faint) cursor-not-allowed opacity-60"
+            : pressed
+              ? "bg-amber-500 border-amber-500 text-zinc-950"
+              : "bg-zinc-900/80 border-(--color-border-strong) text-(--color-fg-secondary) hover:border-amber-500/60 hover:text-(--color-fg-primary)",
         ].join(" ")}
       >
         {children}
@@ -1212,10 +1226,421 @@ class PreviewErrorBoundary extends React.Component<
   }
 }
 
+// ---------------------------------------------------------------------------
+// Task #17 — Engine-rendered preview branch + mode/expand wrapper.
+// ---------------------------------------------------------------------------
+//
+// The wrapper owns three pieces of local state:
+//   - previewMode : "top-down" | "engine"
+//   - controls    : { fly, god }
+//   - expanded    : boolean
+//
+// Mode "top-down" renders the existing THREE.js scene (PreviewPanelInner).
+// Mode "engine" mounts an iframe pointed at GAME_RUNNER_URL with
+// `?source=editor&projectId=…&flyMode=…&godMode=…`. The fly/god flags are
+// also relayed to the engine over postMessage so toggling them mid-session
+// doesn't require an iframe reload — the engine reads them at the top of
+// each frame (see apps/game/src/editor-bridge.ts + the default-pack
+// player-input system).
+//
+// Expand opens the same content inside a Modal (host-routed via shell
+// SDK) so the user can fly through the engine view at full editor-window
+// size and dismiss with Esc or backdrop click.
+//
+// All three features degrade gracefully:
+//   - No active project → engine toggle is disabled (tooltip explains).
+//   - Engine iframe boot fails → the engine branch shows an EmptyState
+//     and the top-down branch remains available.
+//   - WebGL unavailable → existing fallback in PreviewPanelInner stays
+//     intact (the wrapper only adds chrome around it).
+
+interface PreviewControls {
+  fly: boolean;
+  god: boolean;
+}
+
+type PreviewMode = "top-down" | "engine";
+
+interface EngineIframePreviewProps {
+  projectId: string;
+  controls: PreviewControls;
+  /** When false, the toolbar's engine-toggle button is suppressed —
+   *  the modal's top toolbar owns mode switching. */
+  showFallbackHint?: boolean;
+}
+
+/**
+ * EngineIframePreview — mounts an iframe at `<GAME_RUNNER_URL>?source=editor&…`
+ * and relays `controls` over postMessage. The iframe element itself stays
+ * in the DOM across control changes (re-mounting would reload the engine
+ * and lose camera position). The src is computed once per projectId so
+ * project switches still bounce the iframe.
+ *
+ * Status overlay surfaces three states: "Booting…" (no `ready` received
+ * yet), "Running" (after `ready`), and "Error: …" (after an `error`
+ * message). The engine bridge always posts `ready` after install, so the
+ * booting overlay is bounded by the engine's boot time (~1-2 s).
+ */
+function EngineIframePreview({
+  projectId,
+  controls,
+}: EngineIframePreviewProps): React.JSX.Element {
+  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
+  const [status, setStatus] = React.useState<"booting" | "running" | "error">(
+    "booting",
+  );
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+
+  // Build the src once per projectId. Fly/god toggles flow via
+  // postMessage to avoid an iframe reload on each switch.
+  const src = React.useMemo(() => {
+    try {
+      const u = new URL(GAME_RUNNER_URL, window.location.href);
+      u.searchParams.set("source", "editor");
+      u.searchParams.set("projectId", projectId);
+      // Seed initial control state so the engine respects fly/god
+      // before any postMessage round-trip lands. The bridge applies
+      // these at boot.
+      if (controls.fly) u.searchParams.set("flyMode", "true");
+      if (controls.god) u.searchParams.set("godMode", "true");
+      return u.toString();
+      // controls are intentionally NOT in the dep array — see comment
+      // above. We seed once at iframe mount; subsequent toggles use
+      // postMessage so the engine doesn't reload.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch {
+      // Malformed URL — surface an error state. Defensive; in
+      // practice GAME_RUNNER_URL is always a valid relative path.
+      return "";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // Listen for ready/error messages from THIS iframe specifically.
+  React.useEffect(() => {
+    function onMessage(ev: MessageEvent): void {
+      if (ev.source !== iframeRef.current?.contentWindow) return;
+      const m = ev.data as { type?: string; message?: string };
+      if (!m || typeof m.type !== "string") return;
+      if (m.type === "ready") {
+        setStatus("running");
+        setErrorMessage(null);
+      } else if (m.type === "error") {
+        setStatus("error");
+        setErrorMessage(typeof m.message === "string" ? m.message : "Unknown error");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Relay control changes to the iframe. The engine bridge mutates
+  // its preview-controls slot on receipt; the next pack-side frame
+  // picks up the new value. We only post AFTER the iframe is running
+  // so the first message isn't dropped pre-ready.
+  React.useEffect(() => {
+    if (status !== "running") return;
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    win.postMessage({ type: "set-controls", fly: controls.fly, god: controls.god }, "*");
+  }, [controls.fly, controls.god, status]);
+
+  return (
+    <div className="absolute inset-0 bg-black">
+      {src ? (
+        <iframe
+          ref={iframeRef}
+          data-preview-engine-iframe="true"
+          src={src}
+          // Pointer-lock + fullscreen + gamepad permissions per iframe
+          // so the engine's WASD-with-mouse-look works inside the
+          // editor's preview pane. Same allow string as the editor's
+          // main viewport.
+          allow="pointer-lock fullscreen gamepad screen-wake-lock"
+          title="Engine preview"
+          style={{
+            width: "100%",
+            height: "100%",
+            border: 0,
+            display: "block",
+            background: "#000",
+          }}
+        />
+      ) : null}
+      {status === "booting" && (
+        <div
+          data-preview-engine-status="booting"
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        >
+          <span className="text-[11px] uppercase tracking-wide text-(--color-fg-muted) bg-zinc-900/80 px-3 py-1 rounded">
+            Booting engine…
+          </span>
+        </div>
+      )}
+      {status === "error" && (
+        <div
+          data-preview-engine-status="error"
+          className="absolute inset-0 flex items-center justify-center overflow-auto"
+        >
+          <EmptyState
+            icon={<AlertTriangle size={24} />}
+            title="Engine preview unavailable"
+            description={
+              <>
+                The engine iframe reported an error. The top-down
+                preview is still available — switch back via the toolbar.
+                {errorMessage ? (
+                  <span className="block mt-2 text-[10px] text-zinc-600 font-mono break-all">
+                    {errorMessage}
+                  </span>
+                ) : null}
+              </>
+            }
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Top control strip rendered ABOVE the preview canvas — owns the
+ * mode toggle (top-down ↔ engine), fly/god control buttons (engine
+ * mode only), and the Expand button. Always visible when the panel
+ * is wide enough; suppressed when too narrow so the existing
+ * toolbar inside PreviewPanelInner gets the available pixels.
+ */
+interface PreviewTopToolbarProps {
+  mode: PreviewMode;
+  onModeChange: (mode: PreviewMode) => void;
+  controls: PreviewControls;
+  onControlsChange: (controls: PreviewControls) => void;
+  expanded: boolean;
+  onExpandToggle: () => void;
+  /** When falsy, the engine-toggle button is disabled with an
+   *  explanatory tooltip. Pass `null` when no active project. */
+  canUseEngine: boolean;
+  /** When in modal mode, suppress the Expand button (clicking it
+   *  would dismiss the modal — we want a dedicated close button
+   *  in the modal footer instead). */
+  inModal?: boolean;
+}
+
+function PreviewTopToolbar({
+  mode,
+  onModeChange,
+  controls,
+  onControlsChange,
+  expanded,
+  onExpandToggle,
+  canUseEngine,
+  inModal = false,
+}: PreviewTopToolbarProps): React.JSX.Element {
+  // Used to disable the engine-toggle when no project is loaded.
+  const engineDisabled = !canUseEngine && mode !== "engine";
+  return (
+    <div className="absolute top-1 left-1 flex items-center gap-1 z-10">
+      <PreviewIconButton
+        tooltipLabel="Top-down preview"
+        tooltipDescription="Editor-rendered orthographic-ish overhead view of the painted scene."
+        pressed={mode === "top-down"}
+        onClick={() => onModeChange("top-down")}
+      >
+        <Box size={14} />
+      </PreviewIconButton>
+      <PreviewIconButton
+        tooltipLabel={
+          engineDisabled
+            ? "Engine preview (no active project)"
+            : "Engine preview"
+        }
+        tooltipDescription={
+          engineDisabled
+            ? "Open a project before switching to the engine-rendered preview."
+            : "Embed the actual game engine inside the preview, with collision and physics."
+        }
+        pressed={mode === "engine"}
+        disabled={engineDisabled}
+        onClick={() => onModeChange("engine")}
+      >
+        <Cuboid size={14} />
+      </PreviewIconButton>
+      {mode === "engine" && (
+        <>
+          {/* Visual separator between mode toggle and control modes. */}
+          <span className="inline-block w-px h-4 bg-zinc-700 mx-1" aria-hidden="true" />
+          <PreviewIconButton
+            tooltipLabel="Fly mode"
+            tooltipDescription="Free-camera WASD movement with no gravity. Use jump (space) to ascend and crouch (ctrl) to descend."
+            pressed={controls.fly}
+            onClick={() => onControlsChange({ ...controls, fly: !controls.fly })}
+          >
+            <Plane size={14} />
+          </PreviewIconButton>
+          <PreviewIconButton
+            tooltipLabel="God mode"
+            tooltipDescription="Disable wall collision so the player clips through geometry. Combine with Fly for full flythrough."
+            pressed={controls.god}
+            onClick={() => onControlsChange({ ...controls, god: !controls.god })}
+          >
+            <Shield size={14} />
+          </PreviewIconButton>
+        </>
+      )}
+      {!inModal && (
+        <>
+          <span className="inline-block w-px h-4 bg-zinc-700 mx-1" aria-hidden="true" />
+          <PreviewIconButton
+            tooltipLabel={expanded ? "Collapse preview" : "Expand preview"}
+            tooltipDescription={
+              expanded
+                ? "Return the preview to its docked size."
+                : "Open the preview in a fullscreen modal for a real flythrough."
+            }
+            onClick={onExpandToggle}
+          >
+            <Expand size={14} />
+          </PreviewIconButton>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Shared state shape passed down by PreviewPanel into both the
+ * docked-pane shell and the modal-expanded shell. Lifted out of the
+ * shell component so the modal mirrors the docked mode/controls
+ * instead of resetting to defaults on open.
+ */
+interface PreviewShellState {
+  mode: PreviewMode;
+  setMode: (m: PreviewMode) => void;
+  controls: PreviewControls;
+  setControls: (c: PreviewControls) => void;
+  expanded: boolean;
+  setExpanded: (v: boolean) => void;
+  projectId: string | null;
+}
+
+/**
+ * PreviewPanelShell — task #17 inner shell. Receives state from the
+ * top-level `PreviewPanel` (or the modal renderer) so toggling
+ * inside the modal mirrors the docked panel and vice-versa. The
+ * shell itself is stateless; it just composes the preview body +
+ * top toolbar against the supplied state surface.
+ */
+function PreviewPanelShell({
+  state,
+  inModal = false,
+}: {
+  state: PreviewShellState;
+  inModal?: boolean;
+}): React.JSX.Element {
+  const { mode, setMode, controls, setControls, expanded, setExpanded, projectId } = state;
+  const canUseEngine = projectId !== null && projectId !== "";
+
+  // If the engine toggle is on but the project disappears, fall back
+  // to top-down so the user isn't staring at a permanent error.
+  React.useEffect(() => {
+    if (mode === "engine" && !canUseEngine) {
+      setMode("top-down");
+    }
+  }, [mode, canUseEngine, setMode]);
+
+  const previewBody =
+    mode === "engine" && canUseEngine && projectId ? (
+      <EngineIframePreview projectId={projectId} controls={controls} />
+    ) : (
+      <PreviewPanelInner />
+    );
+
+  return (
+    <div
+      data-panel="preview"
+      data-preview-mode={mode}
+      data-preview-expanded={expanded ? "true" : "false"}
+      data-preview-in-modal={inModal ? "true" : "false"}
+      className="relative h-full w-full overflow-hidden"
+    >
+      {previewBody}
+      <PreviewTopToolbar
+        mode={mode}
+        onModeChange={setMode}
+        controls={controls}
+        onControlsChange={setControls}
+        expanded={expanded}
+        onExpandToggle={() => setExpanded(!expanded)}
+        canUseEngine={canUseEngine}
+        inModal={inModal}
+      />
+    </div>
+  );
+}
+
 export function PreviewPanel(): React.JSX.Element {
+  // Lifted state — both the docked shell and the modal-expanded
+  // shell read the same surface so toggles inside the modal mirror
+  // to the docked panel and vice-versa. Without the lift the modal's
+  // shell would mount with default state every open and forget the
+  // user's mode/controls.
+  const [mode, setMode] = React.useState<PreviewMode>("top-down");
+  const [controls, setControls] = React.useState<PreviewControls>({
+    fly: false,
+    god: false,
+  });
+  const [expanded, setExpanded] = React.useState(false);
+
+  const projectId = React.useMemo(() => {
+    try {
+      return typeof window !== "undefined"
+        ? window.localStorage.getItem("editor.currentProjectId")
+        : null;
+    } catch {
+      return null;
+    }
+    // mode is in the deps so a project-switch dispatched between
+    // mode toggles re-reads the localStorage. Cheap enough; React
+    // batches anyway.
+  }, [mode]);
+
+  const state: PreviewShellState = {
+    mode,
+    setMode,
+    controls,
+    setControls,
+    expanded,
+    setExpanded,
+    projectId,
+  };
+
   return (
     <PreviewErrorBoundary>
-      <PreviewPanelInner />
+      <PreviewPanelShell state={state} />
+      {/* Modal mirrors the docked shell — same state, same toolbar
+          (with the Expand button suppressed via inModal so the
+          modal isn't double-expanded). Esc / backdrop click closes
+          the modal; the engine iframe re-mounts because it's a
+          fresh component tree, which loses pointer-lock + boot
+          state. The pack-side `set-controls` slot survives because
+          it's window-scoped, not React-state-scoped. */}
+      <Modal
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        width="3xl"
+        title="3D Preview"
+        description={
+          mode === "engine"
+            ? controls.fly || controls.god
+              ? "Engine-rendered preview — fly/god controls active."
+              : "Engine-rendered preview — full collision and physics."
+            : "Top-down editor preview."
+        }
+      >
+        <div className="relative w-full" style={{ height: "70vh" }}>
+          <PreviewPanelShell state={state} inModal={true} />
+        </div>
+      </Modal>
     </PreviewErrorBoundary>
   );
 }
