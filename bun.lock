@@ -109,6 +109,13 @@
       "name": "@two_5_d/editor-pack-demo",
       "version": "0.0.1",
     },
+    "packages/cardboard-visual-builder-pack": {
+      "name": "@two_5_d/cardboard-visual-builder-pack",
+      "version": "0.0.1",
+      "dependencies": {
+        "lucide-react": "^1.16.0",
+      },
+    },
     "packages/core-editor-pack": {
       "name": "@two_5_d/core-editor-pack",
       "version": "0.1.0",
@@ -493,6 +500,8 @@
     "@tailwindcss/postcss": ["@tailwindcss/postcss@4.3.0", "", { "dependencies": { "@alloc/quick-lru": "^5.2.0", "@tailwindcss/node": "4.3.0", "@tailwindcss/oxide": "4.3.0", "postcss": "^8.5.10", "tailwindcss": "4.3.0" } }, "sha512-Jm05Tjx+9yCLGv5qw1c+84Psds8MnyrEQYCB+FFk2lgGiUjlRqdxke4mVTuYrj2xnVZqKim2Apr5ySuQRYAw/w=="],
 
     "@tweenjs/tween.js": ["@tweenjs/tween.js@23.1.3", "", {}, "sha512-vJmvvwFxYuGnF2axRtPYocag6Clbb5YS7kLL+SO/TeVFzHqDIWrNKYtcsPMibjDx9O+bu+psAy9NKfWklassUA=="],
+
+    "@two_5_d/cardboard-visual-builder-pack": ["@two_5_d/cardboard-visual-builder-pack@workspace:packages/cardboard-visual-builder-pack"],
 
     "@two_5_d/core-editor-pack": ["@two_5_d/core-editor-pack@workspace:packages/core-editor-pack"],
 

@@ -1,0 +1,9 @@
+{
+  "id": "cardboard-visual-builder-pack",
+  "name": "Cardboard Visual Builder",
+  "version": "0.0.1",
+  "engine": "two_5_d@0.1",
+  "scope": ["editor"],
+  "scripts": ["scripts/setup.tsx"],
+  "editorPanels": []
+}

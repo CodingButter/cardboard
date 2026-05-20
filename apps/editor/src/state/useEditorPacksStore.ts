@@ -114,6 +114,15 @@ const INITIAL_STATE: EditorPacksStateData = {
       enabled: true,
       meta: null,
     },
+    "cardboard-visual-builder-pack": {
+      // JSON Visual Builder — VB1 ships the workspace skeleton (Panel
+      // Builder tab + empty 3-pane view). Default-enabled so the tab
+      // lights up on first run; users can disable from the Extensions
+      // tab. See docs/plans/JSON_VISUAL_BUILDER.md §10.
+      id: "cardboard-visual-builder-pack",
+      enabled: true,
+      meta: null,
+    },
   },
 };
 

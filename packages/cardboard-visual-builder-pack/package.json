@@ -1,0 +1,9 @@
+{
+  "name": "@two_5_d/cardboard-visual-builder-pack",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Editor-only pack: JSON Visual Builder. VB1 ships the workspace skeleton — a Panel Builder primary tab + empty 3-pane view (palette / canvas / inspector placeholders). VB2+ wires drag-from-palette, selection, the property inspector, and JSON-mode sync. See docs/plans/JSON_VISUAL_BUILDER.md §10.",
+  "dependencies": {
+    "lucide-react": "^1.16.0"
+  }
+}
