@@ -83,9 +83,10 @@ https://codingbutter.github.io/cardboard/sidecar/?peer=<id>&kind=<panelKind>&lab
 | Param | Required | Purpose |
 |---|---|---|
 | `peer` | ✅ | PeerJS id of the desktop |
-| `kind` | ✅ | Panel kind: `minimap` / `tilePresets` / `gamePreview` / `controller` / etc. |
+| `kind` | one of `kind` / `layout` | Single panel kind: `minimap` / `tilePresets` / `gamePreview` / `controller` / etc. Best for single-panel sidecar use. |
+| `layout` | one of `kind` / `layout` | Full layout id: `map-builder` / `controller-deck` / etc. The sidecar mounts a multi-panel dockview from this preset. Takes precedence over `kind` when both are present. |
 | `label` | optional | Header text shown immediately on phone before WebRTC connects (e.g. `Scene • Map Editor`) |
-| `mode` | optional | `dock` (full panel) / `controller` (input only) / `display` (read-only mirror) |
+| `mode` | optional | `dock` (full panel/layout) / `controller` (input only) / `display` (read-only mirror) |
 
 Heavy state flows after handshake via the WebRTC data channel — NOT
 in the URL. URL stays ~120-150 chars, well under QR size limits.
@@ -94,7 +95,18 @@ in the URL. URL stays ~120-150 chars, well under QR size limits.
 
 - Lives at `apps/editor/.../sidecar/` (route added during D8+; uses
   the existing editor Bun.serve / Pages deploy).
-- Single PWA. Mode-routed via URL `kind`.
+- Single PWA. Mode-routed via URL params.
+- **Not a single-panel viewer — a full editor surface.** Has its
+  OWN dockview and its OWN layouts. The tablet can host a tablet-
+  optimized arrangement (map canvas + tools + tile presets) while
+  the desktop runs whatever it wants on the same session. Layout is
+  per-device; state is shared.
+- Two ways to initialize the layout:
+  - URL carries `kind=<panelKind>` → single panel mount (best for
+    controllers, previews, "show me the minimap").
+  - URL carries `layout=<layoutId>` → full layout mount (best for
+    "make this tablet a map builder").
+  - Both supported. `layout` wins if both present.
 - Cold-launch screen:
   - Live camera preview + QR scanner.
   - Recent-sessions list (last-N peer-ids stored in IDB, tap to
@@ -102,8 +114,14 @@ in the URL. URL stays ~120-150 chars, well under QR size limits.
   - Paste-URL fallback.
 - After-pair screen:
   - Header shows `label` immediately (zero-latency feedback).
-  - Loading skeleton for the panel `kind`.
-  - Once data channel opens, panel hydrates from snapshot.
+  - Loading skeleton for the panel(s) the URL specifies.
+  - Once data channel opens, layout hydrates from snapshot of the
+    relevant stores.
+- **Promotion: tablet is a peer surface, not a viewer.** Edits made
+  on the tablet propagate to desktop (and any other connected peer)
+  via the same store-sync transport. Last-write-wins is the default
+  conflict policy. State is shared across devices; layout (which
+  panels are visible + where) is local to each device.
 - Manifest:
   ```json
   {
@@ -245,22 +263,25 @@ then swap content from the desktop for the rest of the session.
 
 **Mechanics**
 
-- Same WebRTC data channel as store sync. Adds a CONTROL-MESSAGE
-  type alongside the store-write messages:
+- Same WebRTC data channel as store sync. Adds CONTROL-MESSAGE
+  types alongside the store-write messages:
   ```ts
   type ControlMessage =
     | { kind: "switchPanel"; to: SemanticPanelKind }
+    | { kind: "switchLayout"; to: LayoutId }      // tablet swaps full layout
     | { kind: "ping" }
     | { kind: "pong" }
     | { kind: "requestState"; storeIds: string[] }
     | { kind: "disconnect"; reason?: string };
   ```
-- Desktop sends `{kind: "switchPanel", to: "tilePresets"}`. Sidecar
-  unmounts the current panel component, mounts the new one,
-  re-requests state for the new panel's relevant stores.
+- Desktop sends `{kind: "switchPanel", to: "tilePresets"}` for a
+  single-panel swap, or `{kind: "switchLayout", to: "map-builder"}`
+  to push a multi-panel layout to the sidecar. The sidecar unmounts
+  the current view, mounts the new one, re-requests state for the
+  relevant stores.
 - "Broadcast to all paired devices" — desktop sends the same
-  switch-panel message to every connected peer. Live demo mode —
-  three tablets in a room all mirror the same minimap.
+  switch-panel/switch-layout message to every connected peer. Live
+  demo mode — three tablets in a room all mirror the same view.
 
 **`usePairedPeersStore`**
 
