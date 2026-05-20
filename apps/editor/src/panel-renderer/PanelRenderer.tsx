@@ -127,6 +127,16 @@ function useResolvedText(text: string): string {
 // ---------------------------------------------------------------------------
 
 function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
+  // Numeric gap/padding are emitted as INLINE STYLE rather than
+  // `gap-${n}` / `p-${n}` Tailwind classes. Reason: Tailwind's JIT
+  // scanner only picks up class strings that appear LITERALLY in
+  // source — `gap-${gap}` is a template literal at runtime, so the
+  // class is invisible to the scanner and silently emits no rule.
+  // Defaults like gap-2 happened to work because that exact string
+  // exists elsewhere in the codebase; non-default values (gap=5,
+  // padding=3, ...) would silently render with no spacing.
+  // Inline style sidesteps the scanner entirely. Tailwind's unit is
+  // 0.25rem (4px) per integer, so `n * 4` matches the Tailwind scale.
   const gap = node.gap ?? 2;
   const padding = node.padding ?? 0;
   return (
@@ -134,9 +144,11 @@ function LayoutRenderer({ node }: { node: LayoutNode }): React.JSX.Element {
       className={cn(
         "flex",
         node.direction === "row" ? "flex-row" : "flex-col",
-        `gap-${gap}`,
-        padding > 0 && `p-${padding}`,
       )}
+      style={{
+        gap: `${gap * 4}px`,
+        ...(padding > 0 ? { padding: `${padding * 4}px` } : {}),
+      }}
     >
       {node.children.map((child, i) => (
         <NodeRenderer key={i} node={child} />
@@ -215,8 +227,13 @@ function ButtonRenderer({ node }: { node: ButtonNode }): React.JSX.Element {
 }
 
 function SpacerRenderer({ node }: { node: SpacerNode }): React.JSX.Element {
+  // Inline style for the same reason as `LayoutRenderer`'s gap/padding:
+  // dynamic `h-${n}` / `w-${n}` are invisible to the Tailwind JIT scanner.
   const size = node.size ?? 2;
-  return <div className={cn(`h-${size}`, `w-${size}`)} aria-hidden="true" />;
+  const px = `${size * 4}px`;
+  return (
+    <div style={{ width: px, height: px }} aria-hidden="true" />
+  );
 }
 
 function ConditionalRenderer({
