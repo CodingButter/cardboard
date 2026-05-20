@@ -82,6 +82,10 @@ import {
   AssetReferencesPanel,
   MANIFEST as ASSET_REFERENCES_MANIFEST,
 } from "./scene/panels/AssetReferencesPanel";
+import {
+  JsonDemoPanel,
+  MANIFEST as JSON_DEMO_MANIFEST,
+} from "../panel-renderer/JsonDemoPanel";
 
 /**
  * MapView — Scene page shell.
@@ -146,6 +150,9 @@ const PANELS: readonly DockPanelDef[] = [
   { ...LIGHTING_MANIFEST, component: LightingPanel },
   { ...NOTES_MANIFEST, component: NotesPanel },
   { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
+  // JSON-renderer Phase 0 demo wired as a real dockable panel. Opens
+  // from the DocksModal under Inspector → "JSON: Selection Info".
+  { ...JSON_DEMO_MANIFEST, component: JsonDemoPanel },
 ];
 
 /** Initial layout JSON — captured from the maintainer's working
