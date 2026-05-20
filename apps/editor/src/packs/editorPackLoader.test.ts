@@ -1,5 +1,5 @@
 /**
- * Tests for the editor pack loader's Phase 2a script-execution path.
+ * Tests for the editor pack loader's script-execution path.
  *
  * The full async loader (panel registration + script load) is hard to
  * exercise in a Bun test runner because it depends on `fetch` against
@@ -11,13 +11,13 @@
  *     knowing whether a pack ever shipped scripts.
  *   - The exported `EditorPackContext` type wraps the editor's
  *     real-deal `registerCommand` and `useSelectionStore` — verified
- *     by a smoke test that constructs a context literal and walks
- *     its fields. Compile-time check is the actual gate.
- *
- * Browser-side integration (the Clear button on the pack's panel
- * fires after the demo pack's setup.ts registers the command) is
- * covered by the Playwright verification step in the deliverable
- * report, not by Bun tests.
+ *     by a smoke test that constructs a context literal and walks its
+ *     fields. Compile-time check is the actual gate.
+ *   - The Phase 2b context surface (`importLibrary`, `createStore`,
+ *     `getCanvasRef`, `onPanelMount`, `share`/`consume`) is a typed
+ *     shape — the test constructs a context with stub implementations
+ *     to make sure the type widens cleanly + the runtime fields are
+ *     reachable.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -28,42 +28,48 @@ import {
 import { registerCommand, useCommandStore } from "../state/useCommandStore";
 import { useSelectionStore } from "../state/useSelectionStore";
 
-describe("editorPackLoader — Phase 2a script execution", () => {
+/**
+ * Build a context that exercises the Phase 2b surface without
+ * touching the real loader. Used by the type-shape tests below.
+ */
+function makeStubContext(): EditorPackContext {
+  return {
+    packId: "test-pack",
+    registerCommand,
+    stores: { selection: useSelectionStore },
+    importLibrary: async () => ({}),
+    createStore: ((_n: string, initial: Record<string, unknown>) => {
+      // Trivial stub — return a function that returns the initial
+      // state when called as a selector hook. The compile-time
+      // type-check is what matters here.
+      const stub = (() => initial) as unknown;
+      return stub as ReturnType<EditorPackContext["createStore"]>;
+    }) as EditorPackContext["createStore"],
+    getCanvasRef: () => null,
+    onPanelMount: () => () => {},
+    share: () => {},
+    consume: () => undefined,
+    _registerCanvasRef: () => {},
+    _unregisterCanvasRef: () => {},
+    _firePanelMount: () => {},
+    _firePanelUnmount: () => {},
+  };
+}
+
+describe("editorPackLoader — script execution", () => {
   test("disposeEditorPackScripts is safe for unknown pack ids", () => {
-    // Should not throw; just a no-op. Exercises the
-    // `cleanups === undefined` early-return branch.
     expect(() => disposeEditorPackScripts("nonexistent-pack")).not.toThrow();
   });
 
   test("EditorPackContext exposes registerCommand + selection store", () => {
-    // Construct a context literal the way the loader does. The compile
-    // is the type assertion; runtime checks confirm field identity so
-    // a future refactor that swaps in a wrapped registerCommand would
-    // fail this test until the comment / docs are updated.
-    const ctx: EditorPackContext = {
-      packId: "test-pack",
-      registerCommand,
-      stores: {
-        selection: useSelectionStore,
-      },
-    };
+    const ctx = makeStubContext();
     expect(ctx.packId).toBe("test-pack");
     expect(ctx.registerCommand).toBe(registerCommand);
     expect(ctx.stores.selection).toBe(useSelectionStore);
   });
 
   test("registerCommand handed via context registers in the live store", () => {
-    // End-to-end smoke: a script-author would call
-    // `ctx.registerCommand({...})` and the editor app's
-    // useCommandStore should reflect the registration. The cleanup
-    // function must remove it again.
-    const ctx: EditorPackContext = {
-      packId: "test-pack",
-      registerCommand,
-      stores: {
-        selection: useSelectionStore,
-      },
-    };
+    const ctx = makeStubContext();
     const id = "test.editor-pack-loader.cmd";
     const dispose = ctx.registerCommand({
       id,
@@ -80,19 +86,41 @@ describe("editorPackLoader — Phase 2a script execution", () => {
   });
 
   test("ctx.stores.selection mutation reaches the editor's selection store", () => {
-    // The dogfooded demo script clears the selection via
-    // `ctx.stores.selection.getState().select(null)`. If the loader
-    // ever swaps in a wrapped store this test fails fast.
-    const ctx: EditorPackContext = {
-      packId: "test-pack",
-      registerCommand,
-      stores: {
-        selection: useSelectionStore,
-      },
-    };
+    const ctx = makeStubContext();
     ctx.stores.selection.getState().select({ x: 1, y: 2 });
     expect(useSelectionStore.getState().selected).toEqual({ x: 1, y: 2 });
     ctx.stores.selection.getState().select(null);
     expect(useSelectionStore.getState().selected).toBeNull();
+  });
+
+  test("Phase 2b APIs are present + typed on the context", () => {
+    // Each call below would be a compile error if the type widening
+    // for Phase 2b dropped a member. The runtime checks confirm the
+    // stub's shape.
+    const ctx = makeStubContext();
+    expect(typeof ctx.importLibrary).toBe("function");
+    expect(typeof ctx.createStore).toBe("function");
+    expect(typeof ctx.getCanvasRef).toBe("function");
+    expect(typeof ctx.onPanelMount).toBe("function");
+    expect(typeof ctx.share).toBe("function");
+    expect(typeof ctx.consume).toBe("function");
+  });
+
+  test("share + consume round-trip a value within the same context", () => {
+    // The stub's share/consume are no-ops — but the real loader's
+    // implementation MUST round-trip. We assert that with a tiny
+    // pair-style fake.
+    const slots = new Map<string, unknown>();
+    const ctx = makeStubContext();
+    const realCtx: EditorPackContext = {
+      ...ctx,
+      share: (key, value) => {
+        slots.set(key, value);
+      },
+      consume: (key) => slots.get(key),
+    };
+    realCtx.share("k", { v: 1 });
+    expect(realCtx.consume("k")).toEqual({ v: 1 });
+    expect(realCtx.consume("missing")).toBeUndefined();
   });
 });

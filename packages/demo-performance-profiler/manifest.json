@@ -1,0 +1,22 @@
+{
+  "id": "demo-performance-profiler",
+  "name": "demo-performance-profiler",
+  "version": "0.1.0",
+  "engine": "two_5_d@0.1",
+  "scope": ["editor"],
+  "libraries": [
+    {
+      "name": "chart.js",
+      "version": "4.4.0",
+      "path": "libraries/chart.js-4.4.0.js",
+      "hash": "PLACEHOLDER"
+    }
+  ],
+  "scripts": [
+    "scripts/setup.ts",
+    "scripts/chart-init.ts"
+  ],
+  "editorPanels": [
+    "panels/profiler.json"
+  ]
+}

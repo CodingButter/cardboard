@@ -1,0 +1,9 @@
+{
+  "name": "@two_5_d/demo-performance-profiler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Editor demo pack: live FPS / draw-call / memory chart. Bundles chart.js. The marketplace-milestone canary pack for EDITOR_ENGINE §9.",
+  "devDependencies": {
+    "chart.js": "4.4.0"
+  }
+}

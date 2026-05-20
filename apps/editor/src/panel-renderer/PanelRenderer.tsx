@@ -65,6 +65,7 @@ import {
 } from "./resolveBinding";
 import type {
   ButtonNode,
+  CanvasNode,
   ConditionalNode,
   HeadingNode,
   IconNode,
@@ -85,6 +86,7 @@ import type {
   ToggleButtonNode,
   TooltipNode,
 } from "./types";
+import { PackContext } from "../packs/PackContextProvider";
 
 // ---------------------------------------------------------------------------
 // Icon registry — small lucide allowlist to keep the renderer's import
@@ -251,7 +253,15 @@ function useStoreBinding(path: string): {
   // re-read through `binding.get()` so the rendered value is the
   // freshest resolved view. The subscription itself is what triggers
   // re-render on change.
-  const storeHook = getStoreHook(binding.storeName);
+  //
+  // `getStoreHook` may return `undefined` for a dynamic store that hasn't
+  // been registered yet (a pack panel mounting before its script ran).
+  // To keep hook order stable across renders we ALWAYS subscribe to a
+  // fallback hook (`useLayerStore` — already imported, well-known
+  // shell store) in that case — the subscription is harmless and the
+  // binding.get() returns undefined until the real store appears, at
+  // which point the next render picks it up.
+  const storeHook = getStoreHook(binding.storeName) ?? useLayerStore;
   storeHook((s) => s); // subscribe to all slice changes
   const value = binding.get();
   return { value, binding };
@@ -872,6 +882,59 @@ function useSelectOptions(
   }, [source, staticOptions, layerOrder, customLayers]);
 }
 
+/**
+ * CanvasRenderer — mounts a `<canvas>` and registers it with the active
+ * pack context under `node.refName`. The pack's scripts read the DOM
+ * node via `ctx.getCanvasRef(refName)` from inside an `onPanelMount`
+ * lifecycle hook (chart-init pattern). When no pack context is active
+ * (the Canvas node appears in a non-pack panel — defensive, not a
+ * supported authoring shape) the renderer still emits the canvas but
+ * skips the register call.
+ *
+ * `heightPx` defaults to 200; the canvas always fills its flex parent's
+ * width. The `canvas` element's intrinsic width/height attributes are
+ * synced to the device's CSS pixel ratio on mount + on resize so chart
+ * libraries see the right pixel grid.
+ */
+function CanvasRenderer({ node }: { node: CanvasNode }): React.JSX.Element {
+  const ctx = React.useContext(PackContext);
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const heightPx = node.heightPx ?? 200;
+  React.useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    if (ctx) {
+      ctx._registerCanvasRef(node.refName, el);
+    }
+    return () => {
+      if (ctx) {
+        ctx._unregisterCanvasRef(node.refName);
+      }
+    };
+  }, [ctx, node.refName]);
+  // Wrap the canvas in a fixed-height position:relative box. Some
+  // imperative libraries (chart.js with `responsive: true`) drive the
+  // canvas's intrinsic dimensions from its parent's bounding box — if
+  // the canvas were sized directly via CSS height, a flex-column parent
+  // that respects the canvas's grown height would trigger a feedback
+  // loop where each frame grows the canvas further. The wrapper gives
+  // chart.js a stable measurement target and the absolutely-positioned
+  // canvas inside fills it without affecting layout.
+  return (
+    <div
+      className={cn("relative block w-full", node.className)}
+      style={{ height: `${heightPx}px` }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 block"
+        style={{ width: "100%", height: "100%" }}
+        data-canvas-ref={node.refName}
+      />
+    </div>
+  );
+}
+
 function SelectRenderer({ node }: { node: SelectNode }): React.JSX.Element {
   const { value, binding } = useStoreBinding(node.bind);
   const options = useSelectOptions(node.optionsFrom, node.options);
@@ -942,6 +1005,8 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <ScrollRowRenderer node={node} />;
     case "Select":
       return <SelectRenderer node={node} />;
+    case "Canvas":
+      return <CanvasRenderer node={node} />;
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.
@@ -980,6 +1045,21 @@ export function PanelRenderer({
     paddingTop: `${padY * 4}px`,
     paddingBottom: `${padY * 4}px`,
   };
+  // When this panel is pack-contributed, the wrapping `PackContextProvider`
+  // exposes a context value with the loader's lifecycle dispatchers.
+  // Fire `_firePanelMount` AFTER children have mounted so that
+  // `ctx.getCanvasRef(...)` calls from inside the mount hook see the
+  // canvas refs already registered by `CanvasRenderer`. React commits
+  // children effects before parent effects, so a parent `useEffect`
+  // runs after every descendant Canvas has registered.
+  const packCtx = React.useContext(PackContext);
+  React.useEffect(() => {
+    if (!packCtx) return;
+    packCtx._firePanelMount(spec.id);
+    return () => {
+      packCtx._firePanelUnmount(spec.id);
+    };
+  }, [packCtx, spec.id]);
   return (
     <div
       className={cn(

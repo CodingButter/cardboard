@@ -76,11 +76,21 @@ export interface EditorPacksStateActions {
 
 export type EditorPacksState = EditorPacksStateData & EditorPacksStateActions;
 
-/** Initial state — ships with the demo pack installed + enabled. */
+/** Initial state — ships with the demo pack + the performance profiler
+ *  installed + enabled. The Profiler is the marketplace-milestone canary
+ *  pack (EDITOR_ENGINE §9 / PERFORMANCE_PROFILER.md §1); shipping it
+ *  enabled by default means a fresh clone gets a live FPS chart in the
+ *  DocksModal under Diagnostics without any user action. Users can
+ *  disable either pack from the Extensions tab. */
 const INITIAL_STATE: EditorPacksStateData = {
   packs: {
     "cardboard-editor-pack-demo": {
       id: "cardboard-editor-pack-demo",
+      enabled: true,
+      meta: null,
+    },
+    "demo-performance-profiler": {
+      id: "demo-performance-profiler",
       enabled: true,
       meta: null,
     },
@@ -120,6 +130,33 @@ export const useEditorPacksStore = createSyncedStore<
     enableBroadcast: false,
   },
 );
+
+// ──────────────────────────────────────────────────────────────────
+// Initial-state seed pass — runs at module-import time after the
+// persist middleware has rehydrated from localStorage. For every pack
+// id in `INITIAL_STATE.packs` that's NOT yet in the persisted set,
+// we add it with the shipped default-enabled flag. This makes
+// shipping a new default pack as easy as adding it to the INITIAL_STATE
+// constant above — existing installs pick it up on the next reload
+// without needing a store-version bump (which would also wipe the
+// user's enabled/disabled choices for existing packs).
+//
+// Already-installed pack ids are LEFT ALONE — the user's chosen
+// enabled flag wins over the shipped default.
+if (typeof window !== "undefined") {
+  const seenPacks = useEditorPacksStore.getState().packs;
+  const additions: Record<string, EditorPackEntry> = {};
+  for (const [id, entry] of Object.entries(INITIAL_STATE.packs)) {
+    if (!(id in seenPacks)) {
+      additions[id] = { ...entry };
+    }
+  }
+  if (Object.keys(additions).length > 0) {
+    useEditorPacksStore.setState({
+      packs: { ...seenPacks, ...additions },
+    });
+  }
+}
 
 /**
  * Snapshot of the enabled set as an ordered list of pack ids. Used by

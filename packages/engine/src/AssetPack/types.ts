@@ -509,6 +509,32 @@ export interface PackManifest {
    */
   scripts?: ReadonlyArray<string>;
   /**
+   * Editor-scope: pack-bundled npm libraries. Each entry is a JS file
+   * inside the pack root that the editor loads as ESM via a content-
+   * hash-deduped Blob URL. The loader exposes the resolved module to
+   * pack scripts through `ctx.importLibrary(name)`.
+   *
+   * Pack-builder copies + bundles the library from `node_modules/<name>/<entry>`
+   * at build time, computes SHA-256 of the bytes, and writes the hash
+   * into this manifest entry (replacing any `"PLACEHOLDER"` value the
+   * author wrote). See `docs/plans/PERFORMANCE_PROFILER.md` §4 and
+   * `docs/plans/EDITOR_ENGINE.md` §5.
+   *
+   * Ignored on the runtime engine side — the runtime engine has no
+   * notion of pack-bundled npm modules; runtime-scope script imports
+   * resolve through the pack-script compile step.
+   */
+  libraries?: ReadonlyArray<{
+    /** npm package name the library was bundled from (e.g. "chart.js"). */
+    name: string;
+    /** Pinned npm version (informational; SRI hash is the auth gate). */
+    version: string;
+    /** Path inside the pack, relative to the pack root. */
+    path: string;
+    /** SRI-style content hash of the file bytes (e.g. "sha256-<base64>"). */
+    hash: string;
+  }>;
+  /**
    * Declared dependencies. The chain resolver walks every entry,
    * fetches the referenced pack, verifies integrity, and inserts
    * dependencies before the dependent in the resulting chain. P1 of

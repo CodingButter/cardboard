@@ -455,6 +455,44 @@ export interface SelectOptionSpec {
 
 export type SelectOptionsSource = "layers";
 
+/**
+ * Canvas — a mountable HTML5 `<canvas>` element exposed to pack scripts
+ * via a named ref.
+ *
+ * Pack-bundled scripts that integrate an imperative library (chart.js,
+ * three.js, d3) reach the canvas through `EditorPackContext`:
+ *
+ *   ctx.onPanelMount("profiler", () => {
+ *     const el = ctx.getCanvasRef("profiler-chart");
+ *     // …construct chart against el…
+ *     return () => { /* destroy chart on unmount */ /* };
+ *   });
+ *
+ * The renderer creates a `<canvas>` sized to `heightPx` × 100%-width-of-
+ * flex-parent, then registers the live DOM node with the active pack
+ * context under `refName`. Unmount unregisters it. Two panels mounting
+ * the same `refName` last-mount-wins + a console.warn.
+ *
+ * Phase 1 deliberately doesn't expose any canvas-attribute config
+ * beyond size — JSON can't drive `width`, `pixelRatio`, etc. Scripts
+ * own all canvas mutation post-mount. See
+ * `docs/plans/PERFORMANCE_PROFILER.md` §3.1.
+ */
+export interface CanvasNode {
+  type: "Canvas";
+  /**
+   * Stable ref name. The renderer exposes the underlying `<canvas>`
+   * DOM node under this name via the active pack context's
+   * `getCanvasRef(name)`. Names are unique per panel-mount; collisions
+   * log a warning and the last mount wins.
+   */
+  refName: string;
+  /** Canvas height in pixels. Width fills the flex parent. */
+  heightPx?: number;
+  /** Optional className passthrough. */
+  className?: string;
+}
+
 export interface SelectNode {
   type: "Select";
   /** Two-way binding — must point at a string-valued store path. */
@@ -497,7 +535,8 @@ export type NodeSpec =
   | IconNode
   | ToggleButtonNode
   | ScrollRowNode
-  | SelectNode;
+  | SelectNode
+  | CanvasNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire

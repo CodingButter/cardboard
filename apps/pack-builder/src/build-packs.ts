@@ -73,6 +73,7 @@ import {
   replaceExt,
   type PublishConfig,
 } from "./publish-config";
+import { LIBRARY_ENTRIES } from "./library-entries";
 
 function extOf(path: string): string {
   const idx = path.lastIndexOf(".");
@@ -726,6 +727,114 @@ async function buildPack(
     }
   }
 
+  // ── Pack-bundled library step ────────────────────────────────────
+  // `manifest.libraries[]` declares npm modules the pack ships inside
+  // its `.apg` (e.g. chart.js). For each entry, the builder resolves
+  // the canonical entry path from `LIBRARY_ENTRIES`, runs Bun's
+  // bundler to emit a single self-contained ESM file, computes the
+  // SHA-256 of the bytes, and:
+  //   1) writes the bundled bytes into the in-memory `bundledLibraryBytes`
+  //      map (keyed by the manifest's `lib.path`) — emitted by the zip
+  //      walk loop below; any on-disk file at the same path is
+  //      overwritten by the bundled artefact.
+  //   2) mutates `lib.hash` to the computed SRI hash so the zipped
+  //      manifest carries the real hash (replacing any `"PLACEHOLDER"`
+  //      author-provided sentinel).
+  // The pack root may contain a placeholder file at `lib.path` for
+  // round-trip stability across fresh clones; it's replaced by the
+  // bundled bytes during emit. See `docs/plans/PERFORMANCE_PROFILER.md`
+  // §4.2.
+  const bundledLibraryBytes = new Map<string, Uint8Array>();
+  if (manifest) {
+    const libs = (manifest as unknown as {
+      libraries?: Array<{
+        name: string;
+        version: string;
+        path: string;
+        hash: string;
+      }>;
+    }).libraries;
+    if (Array.isArray(libs) && libs.length > 0) {
+      for (const lib of libs) {
+        const entrySpec = LIBRARY_ENTRIES[lib.name];
+        if (!entrySpec) {
+          throw new Error(
+            `pack "${dirName}" declares library "${lib.name}" but no entry mapping ` +
+              `is registered. Add an entry to apps/pack-builder/src/library-entries.ts ` +
+              `or remove the library from manifest.libraries[].`,
+          );
+        }
+        // Resolve the entry spec from the pack's own node_modules. We
+        // resolve via `Bun.resolveSync` so the path works regardless of
+        // hoisting layout (Bun stores hoisted deps under `.bun/<pkg>/...`
+        // with a per-workspace symlink). Resolving against `packRoot`
+        // (instead of the monorepo root) lets each pack declare its
+        // own library deps via its package.json without polluting the
+        // root.
+        let entryAbs: string;
+        try {
+          entryAbs = Bun.resolveSync(entrySpec, packRoot);
+        } catch (err) {
+          throw new Error(
+            `pack "${dirName}": could not resolve library entry "${entrySpec}" ` +
+              `from ${packRoot}: ${(err as Error).message}. Did you forget to ` +
+              `add "${lib.name}" to packages/${dirName}/package.json devDependencies?`,
+          );
+        }
+        const result = await Bun.build({
+          entrypoints: [entryAbs],
+          target: "browser",
+          format: "esm",
+          // Bundle every transitive dep so the emitted file is fully
+          // self-contained — the editor loads it via Blob URL and has
+          // no resolver for bare-specifier imports at runtime.
+          packages: "bundle",
+          // No minify — keep bytes legible for the agent-driven
+          // verification step; future production-mode passes can flip
+          // this on.
+          minify: false,
+        });
+        if (!result.success || result.outputs.length === 0) {
+          const logs = result.logs.map((l) => String(l)).join("\n  ");
+          throw new Error(
+            `pack "${dirName}": Bun.build for library "${lib.name}" failed:\n  ${logs}`,
+          );
+        }
+        // The bundler emits exactly one entry-point artefact for an
+        // ESM single-entry build. Grab its bytes.
+        const out = result.outputs[0]!;
+        const bytes = new Uint8Array(await out.arrayBuffer());
+        // SHA-256 → SRI-style `sha256-<base64>`.
+        const hasher = new Bun.CryptoHasher("sha256");
+        hasher.update(bytes);
+        const expectedHash = `sha256-${hasher.digest("base64")}`;
+        // Honour an author-pinned hash: if `lib.hash` is set to
+        // anything other than the sentinel `"PLACEHOLDER"`, it must
+        // match the computed hash. This catches a dependency-bump
+        // that wasn't intended.
+        if (
+          lib.hash &&
+          lib.hash !== "PLACEHOLDER" &&
+          lib.hash !== expectedHash
+        ) {
+          throw new Error(
+            `pack "${dirName}": library "${lib.name}" hash mismatch.\n` +
+              `  manifest declared: ${lib.hash}\n` +
+              `  computed:          ${expectedHash}\n` +
+              `Update the manifest hash (set to "PLACEHOLDER" to accept ` +
+              `the new bytes) or pin the dependency to the previous version.`,
+          );
+        }
+        lib.hash = expectedHash;
+        bundledLibraryBytes.set(lib.path, bytes);
+        console.log(
+          `    bundled library ${lib.name}@${lib.version} → ${lib.path} ` +
+            `(${bytes.byteLength.toLocaleString()} B, ${expectedHash.slice(0, 18)}…)`,
+        );
+      }
+    }
+  }
+
   // ── T2 build-merge: collapse anonymous duplicates + canonical sort.
   // For the migrated default-pack today this is a near-no-op (every
   // preset has a unique hash + the migration emitted them in the
@@ -962,6 +1071,17 @@ async function buildPack(
       // Defer — see note above. The post-walk phase emits whichever
       // copy (rewritten or original) reflects every rename.
       continue;
+    } else if (bundledLibraryBytes.has(inZip)) {
+      // A library declared in `manifest.libraries[]` — the on-disk
+      // file (if present) is a placeholder; emit the bundled bytes
+      // computed above instead. This lets a fresh-clone build
+      // succeed even when no checked-in placeholder exists, AND
+      // keeps the emitted bytes deterministic (same node_modules →
+      // same hash).
+      const bytes = bundledLibraryBytes.get(inZip)!;
+      zip.file(inZip, bytes);
+      publishStats.bytesIn += bytes.byteLength;
+      publishStats.bytesOut += bytes.byteLength;
     } else if (inZip === "world.json" && worldJsonText !== null) {
       zip.file(inZip, worldJsonText);
     } else if (inZip.startsWith("scenes/") && inZip.endsWith(".json")) {
@@ -1066,6 +1186,17 @@ async function buildPack(
   for (const [compiledPath, source] of compiledScripts) {
     zip.file(compiledPath, source);
     fileCount++;
+  }
+
+  // Emit any bundled libraries whose `lib.path` had no on-disk
+  // placeholder. The walk only visits files that exist on disk —
+  // libraries are bundled into memory at build time, so packs that
+  // ship no checked-in placeholder still get a valid `.apg`.
+  for (const [path, bytes] of bundledLibraryBytes) {
+    if (!zip.file(path)) {
+      zip.file(path, bytes);
+      fileCount++;
+    }
   }
 
   if (!zip.file("manifest.json")) {

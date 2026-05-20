@@ -1,0 +1,75 @@
+{
+  "id": "performance-profiler",
+  "title": "Performance Profiler",
+  "category": "Diagnostics",
+  "dockKind": "dockable-window",
+  "rootOptions": { "padding": 2 },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 2,
+    "children": [
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 2,
+        "align": "center",
+        "children": [
+          { "type": "Heading", "text": "Performance", "level": 3 },
+          { "type": "Spacer", "size": 2 },
+          {
+            "type": "Button",
+            "text": "Pause",
+            "onClick": { "script": "profiler.toggle" },
+            "variant": "secondary"
+          },
+          {
+            "type": "Button",
+            "text": "Reset",
+            "onClick": { "script": "profiler.reset" },
+            "variant": "ghost"
+          }
+        ]
+      },
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 3,
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "FPS", "variant": "label" },
+              { "type": "Text", "text": "$store.profiler.fps", "variant": "value" }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "DRAW CALLS", "variant": "label" },
+              { "type": "Text", "text": "$store.profiler.drawCalls", "variant": "value" }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "MEMORY (MB)", "variant": "label" },
+              { "type": "Text", "text": "$store.profiler.memoryMB", "variant": "value" }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Canvas",
+        "refName": "profiler-chart",
+        "heightPx": 200
+      }
+    ]
+  }
+}

@@ -1545,3 +1545,112 @@ describe("CellInspector JSON spec", () => {
     expect(b.get()).toBe("walls");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Canvas node + dynamic-store registration (Phase 2b — Profiler pack).
+// ---------------------------------------------------------------------------
+
+describe("Canvas node — structural", () => {
+  test("Canvas appears in NodeSpec union (compile-time gate)", () => {
+    // The presence of this literal proves the type addition: a spec
+    // author can author a Canvas node + the type-checker accepts it.
+    // Runtime structure is asserted below.
+    const node: NodeSpec = {
+      type: "Canvas",
+      refName: "test-canvas",
+      heightPx: 120,
+    };
+    expect(node.type).toBe("Canvas");
+  });
+});
+
+describe("registerDynamicStore", () => {
+  // Lazy-import so the test isolates the dynamic registry — we don't
+  // want one of the suites above to accidentally leak a store.
+  test("registers a dynamic store + resolves a path against it", async () => {
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    interface DummyState {
+      fps: number;
+      setFps: (n: number) => void;
+    }
+    const hook = create<DummyState>()((set) => ({
+      fps: 60,
+      setFps: (n) => set({ fps: n }),
+    }));
+    const unregister = registerDynamicStore(
+      "dyn-profiler-1",
+      hook as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    try {
+      const b = resolveBinding("$store.dyn-profiler-1.fps");
+      expect(b.get()).toBe(60);
+      hook.getState().setFps(30);
+      expect(b.get()).toBe(30);
+    } finally {
+      unregister();
+    }
+    // After unregister the path no longer resolves — resolveBinding
+    // throws because the store is unknown.
+    expect(() => resolveBinding("$store.dyn-profiler-1.fps")).toThrow(
+      /unknown store/,
+    );
+  });
+
+  test("collides with built-in store names → throws", async () => {
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    const hook = create(() => ({ x: 1 }));
+    expect(() =>
+      registerDynamicStore(
+        "scene",
+        hook as unknown as Parameters<typeof registerDynamicStore>[1],
+      ),
+    ).toThrow(/collides with a built-in/);
+  });
+
+  test("re-registering the same name warns + replaces the previous slot", async () => {
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    const hookA = create(() => ({ v: "A" }));
+    const hookB = create(() => ({ v: "B" }));
+    const unregA = registerDynamicStore(
+      "dyn-profiler-2",
+      hookA as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    const unregB = registerDynamicStore(
+      "dyn-profiler-2",
+      hookB as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    try {
+      // The second registration wins.
+      const b = resolveBinding("$store.dyn-profiler-2.v");
+      expect(b.get()).toBe("B");
+      // The first unregister is now a no-op (it doesn't own the slot).
+      unregA();
+      expect(resolveBinding("$store.dyn-profiler-2.v").get()).toBe("B");
+    } finally {
+      unregB();
+    }
+  });
+});
+
+describe("libraryCache.sha256Sri", () => {
+  test("computes SRI-style sha256 for known bytes", async () => {
+    const { sha256Sri } = await import("../packs/libraryCache");
+    const empty = await sha256Sri(new Uint8Array(0));
+    // SHA-256 of empty input = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    // → base64 = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+    expect(empty).toBe("sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
+  });
+
+  test("computes a different hash for non-empty bytes", async () => {
+    const { sha256Sri } = await import("../packs/libraryCache");
+    const bytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
+    const hash = await sha256Sri(bytes);
+    expect(hash.startsWith("sha256-")).toBe(true);
+    expect(hash).not.toBe(
+      "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+    );
+  });
+});

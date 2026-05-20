@@ -94,6 +94,24 @@ export class ZipAssetPack extends AssetPack {
     return new TextDecoder().decode(bytes);
   }
 
+  /**
+   * Read a file body as raw bytes. Unlike `binaryBlob` (which copies
+   * into a fresh `ArrayBuffer` for `decodeAudioData` ownership), this
+   * returns the in-memory `Uint8Array` directly — used by the editor
+   * pack loader's library step where the bytes are immediately hashed
+   * + handed to a `Blob` constructor (which copies internally). Throws
+   * with the same "Pack missing <path>" message as the other accessors
+   * when the path isn't in the zip.
+   *
+   * Callers MUST NOT mutate the returned bytes — the pack holds the
+   * same slice for subsequent reads.
+   */
+  async binaryBody(path: string): Promise<Uint8Array> {
+    const bytes = this.files.get(path);
+    if (!bytes) throw new Error(`Pack missing ${path}`);
+    return bytes;
+  }
+
   has(path: string): boolean {
     return this.files.has(path);
   }
@@ -102,3 +120,4 @@ export class ZipAssetPack extends AssetPack {
     return Array.from(this.files.keys());
   }
 }
+

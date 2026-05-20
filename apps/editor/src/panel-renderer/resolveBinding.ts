@@ -174,8 +174,82 @@ export const STORE_REGISTRY: Record<
   brush: useBrushStore as unknown as UseBoundStore<StoreApi<unknown>>,
 };
 
+/**
+ * Pack-contributed Zustand stores. Editor packs that call
+ * `ctx.createStore(name, ...)` register their bound hook here so JSON
+ * panels can read `$store.<name>.<field>` exactly the way they read
+ * built-in stores like `$store.scene.settings.name`.
+ *
+ * The dynamic table sits alongside `STORE_REGISTRY` so the resolver's
+ * lookup widens to: "name in STORE_REGISTRY || DYNAMIC_STORES.has(name)".
+ * Writes are NOT supported through this path — pack stores expose
+ * their own setState through closures the script holds; the JSON
+ * panel side is read-only. See `docs/plans/PERFORMANCE_PROFILER.md`
+ * §3.2 (write-semantics rationale).
+ *
+ * Lifecycle: `registerDynamicStore` returns an unregister fn that the
+ * editor pack loader stashes alongside its other per-pack cleanups,
+ * so disabling a pack tears its store down.
+ */
+const DYNAMIC_STORES: Map<string, UseBoundStore<StoreApi<unknown>>> = new Map();
+
+/**
+ * Register a pack-contributed Zustand store under `name`. Returns an
+ * unregister fn the caller MUST hold onto — calling it removes the
+ * entry from the registry so subsequent `resolveBinding` calls treat
+ * the name as unknown.
+ *
+ * Throws when `name` collides with a built-in store (`scene`,
+ * `selection`, `layer`, `tool`, `brush`) — pack stores must not shadow
+ * the editor's own shell stores. Duplicate dynamic-store names
+ * (re-registering the same name) overwrite the previous entry and log
+ * a warning; the previous unregister fn is now a no-op, the new one
+ * is authoritative.
+ */
+export function registerDynamicStore(
+  name: string,
+  hook: UseBoundStore<StoreApi<unknown>>,
+): () => void {
+  if (name in STORE_REGISTRY) {
+    throw new Error(
+      `[resolveBinding] cannot register dynamic store "${name}" — it ` +
+        `collides with a built-in shell store`,
+    );
+  }
+  if (DYNAMIC_STORES.has(name)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[resolveBinding] dynamic store "${name}" was already registered; ` +
+        `the previous registration's unregister fn is now a no-op`,
+    );
+  }
+  DYNAMIC_STORES.set(name, hook);
+  let active = true;
+  return () => {
+    if (!active) return;
+    // Only delete if we still own the slot — avoid clobbering a
+    // subsequent registration that took our name.
+    if (DYNAMIC_STORES.get(name) === hook) {
+      DYNAMIC_STORES.delete(name);
+    }
+    active = false;
+  };
+}
+
 function isKnownStore(name: string): name is KnownStoreName {
   return name in STORE_REGISTRY;
+}
+
+/**
+ * Look up either a built-in or dynamic store by name. Used by the
+ * resolver's `get` traversal so a `$store.profiler.fps` path works
+ * the same way as `$store.scene.settings.name`.
+ */
+function lookupStore(
+  name: string,
+): UseBoundStore<StoreApi<unknown>> | undefined {
+  if (isKnownStore(name)) return STORE_REGISTRY[name];
+  return DYNAMIC_STORES.get(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -263,10 +337,16 @@ const WRITERS: Record<string, Writer> = {
  * Result of resolving a store-path. The renderer uses `storeName` to
  * pick which zustand hook to subscribe to (so re-renders are scoped to
  * the right store), and the `get` / `set` functions are how data flows.
+ *
+ * `storeName` is widened from `KnownStoreName` to `string` so that
+ * dynamic stores (registered by editor packs via
+ * `registerDynamicStore`) can flow through the same binding shape.
+ * Callers that need to switch on built-in stores should use the
+ * `isKnownStore` predicate exported below.
  */
 export interface ResolvedBinding {
   /** Which store this path roots into. Used for hook subscription. */
-  storeName: KnownStoreName;
+  storeName: string;
   /** Read the current value. Returns `undefined` when the path doesn't resolve. */
   get: () => unknown;
   /**
@@ -288,18 +368,31 @@ export function resolveBinding(path: string): ResolvedBinding {
     throw new Error(`resolveBinding: empty path "${path}"`);
   }
   const head = segments[0];
-  if (head?.kind !== "key" || !isKnownStore(head.name)) {
+  if (head?.kind !== "key") {
+    throw new Error(`resolveBinding: malformed root segment in "${path}"`);
+  }
+  const storeHook = lookupStore(head.name);
+  if (!storeHook) {
+    const dynamicNames = Array.from(DYNAMIC_STORES.keys());
+    const allKnown = [...Object.keys(STORE_REGISTRY), ...dynamicNames].join(", ");
     throw new Error(
-      `resolveBinding: unknown store "${head?.kind === "key" ? head.name : "?"}" in "${path}". Known: ${Object.keys(STORE_REGISTRY).join(", ")}`,
+      `resolveBinding: unknown store "${head.name}" in "${path}". ` +
+        `Known: ${allKnown}`,
     );
   }
-  const storeName: KnownStoreName = head.name;
+  const storeName: string = head.name;
   const tail = segments.slice(1);
 
   const canonical = stripStorePrefix(path);
 
   const get = (): unknown => {
-    const store = STORE_REGISTRY[storeName];
+    // Re-lookup at read time so a store registered AFTER
+    // `resolveBinding` was called still resolves — important for the
+    // panel-mount lifecycle where the resolver may run before a pack
+    // script's `createStore` has fired (Phase 3 scope: the editor
+    // loads scripts before mounting panels, so this is defensive).
+    const store = lookupStore(storeName);
+    if (!store) return undefined;
     let cursor: unknown = store.getState();
     for (const seg of tail) {
       if (cursor == null) return undefined;
@@ -339,17 +432,33 @@ export function resolveBinding(path: string): ResolvedBinding {
  * hook — used by the renderer to subscribe a React component to the
  * right store. Splitting this out keeps `resolveBinding` itself
  * imperative + test-friendly.
+ *
+ * Widened to accept any string `storeName` so dynamic pack stores
+ * (registered via `registerDynamicStore`) work through the same path.
+ * Returns `undefined` when the name doesn't resolve to a built-in or
+ * dynamic store — the renderer's subscription site degrades to a
+ * no-op subscription in that case.
  */
 export function getStoreHook(
-  storeName: KnownStoreName,
-): UseBoundStore<
-  StoreApi<
-    SceneState | SelectionState | LayerState | ToolState | BrushState
-  >
-> {
-  return STORE_REGISTRY[storeName] as UseBoundStore<
-    StoreApi<
-      SceneState | SelectionState | LayerState | ToolState | BrushState
+  storeName: string,
+):
+  | UseBoundStore<
+      StoreApi<
+        | SceneState
+        | SelectionState
+        | LayerState
+        | ToolState
+        | BrushState
+        | unknown
+      >
     >
-  >;
+  | undefined {
+  if (isKnownStore(storeName)) {
+    return STORE_REGISTRY[storeName] as UseBoundStore<
+      StoreApi<
+        SceneState | SelectionState | LayerState | ToolState | BrushState
+      >
+    >;
+  }
+  return DYNAMIC_STORES.get(storeName);
 }
