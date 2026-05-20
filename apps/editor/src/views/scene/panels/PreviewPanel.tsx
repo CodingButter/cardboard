@@ -1,6 +1,7 @@
 import React from "react";
 import * as THREE from "three";
 import {
+  AlertTriangle,
   Box,
   Grid3x3,
   Maximize2,
@@ -9,8 +10,11 @@ import {
   ZoomOut,
 } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
+import { Button } from "../../../components/ui/Button";
+import { EmptyState } from "../../../components/ui/EmptyState";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
+import { getDiagnosticsState } from "../../../state/useDiagnosticsStore";
 import { useSceneStore } from "../../../state/useSceneStore";
 import { useLayerStore } from "../../../state/useLayerStore";
 import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
@@ -277,7 +281,19 @@ function buildPreviewScene(): PreviewSceneHandle {
 // React component
 // ---------------------------------------------------------------------------
 
-export function PreviewPanel(): React.JSX.Element {
+/**
+ * Inner component — the actual Three.js host. Wrapped by
+ * `PreviewPanel` below in a class-based error boundary so any
+ * synchronous render error from React-land (e.g. a descendant
+ * component crashing during a state update) drops the user into the
+ * same WebGL-offline fallback instead of crashing the editor.
+ *
+ * Errors thrown inside `useEffect` (the more common WebGL-context
+ * acquisition path) are caught by the local try/catch in the mount
+ * effect and surfaced via `setWebglError`. Error boundaries do NOT
+ * catch effect errors — we need both layers.
+ */
+function PreviewPanelInner(): React.JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasHostRef = React.useRef<HTMLDivElement | null>(null);
   const handleRef = React.useRef<PreviewSceneHandle | null>(null);
@@ -345,6 +361,20 @@ export function PreviewPanel(): React.JSX.Element {
   // mode toggles, so toolbar buttons can light up correctly. Optional.
   const [, forceRerender] = React.useReducer((x: number) => x + 1, 0);
 
+  // ----- WebGL crash state -------------------------------------------
+  // When `buildPreviewScene()` (or any downstream Three.js call during
+  // mount) throws — most commonly because the browser can't supply a
+  // WebGL context (headless Chromium without GPU, browsers with WebGL
+  // disabled, etc.) — we drop into a fallback UI instead of letting the
+  // exception bubble up and unmount the whole DocksModal. `retryNonce`
+  // bumps on retry to re-trigger the mount effect with a fresh attempt.
+  const [webglError, setWebglError] = React.useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = React.useState(0);
+  const retryPreview = React.useCallback(() => {
+    setWebglError(null);
+    setRetryNonce((n) => n + 1);
+  }, []);
+
   // ----- Camera math --------------------------------------------------
   const updateCameraFromOrbit = React.useCallback(() => {
     const handle = handleRef.current;
@@ -369,8 +399,42 @@ export function PreviewPanel(): React.JSX.Element {
     // If we already bailed to the "too small" fallback last render the
     // host may not be rendered; guard via container size.
     if (size.w < MIN_CANVAS_DIM || size.h < MIN_CANVAS_DIM) return;
+    // If we're in the WebGL-error fallback, skip mounting — the user
+    // must click Retry to clear `webglError` (which bumps `retryNonce`
+    // and re-runs this effect).
+    if (webglError) return;
 
-    const handle = buildPreviewScene();
+    // Wrap construction. `THREE.WebGLRenderer`'s constructor throws when
+    // it can't acquire a WebGL context (headless Chromium without a GPU,
+    // browsers with WebGL disabled, WebGL2-only browsers serving WebGL1,
+    // etc.). Without this guard the exception bubbles through React and
+    // unmounts the whole DocksModal tree.
+    let handle: PreviewSceneHandle;
+    try {
+      handle = buildPreviewScene();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : String(err ?? "unknown error");
+      // Surface to the Output/Problems panels so the user can see why
+      // the preview is offline. Diagnostics is broadcast-synced so
+      // popouts see this too.
+      try {
+        getDiagnosticsState().log(
+          "error",
+          `3D preview unavailable — WebGL initialization failed: ${message}`,
+        );
+      } catch {
+        /* diagnostics store unreachable — fall through */
+      }
+      // Keep a console trace too — `useDiagnosticsStore` only captures
+      // the message string, but a stack helps when debugging locally.
+      if (typeof console !== "undefined" && console.error) {
+        console.error("[PreviewPanel] buildPreviewScene failed", err);
+      }
+      setWebglError(message);
+      return;
+    }
+
     handleRef.current = handle;
     host.appendChild(handle.renderer.domElement);
     // Renderer's canvas is positioned inside an absolutely-filled host;
@@ -390,7 +454,30 @@ export function PreviewPanel(): React.JSX.Element {
     const renderLoop = (): void => {
       const h = handleRef.current;
       if (!h) return;
-      h.renderer.render(h.scene, h.camera);
+      try {
+        h.renderer.render(h.scene, h.camera);
+      } catch (err) {
+        // A runtime render failure (lost context, GPU reset, etc.)
+        // shouldn't keep firing the rAF loop forever. Bail to the
+        // fallback the same way an init failure does.
+        if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        const message =
+          err instanceof Error ? err.message : String(err ?? "unknown error");
+        try {
+          getDiagnosticsState().log(
+            "error",
+            `3D preview render failed: ${message}`,
+          );
+        } catch {
+          /* ignore */
+        }
+        if (typeof console !== "undefined" && console.error) {
+          console.error("[PreviewPanel] render loop failed", err);
+        }
+        setWebglError(message);
+        return;
+      }
       rafRef.current = requestAnimationFrame(renderLoop);
     };
     rafRef.current = requestAnimationFrame(renderLoop);
@@ -407,9 +494,10 @@ export function PreviewPanel(): React.JSX.Element {
       handleRef.current = null;
     };
     // We intentionally re-mount when crossing the size threshold —
-    // size.w/h are part of the gate above.
+    // size.w/h are part of the gate above. `retryNonce` bumps when the
+    // user clicks Retry from the WebGL-error fallback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM]);
+  }, [size.w >= MIN_CANVAS_DIM && size.h >= MIN_CANVAS_DIM, webglError, retryNonce]);
 
   // ----- Floor + grid rebuild on dims change -------------------------
   // Floor PlaneGeometry is sized to dims so it always sits exactly under
@@ -827,7 +915,9 @@ export function PreviewPanel(): React.JSX.Element {
 
   // ----- Render ------------------------------------------------------
   const tooSmall = size.w > 0 && size.h > 0 && (size.w < MIN_CANVAS_DIM || size.h < MIN_CANVAS_DIM);
-  const showToolbar = size.w >= MIN_TOOLBAR_WIDTH && !tooSmall;
+  // Toolbar is suppressed in fallback states — there's nothing to act on
+  // when the canvas isn't rendering.
+  const showToolbar = size.w >= MIN_TOOLBAR_WIDTH && !tooSmall && !webglError;
 
   return (
     <div
@@ -842,6 +932,43 @@ export function PreviewPanel(): React.JSX.Element {
           <span className="text-[10px] uppercase tracking-wide text-(--color-fg-muted)">
             Panel too small
           </span>
+        </div>
+      ) : webglError ? (
+        // WebGL-unavailable fallback — render an EmptyState with a
+        // Retry button. The detail message is captured in
+        // `useDiagnosticsStore` (Output/Problems panel) but we also
+        // surface the first line here so the user has context without
+        // hunting for the panel.
+        <div
+          data-preview-fallback="webgl"
+          className="absolute inset-0 flex items-center justify-center overflow-auto"
+        >
+          <EmptyState
+            icon={<AlertTriangle size={24} />}
+            title="WebGL unavailable — preview offline"
+            description={
+              <>
+                The browser couldn&apos;t initialise a 3D context for the
+                preview. This usually means WebGL is disabled or the
+                browser is running without GPU acceleration.
+                {size.w >= 260 && (
+                  <span className="block mt-2 text-[10px] text-zinc-600 font-mono break-all">
+                    {webglError}
+                  </span>
+                )}
+              </>
+            }
+            action={
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={retryPreview}
+                leadingIcon={<RotateCcw size={12} />}
+              >
+                Retry
+              </Button>
+            }
+          />
         </div>
       ) : (
         <div
@@ -962,6 +1089,98 @@ function PreviewIconButton({
         {children}
       </button>
     </Tooltip>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Error boundary — last-resort safety net.
+// ---------------------------------------------------------------------------
+// The inner component's mount-effect try/catch handles the common
+// WebGL-context-acquisition failure (effect errors are NOT caught by
+// error boundaries, so a boundary alone would still let the editor
+// crash). The boundary picks up the rest: synchronous render errors
+// from descendants, errors thrown during a re-render after a state
+// update, or anything the try/catch didn't anticipate. Either layer in
+// isolation leaves a real crash path open.
+
+interface PreviewErrorBoundaryProps {
+  children: React.ReactNode;
+}
+interface PreviewErrorBoundaryState {
+  error: Error | null;
+}
+
+class PreviewErrorBoundary extends React.Component<
+  PreviewErrorBoundaryProps,
+  PreviewErrorBoundaryState
+> {
+  override state: PreviewErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): PreviewErrorBoundaryState {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    try {
+      getDiagnosticsState().log(
+        "error",
+        `3D preview crashed: ${error.message}`,
+      );
+    } catch {
+      /* diagnostics unreachable — ignore */
+    }
+    if (typeof console !== "undefined" && console.error) {
+      console.error("[PreviewPanel] error boundary caught", error, info);
+    }
+  }
+
+  handleRetry = (): void => {
+    this.setState({ error: null });
+  };
+
+  override render(): React.ReactNode {
+    if (this.state.error) {
+      return (
+        <div
+          data-panel="preview"
+          data-preview-fallback="boundary"
+          className="relative h-full w-full overflow-auto flex items-center justify-center"
+        >
+          <EmptyState
+            icon={<AlertTriangle size={24} />}
+            title="WebGL unavailable — preview offline"
+            description={
+              <>
+                The 3D preview hit an unexpected error and is offline.
+                The rest of the editor is unaffected.
+                <span className="block mt-2 text-[10px] text-zinc-600 font-mono break-all">
+                  {this.state.error.message}
+                </span>
+              </>
+            }
+            action={
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={this.handleRetry}
+                leadingIcon={<RotateCcw size={12} />}
+              >
+                Retry
+              </Button>
+            }
+          />
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function PreviewPanel(): React.JSX.Element {
+  return (
+    <PreviewErrorBoundary>
+      <PreviewPanelInner />
+    </PreviewErrorBoundary>
   );
 }
 
