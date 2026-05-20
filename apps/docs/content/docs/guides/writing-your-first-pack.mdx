@@ -9,8 +9,8 @@ loadable `.apg` and shows up in the game when you point the
 runner at it.
 
 The pack is intentionally minimal: it scatters a custom pickup
-prefab around an existing scene. The point is not what the
-pack does — it's seeing the build + load loop end-to-end.
+around an existing scene. The point is not what the pack does
+— it's seeing the build + load loop end-to-end.
 
 ## 1. Make a new pack directory
 
@@ -28,13 +28,17 @@ The final directory tree for this tutorial:
 ```
 packages/my-pack/
 ├── manifest.json
+├── world.json
 └── scripts/
     └── pickups.js
 ```
 
-That's it. `scenes/` and `images/` are optional in v1 — your
-pack can borrow the default pack's scene by depending on it,
-which is what we'll do here.
+`manifest.json` declares the pack's identity + content
+registries. `world.json` declares the ordered script list (and,
+in larger packs, persistent world entities + singletons).
+`scenes/` and `images/` are optional in v1 — your pack can
+borrow the default pack's scene by depending on it, which is
+what we'll do here.
 
 ## 2. Write the manifest
 
@@ -45,19 +49,8 @@ Create `packages/my-pack/manifest.json`:
   "name": "my-pack",
   "version": "0.1.0",
   "engine": "two_5_d@0.1",
-  "requires": [{ "id": "default", "version": "^0.2.0" }],
-  "startScene": "scenes/scene1.json",
-  "scripts": [
-    "scripts/pickups.js"
-  ],
-  "items": {
-    "health_potion": {
-      "name": "Health Potion",
-      "image": "images/items/ammo_pack.png",
-      "type": "consumable",
-      "stackMax": 5
-    }
-  }
+  "scope": ["game"],
+  "requires": [{ "id": "default", "version": "^0.2.0" }]
 }
 ```
 
@@ -65,28 +58,52 @@ The fields:
 
 | Field | Required | What |
 |---|---|---|
-| `name` | yes | Unique pack id. Used by `requires[]` resolution. |
+| `name` | yes | Pack name. With `requires[]` resolution, `id` (optional) is the globally unique handle; `name` is the human label. |
 | `version` | yes | Semver. Used by `requires[]` range matching. |
-| `engine` | yes | Engine compatibility tag. `two_5_d@0.1` for now. |
-| `requires` | no | Packs this depends on. Today this is mostly aspirational — see [PACK_CHAIN](#extending-vs-replacing) below. |
-| `startScene` | no | Scene path relative to the pack root. Omit to let a dependent pack supply it. |
-| `scripts` | yes | ES modules to load. Run in order; each receives `ModAPI`. |
-| `items` | no | Item definitions. Referenced by item id from inventories, pickups, weapon ammo refs. |
-| `defaultInventory` | no | What the player spawns with. See default-pack manifest. |
+| `engine` | no | Engine compatibility tag (semver). `two_5_d@0.1` for current builds. |
+| `scope` | no | `["game"]` (default), `["editor"]`, or both. Game scope ships runtime content; editor scope ships panel specs / inspectors. |
+| `requires` | no | Packs this depends on. Override semantics + resolver are designed in [PACK_CHAIN](#extending-vs-replacing) below. |
+| `startScene` | no | Scene path relative to the pack root. Omit when extending another pack that supplies the start scene. |
 | `config` | no | Path to a JSON file that deep-merges over the engine baseline. |
+| `tileTextures` / `tilePresets` / `tileSheets` | no | Tile art. Game-scope packs that ship walls/floors set these. |
+| `sprites` | no | Sprite catalog keyed by id (referenced by `Sprite.imageId`). |
+| `audio` | no | Sound registry keyed by id (referenced by `api.audio.play`). |
+| `components` | no | Manifest-declared component types (`name`, optional `schema`, optional `tags`). Registered before scripts run. |
+| `prefabs` | no | Editor-authored declarative prefabs keyed by id. |
+| `editorPanels` | no | (Editor scope only) JSON panel-spec files contributed to the editor's docks. |
 
 The reference for every field is `PackManifest` in
-`packages/engine/src/AssetPack/`. The default pack's
+`packages/engine/src/AssetPack/types.ts`. The default pack's
 `manifest.json` is the most complete real example.
 
-> **Note on item images.** This tutorial points the
-> `health_potion` image at `images/items/ammo_pack.png` —
-> reusing the default-pack texture so we don't have to ship
-> art. Pack-chain image overrides aren't fully wired yet
-> (`docs/plans/PACK_CHAIN.md`), so the practical fallback is
-> to copy the icon you want into your own pack's `images/`
-> folder and reference it locally. For the rest of the
-> tutorial the ammo-pack icon stands in fine.
+> **Notes on the new shape.**
+>
+> - The ordered list of scripts to run is **not** a manifest
+>   field. It lives in `world.json.scripts[]`. See step 3.
+> - Item definitions and the player's starting inventory are
+>   **not** manifest fields. Items are entities carrying
+>   `Item` + `Stackable` (+ optional `Equippable` / `Weapon`)
+>   components; the starting inventory is declared on the
+>   persistent player entity in `world.json`. For a working
+>   pattern, read `packages/default-pack/scripts/setup/load-items.js`
+>   and `packages/default-pack/world.json`.
+
+## 2b. Write the world file
+
+Create `packages/my-pack/world.json`. The minimum is the script
+list:
+
+```jsonc
+{
+  "scripts": [
+    "scripts/pickups.js"
+  ]
+}
+```
+
+The pack-builder also walks `Scripts.refs[]` on world-scope
+entities and on scene controllers, so larger packs split their
+scripts across `world.json.scripts[]` + entity-attached refs.
 
 ## 3. Write your first script
 
@@ -94,16 +111,23 @@ Create `packages/my-pack/scripts/pickups.js`:
 
 ```js
 /**
- * my-pack — scatter health potions across the world.
+ * my-pack — scatter extra ammo packs across the world.
+ *
+ * Reuses the default pack's `rifle_ammo` item id (registered by
+ * `packages/default-pack/scripts/setup/load-items.js` into the
+ * `ItemRegistry` singleton). When you're ready to ship your own
+ * item, declare it in your pack's `data/items.json` and load it
+ * into the same registry from a `setup/` script — see the
+ * default pack for the working pattern.
  */
 export default (api) => {
   const C = api.components;
 
-  // Local helper: spawn one potion at (x, y).
+  // Local helper: spawn one pickup at (x, y).
   // (Prefabs are an editor-only declarative asset and don't
   // exist as a runtime ModAPI concept — pack scripts build
   // entities directly via api.world.spawn() + api.world.add().)
-  function spawnPotion(x, y) {
+  function spawnPickup(x, y) {
     const e = api.world.spawn();
     api.world
       .add(e, C.Position, new api.Vec2(x, y))
@@ -113,8 +137,8 @@ export default (api) => {
         yOffset: 0.25,
       })
       .add(e, C.Pickup, {
-        itemId: "health_potion",
-        count: 1,
+        itemId: "rifle_ammo",   // default-pack-registered item id
+        count: 30,
       })
       .add(e, C.MinimapMarker, {
         color: "#66ff88",
@@ -125,7 +149,7 @@ export default (api) => {
   }
 
   // After the scene has spawned (so the player exists), scatter
-  // 5 potions at random open cells away from spawn.
+  // 5 pickups at random open cells away from spawn.
   api.onWorldReady((api) => {
     const player = api.world.first(C.PlayerInput, C.Position);
     const playerPos = player ? C.Position.getOrThrow(player) : null;
@@ -143,16 +167,16 @@ export default (api) => {
         const dy = y + 0.5 - playerPos.y;
         if (dx * dx + dy * dy < 9) continue; // keep clear of spawn
       }
-      spawnPotion(x + 0.5, y + 0.5);
+      spawnPickup(x + 0.5, y + 0.5);
       placed++;
     }
-    console.log(`[my-pack] scattered ${placed} potions`);
+    console.log(`[my-pack] scattered ${placed} pickups`);
   });
 };
 ```
 
 This is the whole script: define a local spawn helper, wait
-for the world, scatter five potions. The pickup behaviour
+for the world, scatter five pickups. The pickup behaviour
 comes for free because the default pack's pickup system handles
 any entity with a `Pickup` component.
 
@@ -189,14 +213,16 @@ http://localhost:3000/?pack=/packs/my-pack.apg
 
 The `?pack=` query takes a URL — relative paths resolve against
 the runner origin, absolute URLs work for hosted packs. The
-runner downloads the `.apg`, parses the manifest, loads each
-script in order, calls each one with the `ModAPI`, and then
-spawns the scene's initial entities.
+runner downloads the `.apg`, parses the manifest, walks
+`world.json.scripts[]` (plus any entity-attached
+`Scripts.refs[]`), loads each script in order, calls each one
+with the `ModAPI`, and then spawns the scene's initial
+entities.
 
 You should see the default pack's world (we depended on it),
-plus five green-marker potions scattered around — and walking
-over one logs the pickup. Check the dev tools console for
-`[my-pack] scattered 5 potions`.
+plus five extra green-marker ammo pickups scattered around —
+and walking over one adds 30 rounds to your rifle ammo. Check
+the dev tools console for `[my-pack] scattered 5 pickups`.
 
 ## 6. Iterating
 
@@ -222,7 +248,9 @@ Things that need a rebuild:
 - Pack scripts (`scripts/*.js`).
 - Pack scenes (`scenes/*.json`) — and these also re-bake
   lightmaps, so they take a couple seconds.
-- Manifest edits (new items, scripts, requires, etc.).
+- Manifest edits (new components, sprites, requires, etc.).
+- `world.json` edits (new scripts, persistent entities,
+  singletons).
 - Images, textures, item icons.
 
 Things that don't need a rebuild:

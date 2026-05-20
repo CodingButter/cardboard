@@ -117,9 +117,10 @@ new count logged by `hello.js`:
 You changed a pack script. `bun run build-packs` re-zipped the
 default pack into `apps/game/public/packs/default.apg`. On
 reload, the runner fetched the new `.apg`, extracted the
-manifest, loaded each script listed in `manifest.scripts` as
-an ES module, and called the default export with the live
-`ModAPI` instance. `hello.js` ran, registered its system + its
+manifest, walked `world.json.scripts[]` (plus any
+entity-attached `Scripts.refs[]`), loaded each script as an ES
+module, and called the default export with the live `ModAPI`
+instance. `hello.js` ran, registered its system + its
 ammo-scatter, and the engine carried on.
 
 That's the whole loop. The engine doesn't know what an "ammo

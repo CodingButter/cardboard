@@ -33,7 +33,7 @@ Last revised: 2026-05-16.
   slider. Sliders apply instantly via gain updates — no reload, no
   audio dropout.
 - **Pack-declared sound registry.** Same pattern as
-  `manifest.items` / `manifest.sprites`. Each sound has a stable
+  `manifest.sprites`. <!-- historical: `manifest.items` removed 2026-05-20 — item defs now live on entities (Item + Stackable components); pack-side item registry seeded from `data/items.json` via `scripts/setup/load-items.js`. --> Each sound has a stable
   id, a file path inside the pack, optional default volume +
   group. Scripts reference sounds by id; the pack-loader preloads
   every sfx-group sound to `AudioBuffer` at boot.

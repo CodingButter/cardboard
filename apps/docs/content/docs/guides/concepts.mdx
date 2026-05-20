@@ -15,10 +15,11 @@ minimal pack ships:
 
 ```
 my-pack/
-├── manifest.json    declares scripts, scenes, items, ...
+├── manifest.json    declares scope, scenes, components, ...
+├── world.json       persistent entities + the script list
 ├── scripts/*.js     ES modules — the gameplay code
 ├── scenes/*.json    world geometry + entity placements
-└── images/*         textures, item icons, sprites
+└── images/*         textures, sprites, item icons
 ```
 
 The engine ships **zero** gameplay content. The default-pack
@@ -26,31 +27,52 @@ player, weapons, pickups, minimap, hotbar — every visible
 behaviour — lives in `packages/default-pack/` and loads through
 the same ModAPI any third-party pack uses.
 
-The manifest names which scripts run, which scene boots first,
-what items exist, and what the player starts with. Real
-example, condensed from the default pack:
+The manifest declares the pack's identity, which scope(s) it
+contributes to (`"game"`, `"editor"`, or both), the start scene,
+and any registered components / sprites / audio / prefabs. The
+ordered list of scripts to run lives in `world.json.scripts[]`,
+not in the manifest. Real example, condensed from the default
+pack:
 
 ```jsonc
 {
   "name": "default",
   "version": "0.2.0",
   "engine": "two_5_d@0.1",
+  "scope": ["game"],
   "startScene": "scenes/scene1.json",
-  "scripts": [
-    "scripts/prefabs/player.js",
-    "scripts/systems/player-input.js",
-    "scripts/systems/pickup.js",
-    "scripts/hello.js"
+  "config": "config.json",
+  "components": [
+    { "name": "Item",      "tags": ["entity"], "schema": { /* ... */ } },
+    { "name": "Stackable", "tags": ["entity"], "schema": { /* ... */ } }
+    // ...
   ],
-  "items": { "rifle": { /* ... */ } },
-  "defaultInventory": [{ "itemId": "rifle", "slot": "hotbar:0" }]
+  "sprites": { "ammo_pack": { "image": "images/items/ammo_pack.png" } }
 }
 ```
 
-Packs can declare a `requires[]` array to depend on other packs.
-Override semantics + the resolution algorithm are designed in
-`docs/plans/PACK_CHAIN.md`; until that lands, packs ship
-standalone.
+Notable fields you might use:
+
+- `scope` — `["game"]` for runtime contributions, `["editor"]`
+  for editor-only contributions (panel specs, inspectors), or
+  both. Defaults to `["game"]` when absent.
+- `editorPanels` — list of JSON panel-spec files when the pack
+  contributes editor UI.
+- `tileTextures` / `tilePresets` / `tileSheets` — tile art.
+- `sprites` / `audio` / `prefabs` / `recipes` — content registries.
+- `components` — manifest-declared component types (schema +
+  tags). Registered before any script runs.
+- `requires[]` — declared dependencies. Override semantics +
+  resolution algorithm are designed in `docs/plans/PACK_CHAIN.md`.
+
+Item definitions and the player's starting inventory are
+**not** manifest fields. Items live on entities as `Item` +
+`Stackable` (+ optional `Equippable` / `Weapon`) components;
+the player's starting inventory is declared on the persistent
+player entity in `world.json`. The default pack ships
+`data/items.json` loaded by `scripts/setup/load-items.js` into
+an `ItemRegistry` singleton — see `packages/default-pack/scripts/setup/`
+for the working pattern.
 
 ## ECS — entities, components, systems
 
@@ -365,7 +387,7 @@ Everything a pack script sees lives on the `api` argument:
 | `api.world` | The ECS world. `spawn`, `despawn`, `each`, `first`, `add`. |
 | `api.scene` | Static world data — walls, dimensions, queries. |
 | `api.config` | Merged engine + pack config. Live; reads see overrides. |
-| `api.pack` | The active `AssetPack`. `.manifest` for items, default inventory, etc. |
+| `api.pack` | The active `AssetPack`. `.manifest` for declared content (sprites, audio, components, prefabs, recipes), `.textBody(path)` to read pack data files. |
 | `api.components` | Built-in component types, by name. |
 | `api.raycast` | `castRayToWall(scene, origin, dir, maxDist)`. |
 | `api.itemImages` | Shared decoded item-image cache. `.get(itemId, "held"?)`. |
