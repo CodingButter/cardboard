@@ -222,6 +222,81 @@ All four are browser-safe, tree-shakable, no native deps.
 - Tap to reconnect (no rescan needed if desktop session is still up).
 - Graceful "session ended" state when desktop closes.
 
+### D12b — Remote Dock Controller panel  *(added 2026-05-19)*
+
+A first-class panel inside the desktop editor that lists all paired
+sidecars and lets the user remote-control what each one displays.
+Eliminates "rescan QR to switch panels" entirely — pair phone once,
+then swap content from the desktop for the rest of the session.
+
+**Shape**
+
+- New panel kind: `remoteDockController` (lives alongside Minimap,
+  TilePresets, etc. in the dock-add modal).
+- Reads from `usePairedPeersStore` — a new store holding
+  PEER METADATA (id, label, currentPanelKind, status, last-seen
+  timestamp). NOT the actual `RTCPeerConnection` objects; those
+  can't serialize and live in a singleton on the originating window.
+- UI: a card per paired peer. Each card shows current panel kind,
+  a dropdown to switch panels, a disconnect button. Status pill
+  (connected / reconnecting / disconnected) per card.
+- Empty state: "No devices paired. Pop out a panel and scan the QR
+  to pair one."
+
+**Mechanics**
+
+- Same WebRTC data channel as store sync. Adds a CONTROL-MESSAGE
+  type alongside the store-write messages:
+  ```ts
+  type ControlMessage =
+    | { kind: "switchPanel"; to: SemanticPanelKind }
+    | { kind: "ping" }
+    | { kind: "pong" }
+    | { kind: "requestState"; storeIds: string[] }
+    | { kind: "disconnect"; reason?: string };
+  ```
+- Desktop sends `{kind: "switchPanel", to: "tilePresets"}`. Sidecar
+  unmounts the current panel component, mounts the new one,
+  re-requests state for the new panel's relevant stores.
+- "Broadcast to all paired devices" — desktop sends the same
+  switch-panel message to every connected peer. Live demo mode —
+  three tablets in a room all mirror the same minimap.
+
+**`usePairedPeersStore`**
+
+Uses `createSyncedStore` so popping the Controller dock to a second
+monitor still shows the same paired peers. State:
+```ts
+interface PairedPeer {
+  id: string;           // PeerJS id
+  label: string;        // user-friendly name ("Jamie's iPad")
+  currentKind: SemanticPanelKind;
+  status: "connecting" | "connected" | "reconnecting" | "ended";
+  connectedAt: number;
+  lastSeenAt: number;
+}
+interface PairedPeersState {
+  peers: Record<string, PairedPeer>;
+}
+```
+
+The `RTCPeerConnection` objects themselves live in a per-window
+singleton (`networkTransport.activeConnections: Map<peerId, RTCPeerConnection>`).
+The store has the metadata; the singleton has the live connections.
+Switching panels from any window: update store → singleton observes
+change → sends control message over connection it owns.
+
+**Why this is cheap to add**
+
+- The WebRTC transport is already there (D10).
+- The store sync layer already runs over it.
+- Control messages are just another message type on the same channel.
+- `usePairedPeersStore` is one more `createSyncedStore` — same shape
+  as the existing 8.
+- The Controller dock is just a React panel reading the store.
+
+No new architectural primitives. Slots in naturally.
+
 ### D13 — Game runtime sidecar (phone-as-controller)
 - Game runtime emits a `kind=controller` peer-id when running on
   desktop.
