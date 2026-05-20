@@ -134,7 +134,7 @@ As Wave 3 progresses, document anything that's harder than expected:
 - Were any command runs racing with state updates? (Suggests we need
   a command-queue or transactional dispatch.)
 
-Update `docs/PAGE_BUILD_PROCESS.md` with any process improvements.
+Update `docs/process/PAGE_BUILD_PROCESS.md` with any process improvements.
 
 ## Out of scope for Wave 3
 

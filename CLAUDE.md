@@ -32,17 +32,40 @@ snapshot lives at `docs/SESSION_STATE.md`.
 
 Index:
 
+**Top-level (`docs/`):**
+
 | File | Topic |
 |---|---|
 | `docs/PLAN.md` | Master plan + phase status table. Start here. |
 | `docs/SESSION_STATE.md` | Latest session-state snapshot — open tasks, decisions, file-touched map. Read after `PLAN.md` for current context. |
+| `docs/IDEAS.md` | Idea log + future plan seeds. |
+
+**Forward-looking plans (`docs/plans/`):**
+
+| File | Topic |
+|---|---|
 | `docs/plans/WALL_OVERHAUL.md` | Variable wall heights, partial walls, caps. Phase 1 done. |
-| `docs/plans/LIGHTING_OVERHAUL.md` | Bake-heavy emissive lighting model. Phases 1, 2, 4, 5 done. Phase 3 (per-wall samples) pending. |
-| `docs/plans/LIGHTING_ENTITIES_REFACTOR.md` | Audit + plan for making lights first-class entities. |
+| `docs/plans/LIGHTING_OVERHAUL.md` | Bake-heavy emissive lighting model. Phases 1, 2, 4, 5 done. Phase 3 (per-wall samples) pending. Phase 7 (light entities R3+R4) absorbed from former LIGHTING_ENTITIES_REFACTOR. |
 | `docs/plans/ENGINE_PACK_SPLIT.md` | Long-term: `src/` becomes pure engine, all game content lives in packs. Phases R1–R5. |
 | `docs/plans/MONOREPO_PLAN.md` | Workspace restructure — prerequisite for the engine/pack split. |
 | `docs/plans/MULTIPLAYER_PLAN.md` | Networked multiplayer as a drop-in pack. Phases M1–M6. |
 | `docs/plans/PACK_CHAIN.md` | Multi-pack chain loading + dependencies + override semantics + community store. Subsumes ENGINE_PACK_SPLIT R5. |
+
+**Process docs (`docs/process/`):**
+
+| File | Topic |
+|---|---|
+| `docs/process/PAGE_BUILD_PROCESS.md` | Playbook for building an editor page end-to-end. |
+| `docs/process/EDITOR_DESIGN_INVENTORY.md` | Editor view × panel inventory + per-panel decisions. |
+
+**Audits (`docs/audits/`):**
+
+| File | Topic |
+|---|---|
+| `docs/audits/AUDIT_2026-05-16.md` | Plan-doc audit (18 docs) — staleness + redundancy findings. |
+| `docs/audits/AUDIT_2026-05-19.md` | Reorg audit + execution record (this reorg). |
+| `docs/audits/EDITOR_DOCK_EVALUATION.md` | Evaluation of dock library candidates for the editor. |
+| `docs/audits/EDITOR_UI_AUDIT.md` | Editor UI audit + remediation list. |
 
 When the user mentions a phase by name (e.g. "R3 of the engine
 split", "Phase 4 lighting", "M1") look it up in the corresponding

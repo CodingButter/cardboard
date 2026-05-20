@@ -1,5 +1,9 @@
 # Prefabs become editor-only
 
+> **Status: All phases shipped (PE1–PE3 + §17 re-implementation).** Kept as
+> historical / pattern reference.
+> Cross-referenced by: `docs/PLAN.md`, `docs/plans/WORLD_STATE.md`.
+
 Plan document for **PE1–PE5** — the architectural shift that removes
 all prefab-runtime machinery from the engine and recasts prefabs as
 editor-only authoring templates. Engine becomes a pure ECS-data

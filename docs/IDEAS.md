@@ -150,7 +150,7 @@ PROC3 audio engine / PROC4 image editor / PROC5 audio editor).
 ## 2026-05-16 — Idea log + plan-doc audit
 
 This very file. Plus an audit pass that produced
-`docs/AUDIT_2026-05-16.md` (767 lines) — 18 docs audited, top
+`docs/audits/AUDIT_2026-05-16.md` (767 lines) — 18 docs audited, top
 findings: SESSION_STATE.md 12 commits stale, 6 plan docs with
 "not started" rows for phases that shipped, ENGINE_PACK_SPLIT.md
 §R4/§R5 should redirect to newer canonical docs.

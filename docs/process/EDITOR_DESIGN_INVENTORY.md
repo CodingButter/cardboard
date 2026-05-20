@@ -150,7 +150,7 @@ Playtest overlay. Each subsection follows the same template:
       or instantiated from prefabs.
     - **Lights are not a distinct mode** — any entity becomes a light
       source by attaching the right components (see
-      `docs/plans/LIGHTING_ENTITIES_REFACTOR.md`).
+      `docs/plans/LIGHTING_OVERHAUL.md` Phase 7).
     - **Shared tools** in both modes: Select, Eraser, Eye Dropper,
       plus mode-specific extras (Paint / Fill in Map mode; Place /
       Prefab Drop in Entity mode).

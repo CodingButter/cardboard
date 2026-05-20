@@ -1,5 +1,9 @@
 # Monorepo restructure — workspace layout
 
+> **Status: All phases shipped.** Kept as historical / pattern reference.
+> Cross-referenced by: `docs/plans/ENGINE_PACK_SPLIT.md`,
+> `docs/plans/MULTIPLAYER_PLAN.md`, `docs/PLAN.md`.
+
 A focused plan for splitting the current flat repo into a Bun
 workspace with clear engine-vs-content-vs-app boundaries. This is the
 prerequisite for `ENGINE_PACK_SPLIT.md` R1-R5 and `MULTIPLAYER_PLAN.md`

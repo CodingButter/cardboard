@@ -274,7 +274,7 @@ unblocked).
 ```sh
 cat PLAN.md
 cat ENGINE_PACK_SPLIT.md
-cat LIGHTING_ENTITIES_REFACTOR.md
+cat LIGHTING_OVERHAUL.md         # Phase 7 covers former LIGHTING_ENTITIES_REFACTOR
 cat MULTIPLAYER_PLAN.md          # this file
 ```
 

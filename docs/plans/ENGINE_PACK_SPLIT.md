@@ -291,8 +291,7 @@ the remaining work.
 
 ```sh
 cat PLAN.md
-cat LIGHTING_OVERHAUL.md
-cat LIGHTING_ENTITIES_REFACTOR.md
+cat LIGHTING_OVERHAUL.md           # includes Phase 7 (former LIGHTING_ENTITIES_REFACTOR)
 cat ENGINE_PACK_SPLIT.md           # this file
 ```
 

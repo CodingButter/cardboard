@@ -96,7 +96,7 @@ After all panels migrated, wire the canvas-side paint loop:
 
 For each migrated panel: pop out, verify state syncs both directions,
 verify reload persistence. Capture pain points back into
-`docs/PAGE_BUILD_PROCESS.md`.
+`docs/process/PAGE_BUILD_PROCESS.md`.
 
 ## Pending tasks queue (post Wave 3)
 
@@ -108,7 +108,7 @@ verify reload persistence. Capture pain points back into
   lands.
 - **Other pages** — Components / Assets / Scripts / Animation / Image
   Lab / Sound Lab / UI Builder / Project. Apply the playbook
-  (`docs/PAGE_BUILD_PROCESS.md`).
+  (`docs/process/PAGE_BUILD_PROCESS.md`).
 
 ## Architectural context the next agent must know
 

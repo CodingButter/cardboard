@@ -29,7 +29,7 @@ Before any code is touched, gather:
 3. **The relevant plan doc**: `docs/PLAN.md` and any related
    `docs/plans/<feature>.md`. Cross-reference the phase this work
    completes so the status table updates correctly at the end.
-4. **The list of panels** the page hosts, from `EDITOR_DESIGN_INVENTORY.md`
+4. **The list of panels** the page hosts, from `docs/process/EDITOR_DESIGN_INVENTORY.md`
    or the design reference itself. Split into "default visible" and
    "opt-in" (added via DocksModal).
 5. **Tooling state**: dev server reachable on `http://localhost:3001/`;
@@ -359,7 +359,7 @@ After the page lands:
    status table marking the page complete.
 2. **Update `docs/SESSION_STATE.md`**: if the page work spanned a
    long session, capture an open-task / decision snapshot.
-3. **Update `docs/EDITOR_DESIGN_INVENTORY.md`**: tick off the page's
+3. **Update `docs/process/EDITOR_DESIGN_INVENTORY.md`**: tick off the page's
    panels in the inventory and add any decisions made along the way.
 4. **Tag the page-complete commit**: `git tag scene-page-complete` (or
    similar). Tags give a fast revert point if a later page accidentally

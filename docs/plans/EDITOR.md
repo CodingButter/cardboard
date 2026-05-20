@@ -439,8 +439,8 @@ declarative + initScript" — for the full design.
 
 ### 6.4 Light placement
 
-Lights are entities with the `Light` component (per the
-`LIGHTING_ENTITIES_REFACTOR` plan) once that's merged; until then
+Lights are entities with the `Light` component (per
+`LIGHTING_OVERHAUL.md` Phase 7) once that's fully landed; until then
 they are also-accepted as `scene.lights[]`.
 
 - "Place light" tool drops a Light entity at clicked coords.
