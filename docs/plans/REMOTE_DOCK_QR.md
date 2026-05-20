@@ -268,10 +268,15 @@ interface PanelDndPayload {
 
 ## 5c. Game-as-dock + initial IDB mirror (the live test-on-device flow)
 
-**This isn't a new platform — it's the apg pack system paying off.**
-Games are already data-driven, declarative, IDB-backed by design.
-Everything in this section is just exposing what the pack
-architecture already enables.
+**This isn't a new platform — it's the apg pack system paying off
+via "editor package injection".** Games are already data-driven,
+declarative, IDB-backed by design. At dev-time, the editor injects
+a BRIDGE PACK into the user's pack chain (alongside the user's own
+pack). The bridge registers store-change subscribers, asset-bus
+listeners, and the WebRTC transport. Production builds chain only
+the user's pack — the bridge is tree-shaken out. Zero runtime cost
+in shipped games. See `.claude/memory/project_editor_package_injection.md`
+for the full architectural rationale.
 
 The game runner is itself a panel kind (`kind=gamePreview`). Sidecar
 mounts the existing game runner component; it reads from the
