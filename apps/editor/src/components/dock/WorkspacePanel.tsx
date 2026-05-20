@@ -15,7 +15,7 @@ import {
 import { cn } from "../../lib/cn";
 import { useWorkspaceStore } from "../../state/useWorkspaceStore";
 import { registerCommand } from "../../state/useCommandStore";
-import { getPredefinedLayouts } from "../../state/predefinedLayouts";
+import { useRegisteredPredefinedLayouts } from "../../state/useLayoutRegistryStore";
 import { Modal } from "../ui/Modal";
 import { Tooltip } from "../ui/Tooltip";
 import { LayoutsModal } from "./LayoutsModal";
@@ -357,10 +357,12 @@ export function WorkspaceRail({
   // layout is "active". `layouts.saveAsNew` and `layouts.resave` are
   // also registered here so they're discoverable from the palette even
   // when the LayoutsModal isn't open.
-  const predefinedLayouts = React.useMemo(
-    () => getPredefinedLayouts(pageId),
-    [pageId],
-  );
+  // P5 — predefined layouts come from the pack-contributed registry
+  // (`useLayoutRegistryStore`). The hook returns a stable array that
+  // re-derives only when the registry changes, so the downstream
+  // command-registration effect stays warm until a pack
+  // adds/removes a preset.
+  const predefinedLayouts = useRegisteredPredefinedLayouts(pageId);
   const userPresets = useWorkspaceStore(
     (s) => s.presets[pageId] ?? EMPTY_USER_PRESETS,
   );

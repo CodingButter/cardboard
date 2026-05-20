@@ -55,7 +55,7 @@ import { Select } from "../components/ui/Select";
 import { TextInput } from "../components/ui/TextInput";
 import { Tooltip } from "../components/ui/Tooltip";
 import { cn } from "../lib/cn";
-import { MOCK_LAYERS } from "../views/scene/scene-fixtures";
+import { MOCK_LAYERS } from "../state/scene-mock-data";
 import { useLayerStore } from "../state/useLayerStore";
 import { invokeScript } from "./invokeScript";
 import {

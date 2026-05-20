@@ -12,7 +12,7 @@ import {
   useEditingPresetId,
   type WorkspacePreset,
 } from "../../state/useWorkspaceStore";
-import { getPredefinedLayouts } from "../../state/predefinedLayouts";
+import { useRegisteredPredefinedLayouts } from "../../state/useLayoutRegistryStore";
 import { useCommandStore } from "../../state/useCommandStore";
 
 // Hoisted so the workspace-store selector's fallback reference is
@@ -403,10 +403,11 @@ export function LayoutsModal({
   pageId,
   apiRef,
 }: LayoutsModalProps): React.JSX.Element {
-  const predefined = React.useMemo(
-    () => getPredefinedLayouts(pageId),
-    [pageId],
-  );
+  // P5 — predefined layouts come from the pack-contributed registry
+  // (`useLayoutRegistryStore`). The hook returns a stable array that
+  // re-derives only when the registry changes, so the LayoutsModal
+  // grid keys stay consistent across renders.
+  const predefined = useRegisteredPredefinedLayouts(pageId);
 
   const presets = useWorkspaceStore(
     (s) => s.presets[pageId] ?? EMPTY_USER_PRESETS,

@@ -31,12 +31,12 @@ import { useToolStore } from "../state/useToolStore";
 import { useBrushStore } from "../state/useBrushStore";
 import { useCommandStore } from "../state/useCommandStore";
 import demoSpec from "./test-fixtures/demo-selection-info.json";
-import selectionInfoSpec from "./specs/selection-info.json";
-import toolPaletteSpec from "./specs/tool-palette.json";
-import brushSpec from "./specs/brush.json";
-import quickToolsSpec from "./specs/quick-tools.json";
-import cellInspectorSpec from "./specs/cell-inspector.json";
-import { MOCK_QUICK_TOOLS } from "../views/scene/scene-fixtures";
+import selectionInfoSpec from "./test-fixtures/selection-info.json";
+import toolPaletteSpec from "./test-fixtures/tool-palette.json";
+import brushSpec from "./test-fixtures/brush.json";
+import quickToolsSpec from "./test-fixtures/quick-tools.json";
+import cellInspectorSpec from "./test-fixtures/cell-inspector.json";
+import { MOCK_QUICK_TOOLS } from "../state/scene-mock-data";
 import type { NodeSpec, PanelSpec } from "./types";
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,6 @@ import {
 } from "../state/tileTextureCache";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
-import { SceneTabContextPicker } from "../views/scene/SceneTabContextPicker";
 // P4 view-shell migration — views moving into the pack need access to
 // the DockShell primitive, the WorkspaceRail chrome, the per-tab
 // context-slot hook, the URL-hash router, and the editor-pack registry
@@ -214,15 +213,6 @@ export const shellSdk = {
   // through the cache.
   loadTileTexture,
   getTileTextureSync,
-  // P3 batch D-light — `SceneTabContextPicker` is a presentational
-  // composite that reads `scenes` / `activeScene` from the host's
-  // `<ActiveSceneProvider/>` context. Bundling a duplicate into a
-  // pack would give it a different React context identity and the
-  // hook would resolve to the default (empty) value — the picker
-  // would render disabled regardless of the actual scene list. Any
-  // pack-shipped surface that wants the same picker reaches for the
-  // shared component, same as `EmptyState` / `PanelRenderer`.
-  SceneTabContextPicker,
   // P4 — view shells moving into the pack. Each entry below is
   // singleton-bound (React Context, Zustand store, window.location,
   // or a module-level promise cache). Bundling a duplicate inside

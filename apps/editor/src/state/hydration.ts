@@ -13,7 +13,7 @@ import {
   resetTextureCache,
 } from "./tileTextureCache";
 import { useDiagnosticsStore } from "./useDiagnosticsStore";
-import type { TilePresetCategory } from "../views/scene/scene-fixtures";
+import type { TilePresetCategory } from "./scene-mock-data";
 
 /**
  * hydrateStoresFromIdb — bridge the IDB → Zustand gap that Wave 3.3

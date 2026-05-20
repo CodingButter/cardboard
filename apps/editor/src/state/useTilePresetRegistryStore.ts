@@ -1,5 +1,5 @@
 import { createSyncedStore } from "./sync";
-import type { TilePresetCategory } from "../views/scene/scene-fixtures";
+import type { TilePresetCategory } from "./scene-mock-data";
 
 /**
  * useTilePresetRegistryStore — read-only registry of every tile preset

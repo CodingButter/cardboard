@@ -65,6 +65,13 @@ import { MapView } from "../views/MapView";
 import { PrefabsView } from "../views/PrefabsView";
 import { SCENE_DEFAULT_LAYOUT } from "../layouts/scene-default";
 import { PREFABS_DEFAULT_LAYOUT } from "../layouts/prefabs-default";
+// P5 — predefined Scene-page layouts moved out of the shell-side
+// `apps/editor/src/state/predefinedLayouts.ts` into pack content. The
+// pack registers each one via `ctx.registerPredefinedLayout(...)` so
+// the shell's `useLayoutRegistryStore` becomes the single source of
+// truth for both default + predefined layouts. CORE_EDITOR_PACK.md §10
+// P5.
+import { SCENE_PREDEFINED_LAYOUTS } from "../layouts/predefined";
 
 import { NotesPanel, MANIFEST as NOTES_MANIFEST } from "../panels/NotesPanel";
 import { OutputPanel, MANIFEST as OUTPUT_MANIFEST } from "../panels/OutputPanel";
@@ -274,6 +281,17 @@ export default function setup(ctx: EditorPackContext): () => void {
     // `useDefaultLayout(viewId)` to find these.
     ctx.registerLayout("scene", SCENE_DEFAULT_LAYOUT),
     ctx.registerLayout("prefabs", PREFABS_DEFAULT_LAYOUT),
+    // P5 — Scene predefined-layout catalogue. Each preset appears in
+    // the LayoutsModal grid + becomes a `layouts.apply.<id>` command in
+    // the palette. WorkspacePanel + LayoutsModal merge these into the
+    // user-preset list at render time. CORE_EDITOR_PACK.md §10 P5.
+    ...SCENE_PREDEFINED_LAYOUTS.map((preset) =>
+      ctx.registerPredefinedLayout("scene", preset.name, {
+        id: preset.id,
+        description: preset.description,
+        layout: preset.layout,
+      }),
+    ),
     // P4 — primary-tab contributions. Tabs render in registration
     // order, so this ordering mirrors the legacy hardcoded
     // PRIMARY_TABS array exactly. The shell-side `PrimaryTabs` strip

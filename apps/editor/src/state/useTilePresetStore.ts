@@ -1,5 +1,5 @@
 import { createSyncedStore } from "./sync";
-import type { TilePresetCategory } from "../views/scene/scene-fixtures";
+import type { TilePresetCategory } from "./scene-mock-data";
 
 /**
  * useTilePresetStore — the editor's active tile preset selection.

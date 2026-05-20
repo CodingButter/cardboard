@@ -10,9 +10,10 @@
 // texture epoch bumps, disconnected undo/redo) — see
 // CORE_EDITOR_PACK.md §6 gotcha #2.
 //
-// `SceneTabContextPicker` is also externalised — its `useActiveScene`
-// hook reads from the host's React Context, so a bundled duplicate
-// would resolve to the default empty value.
+// `SceneTabContextPicker` is now a pack-local composite (P5 moved it
+// out of the shell). Its only hook — `useActiveScene` — is
+// externalised through the SDK so the picker reads the host's React
+// Context.
 //
 // `PaintOp` and `HistoryEntry` / `CustomLayer` are types only — Bun
 // erases them at compile, so they can come from the shell sources
@@ -29,10 +30,15 @@ import type { PaintOp } from "../../../apps/editor/src/state/historyDispatcher";
 // dependency, safe to ship inside the pack.
 import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
 import { MOCK_LAYERS, type LayerRow } from "./scene-fixtures";
+// Pack-local composite — P5 moved this out of the shell SDK because
+// MapCanvasPanel is its only consumer. The picker itself externalises
+// `useActiveScene`; the wrapping `DropdownMenu` + `Tooltip` are
+// bundled like other presentational primitives.
+import { SceneTabContextPicker } from "../views/scene/SceneTabContextPicker";
 // Externalised — all of these are Wave-3 synced stores OR the
-// history dispatcher OR the tile-texture cache wrapper OR the
-// scene-picker composite. They MUST resolve to the host's singletons
-// / React context to avoid the duplicate-state hazard.
+// history dispatcher OR the tile-texture cache wrapper. They MUST
+// resolve to the host's singletons / React context to avoid the
+// duplicate-state hazard.
 import {
   registerCommand,
   useSceneStore,
@@ -49,7 +55,6 @@ import {
   redoOnce,
   loadTileTexture,
   getTileTextureSync,
-  SceneTabContextPicker,
 } from "@cardboard/editor-shell";
 
 /**

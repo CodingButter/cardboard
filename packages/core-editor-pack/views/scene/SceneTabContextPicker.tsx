@@ -1,12 +1,23 @@
 import React from "react";
-import { DropdownMenu } from "../../components/ui/DropdownMenu";
-import { Tooltip } from "../../components/ui/Tooltip";
-import { useActiveScene } from "../../shell/ActiveSceneContext";
+// Bundled — presentational primitives with no singleton/context
+// dependency. The pack-builder's `cardboard-react-externals` plugin
+// rewrites `import React from "react"` so the React identity matches
+// the host; everything else here is safe to bundle alongside the
+// component.
+import { DropdownMenu } from "../../../../apps/editor/src/components/ui/DropdownMenu";
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `useActiveScene` reads the host's
+// `<ActiveSceneProvider/>` React Context. A bundled duplicate would
+// resolve to a default empty context and the picker would render
+// disabled regardless of the actual scene list.
+import { useActiveScene } from "@cardboard/editor-shell";
 
 /**
  * SceneTabContextPicker — the dropdown that used to live in the
- * TopBar. It now renders in the tab strip's per-tab right slot (see
- * `lib/tabContextSlot.tsx`) and is registered by the Scene view.
+ * TopBar. It renders in the tab strip's per-tab right slot (see
+ * `apps/editor/src/lib/tabContextSlot.tsx`) and is mounted by
+ * `MapCanvasPanel` in the pack (see the `useTabContextSlot` call
+ * around the canvas body).
  *
  * Reads `scenes`, `fallbackScene`, `activeScene`, and `setActiveScene`
  * from `<ActiveSceneProvider/>` so the component has no required props
@@ -21,6 +32,10 @@ import { useActiveScene } from "../../shell/ActiveSceneContext";
  * vanishing — we want users to see "yes, this tab cares about scenes,
  * you just haven't added any" instead of silently dropping the
  * affordance.
+ *
+ * P5 moved the file out of `apps/editor/src/views/scene/` and into the
+ * core-editor-pack alongside `MapCanvasPanel`, its only consumer. The
+ * previous shell-SDK export was retired in the same pass.
  */
 export function SceneTabContextPicker(): React.JSX.Element {
   const { activeScene, setActiveScene, scenes, fallbackScene } =

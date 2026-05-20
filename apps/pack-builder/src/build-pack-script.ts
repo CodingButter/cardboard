@@ -373,7 +373,6 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const redoOnce = __mod.redoOnce;
               export const loadTileTexture = __mod.loadTileTexture;
               export const getTileTextureSync = __mod.getTileTextureSync;
-              export const SceneTabContextPicker = __mod.SceneTabContextPicker;
               export const DockShell = __mod.DockShell;
               export const WorkspaceRail = __mod.WorkspaceRail;
               export const useTabContextSlot = __mod.useTabContextSlot;

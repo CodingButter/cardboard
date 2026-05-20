@@ -5,12 +5,7 @@
   "engine": "two_5_d@0.1",
   "scope": ["editor"],
   "editorPanels": [
-    "panels/selection-info.json",
-    "panels/selection-info-migrated.json",
-    "panels/tool-palette-migrated.json",
-    "panels/brush-migrated.json",
-    "panels/quick-tools-migrated.json",
-    "panels/cell-inspector-migrated.json"
+    "panels/selection-info.json"
   ],
   "scripts": ["scripts/setup.ts"]
 }

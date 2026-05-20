@@ -17,17 +17,16 @@ import type { SerializedDockview } from "dockview";
  *   2. `registerPredefinedLayout(viewId, name, layout)` — appends a
  *      named preset to the view's predefined-layout catalogue surfaced
  *      in the Workspace Layouts modal. Replaces the previous static
- *      `PREDEFINED_LAYOUTS` map in
- *      `apps/editor/src/state/predefinedLayouts.ts`.
+ *      `PREDEFINED_LAYOUTS` map that used to live at
+ *      `apps/editor/src/state/predefinedLayouts.ts` (retired in P5).
  *
  * Both registration paths return unregister functions so a future
  * Extensions-tab live-disable can flush the contributions without a
  * reload. Re-registering an id is last-write-wins.
  *
- * The shell's WorkspacePanel + LayoutsModal merge these pack-
- * contributed presets with the (still-existing) shell-side
- * `getPredefinedLayouts(pageId)` list during P4. P5 retires the
- * shell-side list.
+ * The shell's WorkspacePanel + LayoutsModal read pack-contributed
+ * presets through `useRegisteredPredefinedLayouts(pageId)` — there is
+ * no longer a shell-side fallback list.
  *
  * Why a plain `create` (not synced): same per-window reasoning as
  * `useViewRegistryStore` — popouts re-load packs and re-populate the
@@ -36,10 +35,10 @@ import type { SerializedDockview } from "dockview";
  * See `docs/plans/CORE_EDITOR_PACK.md` §10 P4 for the design intent.
  */
 
-/** A pack-contributed predefined layout entry. Matches the
- *  `PredefinedLayout` shape in `state/predefinedLayouts.ts` so the
- *  existing WorkspacePanel / LayoutsModal consumers can read either
- *  source through the same interface. */
+/** A pack-contributed predefined layout entry. Mirrors the shape
+ *  WorkspacePanel + LayoutsModal expect (id / name / description /
+ *  layout) so a pack-shipped preset renders identically to whatever
+ *  the shell used to surface from its retired predefinedLayouts list. */
 export interface RegisteredPredefinedLayout {
   /** Stable id; used as the `lastAppliedPresetId` marker + React key. */
   readonly id: string;
