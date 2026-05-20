@@ -511,6 +511,35 @@ export interface SelectNode {
 }
 
 /**
+ * RenderSpec — recursive renderer escape hatch. Reads a `PanelSpec` or
+ * `NodeSpec` from a store binding and renders it through the renderer.
+ *
+ * Added for the JSON Visual Builder (VB2) — the builder's canvas pane
+ * is itself a `<PanelRenderer>`-rendered panel that needs to display
+ * the user's in-progress draft. `RenderSpec { from: "store.panelBuilder.root" }`
+ * reaches into the panel-builder store, resolves the binding to a
+ * `NodeSpec` (or a full `PanelSpec`), and walks it recursively.
+ *
+ * Two binding-value shapes are accepted:
+ *   • A `NodeSpec` — rendered via `<NodeRenderer>`.
+ *   • A `PanelSpec` (discriminated by the presence of a `root` field) —
+ *     unwrapped to its `root` and rendered via `<NodeRenderer>`.
+ *
+ * Anything else (null / undefined / non-object) renders nothing.
+ *
+ * Use cases beyond the visual builder: any pack that loads + renders a
+ * user-provided spec (live preview tools, A/B comparison panels,
+ * documentation-style "here's a panel snippet"-style displays). See
+ * `docs/plans/JSON_VISUAL_BUILDER.md` §5 for the rationale + risk
+ * callout (recursive `<PanelRenderer>` reentrancy).
+ */
+export interface RenderSpecNode {
+  type: "RenderSpec";
+  /** Store-path binding pointing at a NodeSpec or PanelSpec value. */
+  from: StorePath;
+}
+
+/**
  * Discriminated union of every node type the Phase 0 renderer
  * understands. Adding a new node type is a four-step process:
  *   1. Add the interface above.
@@ -536,7 +565,8 @@ export type NodeSpec =
   | ToggleButtonNode
   | ScrollRowNode
   | SelectNode
-  | CanvasNode;
+  | CanvasNode
+  | RenderSpecNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire

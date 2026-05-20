@@ -39,7 +39,8 @@ export type SemanticAssetKind =
   | "music"
   | "prefab"
   | "tilePreset"
-  | "scene";
+  | "scene"
+  | "panelBuilderNode";
 
 /**
  * The structured payload carried by every drag. Serialized with
@@ -85,6 +86,7 @@ export const MIME = {
   prefab: "application/x-cardboard-prefab",
   tilePreset: "application/x-cardboard-tile-preset",
   scene: "application/x-cardboard-scene",
+  panelBuilderNode: "application/x-cardboard-panel-builder-node",
 } as const satisfies Record<SemanticAssetKind, string>;
 
 /**

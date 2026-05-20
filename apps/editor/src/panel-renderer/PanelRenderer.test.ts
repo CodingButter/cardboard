@@ -1635,6 +1635,139 @@ describe("registerDynamicStore", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// RenderSpec node — JSON Visual Builder VB2.
+//
+// The renderer-surface change: a NodeSpec variant that reads a NodeSpec
+// or PanelSpec value from a binding and renders it recursively. These
+// tests cover the binding-resolution + structural-acceptance contract;
+// the actual React-tree render path is exercised in
+// `PanelRenderer.render.test.tsx` (recursive PanelRenderer tests).
+// ---------------------------------------------------------------------------
+
+describe("RenderSpec node — structural validation", () => {
+  test("RenderSpec appears in NodeSpec union (compile-time gate)", () => {
+    const node: NodeSpec = {
+      type: "RenderSpec",
+      from: "store.panelBuilder.root",
+    };
+    expect(node.type).toBe("RenderSpec");
+    expect(node.from).toBe("store.panelBuilder.root");
+  });
+
+  test("RenderSpec can be nested inside a Layout's children", () => {
+    // The builder canvas wraps the RenderSpec in a Layout so a host
+    // padding / scroll behaviour can still apply. Verify the type
+    // surface accepts this composition.
+    const node: NodeSpec = {
+      type: "Layout",
+      direction: "column",
+      children: [
+        { type: "RenderSpec", from: "store.panelBuilder.root" },
+      ],
+    };
+    expect(node.type).toBe("Layout");
+    expect((node.children[0] as { type?: string }).type).toBe("RenderSpec");
+  });
+});
+
+describe("RenderSpec — binding resolution", () => {
+  test("resolves a NodeSpec value through a dynamic store binding", async () => {
+    // The renderer's RenderSpec case delegates to `useStoreBinding`,
+    // which goes through `resolveBinding` — same resolver used by every
+    // other binding-shaped node. Exercise the resolution path through
+    // the imperative resolveBinding (no React DOM needed) to prove the
+    // builder's `$store.panelBuilder.root` binding actually returns a
+    // NodeSpec-shaped value.
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    interface BuilderState {
+      root: NodeSpec;
+    }
+    const hook = create<BuilderState>(() => ({
+      root: {
+        type: "Layout",
+        direction: "column",
+        children: [{ type: "Heading", text: "Hello recursive renderer" }],
+      },
+    }));
+    const unregister = registerDynamicStore(
+      "panelBuilder-resolve-test",
+      hook as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    try {
+      const b = resolveBinding("$store.panelBuilder-resolve-test.root");
+      const value = b.get();
+      expect(value).toBeDefined();
+      // The resolver returns the raw object — non-scalar. RenderSpec
+      // accepts NodeSpec-shaped objects without further coercion.
+      const node = value as NodeSpec;
+      expect(node.type).toBe("Layout");
+      const layoutNode = node as { children: NodeSpec[] };
+      expect(layoutNode.children[0]?.type).toBe("Heading");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("resolves a PanelSpec value through a dynamic store binding", async () => {
+    // The renderer's `coerceSpecValue` accepts BOTH a NodeSpec and a
+    // PanelSpec (unwrapping to .root). Make sure the resolver doesn't
+    // mangle the PanelSpec shape on the way through.
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    interface BuilderState {
+      spec: PanelSpec;
+    }
+    const hook = create<BuilderState>(() => ({
+      spec: {
+        id: "untitled",
+        title: "Untitled",
+        category: "Inspector",
+        dockKind: "dockable-window",
+        root: {
+          type: "Layout",
+          direction: "column",
+          children: [{ type: "Heading", text: "Wrapped panel" }],
+        },
+      },
+    }));
+    const unregister = registerDynamicStore(
+      "panelBuilder-spec-test",
+      hook as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    try {
+      const b = resolveBinding("$store.panelBuilder-spec-test.spec");
+      const value = b.get();
+      const spec = value as PanelSpec;
+      expect(spec.id).toBe("untitled");
+      expect(spec.root.type).toBe("Layout");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("a missing binding returns undefined — RenderSpec safely renders nothing", async () => {
+    // The renderer's RenderSpec case calls `coerceSpecValue` on the
+    // resolved value; non-object values return null which the case
+    // renders as null. Confirm the resolver returns undefined when the
+    // path doesn't resolve (no selection, store key missing, etc.).
+    const { registerDynamicStore } = await import("./resolveBinding");
+    const { create } = await import("zustand");
+    const hook = create(() => ({ root: undefined as NodeSpec | undefined }));
+    const unregister = registerDynamicStore(
+      "panelBuilder-missing-test",
+      hook as unknown as Parameters<typeof registerDynamicStore>[1],
+    );
+    try {
+      const b = resolveBinding("$store.panelBuilder-missing-test.root");
+      expect(b.get()).toBeUndefined();
+    } finally {
+      unregister();
+    }
+  });
+});
+
 describe("libraryCache.sha256Sri", () => {
   test("computes SRI-style sha256 for known bytes", async () => {
     const { sha256Sri } = await import("../packs/libraryCache");

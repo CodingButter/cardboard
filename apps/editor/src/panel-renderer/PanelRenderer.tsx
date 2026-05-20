@@ -74,6 +74,7 @@ import type {
   NodeSpec,
   NumberInputNode,
   PanelSpec,
+  RenderSpecNode,
   ScrollRowNode,
   SelectNode,
   SelectOptionSpec,
@@ -994,6 +995,62 @@ function SelectRenderer({ node }: { node: SelectNode }): React.JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
+// RenderSpec — render a NodeSpec / PanelSpec resolved from a binding.
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminator for a value retrieved through a binding — is it shaped
+ * like a `PanelSpec`, a `NodeSpec`, or neither? We can't import a JSON
+ * Schema at runtime so the check is structural:
+ *
+ *   • An object with a `root` field whose `type` is a string → PanelSpec.
+ *   • An object with a `type` field whose value is a string → NodeSpec.
+ *   • Anything else → null (rendered as nothing).
+ *
+ * Deliberately loose — we don't validate every NodeSpec variant here;
+ * the `NodeRenderer` switch handles unknown `type` values with a
+ * console.error + null render, which is the right fallback for an
+ * authored binding that points at malformed data.
+ */
+function coerceSpecValue(value: unknown): NodeSpec | null {
+  if (value == null || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  // PanelSpec shape — unwrap to root.
+  if (
+    "root" in obj &&
+    obj.root != null &&
+    typeof obj.root === "object" &&
+    typeof (obj.root as { type?: unknown }).type === "string"
+  ) {
+    return obj.root as unknown as NodeSpec;
+  }
+  // NodeSpec shape — has a string `type` field.
+  if (typeof obj.type === "string") {
+    return obj as unknown as NodeSpec;
+  }
+  return null;
+}
+
+function RenderSpecRenderer({
+  node,
+}: {
+  node: RenderSpecNode;
+}): React.JSX.Element | null {
+  // Reuse the same `useStoreBinding` machinery every other binding uses
+  // — the resolver's `get()` returns the raw resolved value (no
+  // string-coercion, no formatter), which is exactly what we need to
+  // hand back a `NodeSpec` / `PanelSpec` shaped value.
+  const { value } = useStoreBinding(node.from);
+  const child = React.useMemo(() => coerceSpecValue(value), [value]);
+  if (!child) return null;
+  // Recursive dispatch — NodeRenderer is exported above so the
+  // recursion works without a forward-decl. The renderer's
+  // PackContextProvider context is inherited via React.useContext so
+  // pack-bundled commands stay reachable from the inner subtree.
+  return <NodeRenderer node={child} />;
+}
+
+// ---------------------------------------------------------------------------
 // Recursive dispatch
 // ---------------------------------------------------------------------------
 
@@ -1034,6 +1091,8 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <SelectRenderer node={node} />;
     case "Canvas":
       return <CanvasRenderer node={node} />;
+    case "RenderSpec":
+      return <RenderSpecRenderer node={node} />;
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.

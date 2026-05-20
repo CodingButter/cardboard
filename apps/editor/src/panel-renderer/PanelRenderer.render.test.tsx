@@ -36,7 +36,7 @@ import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { PanelRenderer } from "./PanelRenderer";
 import { registerDynamicStore } from "./resolveBinding";
-import type { PanelSpec } from "./types";
+import type { NodeSpec, PanelSpec } from "./types";
 
 /**
  * A minimal PanelSpec that binds a `Text` node to a dynamic store
@@ -182,4 +182,287 @@ describe("PanelRenderer — DYNAMIC_STORES swap (Fix 2)", () => {
       expect(seen[2]).toContain("cycle-2");
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// RenderSpec — recursive PanelRenderer (JSON Visual Builder VB2).
+//
+// The risk flagged by docs/plans/JSON_VISUAL_BUILDER.md §10 is that
+// `<PanelRenderer>` was not written with a "render a spec resolved from
+// a binding" use case in mind — every existing call mounts it once at
+// the top of a panel. The `RenderSpec` node mounts a `<NodeRenderer>`
+// (the renderer's recursive dispatcher) on a binding-resolved value
+// from INSIDE another `<PanelRenderer>` tree. These tests prove the
+// reentrancy works without a React error.
+// ---------------------------------------------------------------------------
+
+describe("PanelRenderer — RenderSpec recursive render (VB2)", () => {
+  test("renders a NodeSpec value resolved from a dynamic store binding", () => {
+    // Outer spec: a panel with a single RenderSpec node that points at
+    // the dynamic-store's root. The store holds a Heading NodeSpec —
+    // the recursive walker should land on that Heading and render its
+    // text into the outer panel's tree.
+    interface BuilderState {
+      root: NodeSpec;
+    }
+    const hook = create<BuilderState>(() => ({
+      root: {
+        type: "Heading",
+        text: "Recursive heading rendered through RenderSpec",
+        level: 2,
+      },
+    }));
+    const unregister = registerDynamicStore(
+      "vb2-recursive-1",
+      hook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-1.root",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      expect(html).toContain("Recursive heading rendered through RenderSpec");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("renders a NodeSpec tree (Layout with children) through RenderSpec", () => {
+    // The realistic case for the panel builder: the store's root is a
+    // Layout containing the user's dropped nodes. The recursive walker
+    // should descend through the Layout into each Heading.
+    interface BuilderState {
+      root: NodeSpec;
+    }
+    const hook = create<BuilderState>(() => ({
+      root: {
+        type: "Layout",
+        direction: "column",
+        children: [
+          { type: "Heading", text: "Child one" },
+          { type: "Heading", text: "Child two" },
+          { type: "Heading", text: "Child three" },
+        ],
+      },
+    }));
+    const unregister = registerDynamicStore(
+      "vb2-recursive-2",
+      hook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer-tree",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-2.root",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      expect(html).toContain("Child one");
+      expect(html).toContain("Child two");
+      expect(html).toContain("Child three");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("renders a PanelSpec value resolved from a binding (unwraps to .root)", () => {
+    // The renderer accepts either a NodeSpec OR a full PanelSpec — the
+    // builder's preview-store mode (VB6) may eventually hand back a
+    // full PanelSpec, and we want today's RenderSpec to handle it.
+    interface BuilderState {
+      spec: PanelSpec;
+    }
+    const hook = create<BuilderState>(() => ({
+      spec: {
+        id: "wrapped",
+        title: "Wrapped",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "Heading",
+          text: "Wrapped PanelSpec text",
+        },
+      },
+    }));
+    const unregister = registerDynamicStore(
+      "vb2-recursive-3",
+      hook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer-spec",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-3.spec",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      expect(html).toContain("Wrapped PanelSpec text");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("RenderSpec with a missing / undefined binding renders nothing without error", () => {
+    // The store key exists but resolves to undefined — the renderer
+    // should fall through coerceSpecValue → return null without
+    // throwing. This is the "fresh draft, no root assigned" case.
+    interface BuilderState {
+      root: NodeSpec | undefined;
+    }
+    const hook = create<BuilderState>(() => ({ root: undefined }));
+    const unregister = registerDynamicStore(
+      "vb2-recursive-4",
+      hook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer-missing",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-4.root",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      // Outer panel wrapper still renders — but the recursive subtree
+      // is empty.
+      expect(html).toContain("data-panel-id=\"vb2-outer-missing\"");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("RenderSpec with a malformed (non-spec-shaped) binding renders nothing", () => {
+    // A binding that points at a scalar / random object that isn't a
+    // NodeSpec or PanelSpec. The renderer's coerceSpecValue returns
+    // null and the recursive case renders nothing — no React error,
+    // no console crash.
+    interface BadState {
+      garbage: unknown;
+    }
+    const hook = create<BadState>(() => ({ garbage: 42 }));
+    const unregister = registerDynamicStore(
+      "vb2-recursive-5",
+      hook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer-malformed",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-5.garbage",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      expect(html).toContain("data-panel-id=\"vb2-outer-malformed\"");
+    } finally {
+      unregister();
+    }
+  });
+
+  test("doubly-recursive RenderSpec (RenderSpec inside a RenderSpec) renders without error", () => {
+    // Two levels of recursion: the store's root is itself a RenderSpec
+    // pointing at a SECOND store path. This exercises the "renderer
+    // calls itself which calls itself" stack to make sure the
+    // PackContext / hook order survives two levels deep.
+    interface OuterState {
+      root: NodeSpec;
+    }
+    interface InnerState {
+      leaf: NodeSpec;
+    }
+    const innerHook = create<InnerState>(() => ({
+      leaf: { type: "Heading", text: "Inner-most leaf" },
+    }));
+    const outerHook = create<OuterState>(() => ({
+      root: { type: "RenderSpec", from: "$store.vb2-recursive-7.leaf" },
+    }));
+    const u1 = registerDynamicStore(
+      "vb2-recursive-6",
+      outerHook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    const u2 = registerDynamicStore(
+      "vb2-recursive-7",
+      innerHook as unknown as UseBoundStore<StoreApi<unknown>>,
+    );
+    try {
+      const spec: PanelSpec = {
+        id: "vb2-outer-double",
+        title: "Outer",
+        category: "Custom",
+        dockKind: "dockable-window",
+        root: {
+          type: "RenderSpec",
+          from: "$store.vb2-recursive-6.root",
+        },
+      };
+      let err: unknown = null;
+      let html = "";
+      try {
+        html = renderToString(React.createElement(PanelRenderer, { spec }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeNull();
+      expect(html).toContain("Inner-most leaf");
+    } finally {
+      u1();
+      u2();
+    }
+  });
 });
