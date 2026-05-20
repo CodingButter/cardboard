@@ -81,6 +81,38 @@ the apg pack-chain we already shipped. We didn't design a
 marketplace; we stumbled into one because pack-chain is the universal
 extension point.
 
+### Extension packs contribute ALL four primitive kinds
+
+Extension packs aren't just dev tools that watch from the side —
+they can contribute the same engine-level primitives that user game
+packs do. Pack-chain doesn't distinguish "extension" vs "game":
+
+| Contribution | Example for the cheat-system extension |
+|---|---|
+| **Components** | `CheatCodeListener` component schema — key-sequence + trigger-script-id fields |
+| **Scripts** | Runtime input watcher that monitors keystrokes against the sequence; preset trigger scripts ("god mode", "all weapons") |
+| **Prefabs** | Pre-configured "Konami cheat" entity bundle the user drops into their scene |
+| **Custom editor panels** | "Cheat Code Manager" dock panel — lists every CheatCodeListener in the project, key sequence, target, links to entities |
+
+The user attaches `CheatCodeListener` to entities in their game pack
+(same way they'd attach any other component), configures the
+sequence in JSON, picks a preset trigger script OR writes their own.
+Production export: chain doesn't include the extension pack, the
+component definition disappears, entities with `CheatCodeListener`
+have unknown components stripped or warned about (pack-chain's
+existing missing-component behavior).
+
+### The architectural moment
+
+The mechanism is exactly what the apg system already enables.
+Components are data-driven. Scripts are pack-provided. The engine
+merges contributions across the chain. **Extension packs are just
+more packs that happen to opt into dev-mode-only injection.**
+Implementation details — schema design, runtime watcher, preset
+scripts, custom panel UI — are up to the extension's author, the
+same way game devs design their own components today. **No new
+engine work required.**
+
 ## Bridge package location
 
 When implemented:
