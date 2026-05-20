@@ -322,34 +322,22 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
   // Pre-resolve every `manifest.libraries[]` entry so the context's
   // `importLibrary(name)` is a synchronous map lookup. Each library
   // routes through `resolveLibrary` (content-hash-deduped cache).
-  const libs = (manifest as unknown as {
-    libraries?: Array<{
-      name: string;
-      version: string;
-      path: string;
-      hash: string;
-    }>;
-  }).libraries ?? [];
+  //
+  // `manifest.libraries` is now formally declared on `PackManifest`
+  // (engine `AssetPack/types.ts:527`), so no `as unknown as { ... }`
+  // cast is needed — TypeScript narrows the optional array directly.
+  const libs = manifest.libraries ?? [];
   for (const lib of libs) {
     try {
-      // Read bytes via the engine's `binaryBody` (preferred — no copy)
-      // OR fall back to `binaryBlob` (returns a fresh ArrayBuffer
-      // copy). The fallback exists for older engine builds bundled
-      // before the `binaryBody` accessor landed; both paths produce
-      // the same `Uint8Array` view the library cache expects.
-      let bytes: Uint8Array;
-      const packAny = pack as unknown as {
-        binaryBody?: (path: string) => Promise<Uint8Array>;
-        binaryBlob?: (path: string) => Promise<ArrayBuffer>;
-      };
-      if (typeof packAny.binaryBody === "function") {
-        bytes = await packAny.binaryBody(lib.path);
-      } else if (typeof packAny.binaryBlob === "function") {
-        const buf = await packAny.binaryBlob(lib.path);
-        bytes = new Uint8Array(buf);
-      } else {
-        throw new Error("pack exposes neither binaryBody nor binaryBlob");
-      }
+      // Read bytes via the engine's `binaryBody` accessor. The
+      // accessor is non-optional on `ZipAssetPack` (engine
+      // `AssetPack/ZipAssetPack.ts:109`); the prior fallback to a
+      // legacy `binaryBlob` accessor + the corresponding cast were
+      // dead code post the engine's accessor consolidation. The
+      // `as ZipAssetPack` widens `pack` (typed `ZipAssetPack` from
+      // `loadFromBytes` above) so this access is a clean
+      // structural match.
+      const bytes = await pack.binaryBody(lib.path);
       const mod = resolveLibrary(lib.hash, bytes);
       state.libModuleByName.set(lib.name, mod);
     } catch (err) {

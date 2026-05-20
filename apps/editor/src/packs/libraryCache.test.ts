@@ -99,6 +99,51 @@ describe("libraryCache — content-hash dedup", () => {
     expect(_libraryCacheSnapshotForTests()).toHaveLength(0);
   });
 
+  test("verify-then-cache: a mismatched-hash call inserts NOTHING permanently", async () => {
+    // Regression guard for the "verify → trust" ordering. Before the
+    // fix, the loader inserted a cache entry SYNCHRONOUSLY (trust),
+    // then awaited the hash check, then deleted on mismatch (clean
+    // up). This test asserts the post-rejection cache snapshot is
+    // empty AND that no `blob:` URL ever made it into a trusted
+    // entry — only the placeholder ever existed, and only briefly.
+    const { bytes } = await makeBytes("export const real = 1;");
+    const fakeHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    expect(_libraryCacheSnapshotForTests()).toHaveLength(0);
+    const promise = resolveLibrary(fakeHash, bytes);
+    // While the verifier is hashing the bytes, the cache holds a
+    // placeholder entry — that's how dedup-race-safety works. The
+    // placeholder's `url` is the empty string (NOT a blob: URL), so
+    // a malicious-bytes call never produces a usable, trusted Blob.
+    const midSnap = _libraryCacheSnapshotForTests();
+    expect(midSnap).toHaveLength(1);
+    expect(midSnap[0]!.url).toBe("");
+    await expect(promise).rejects.toThrow(/hash mismatch/i);
+    // Post-rejection: placeholder is gone. The cache is empty.
+    expect(_libraryCacheSnapshotForTests()).toHaveLength(0);
+  });
+
+  test("dedup-race with bad bytes: two concurrent calls both reject, no zombie cache entry", async () => {
+    // Concurrent callers must share a single verification — and
+    // when the bytes fail the hash, BOTH must reject and the cache
+    // must contain ZERO entries afterwards. Without the placeholder
+    // dedup, two concurrent rejections could leave a residual entry
+    // from whichever rejection's delete-step lost the race.
+    const { bytes } = await makeBytes("export const real = 1;");
+    const fakeHash = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=";
+    const a = resolveLibrary(fakeHash, bytes);
+    const b = resolveLibrary(fakeHash, bytes);
+    // Both calls share the same module promise — placeholder dedup
+    // preserves promise identity through the verification phase.
+    expect(a).toBe(b);
+    const results = await Promise.allSettled([a, b]);
+    expect(results[0]!.status).toBe("rejected");
+    expect(results[1]!.status).toBe("rejected");
+    if (results[0]!.status === "rejected") {
+      expect(String(results[0]!.reason)).toMatch(/hash mismatch/i);
+    }
+    expect(_libraryCacheSnapshotForTests()).toHaveLength(0);
+  });
+
   test("sha256Sri produces the canonical `sha256-<base64>` format", async () => {
     const bytes = new TextEncoder().encode("hello");
     const hash = await sha256Sri(bytes);

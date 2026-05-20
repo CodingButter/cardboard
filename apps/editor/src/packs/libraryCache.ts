@@ -29,10 +29,29 @@
  */
 
 interface CacheEntry {
-  /** Object URL backing the dynamic `import()`. Never revoked. */
+  /**
+   * Object URL backing the dynamic `import()`. Never revoked. Empty
+   * string while the entry is in the `pending verification` phase
+   * (hash not yet confirmed). Populated once the integrity check
+   * passes and the Blob is constructed.
+   */
   url: string;
   /** The pending or resolved module namespace object. */
   module: Promise<unknown>;
+  /**
+   * True while the entry is the placeholder a concurrent caller
+   * inserted to dedup their own SHA-256 verification step. False
+   * once the verifier has upgraded the entry with the real Blob URL.
+   *
+   * The placeholder phase preserves the dedup guarantee: two
+   * `resolveLibrary` calls with identical declared hashes and
+   * identical bytes share ONE verification + ONE Blob URL, regardless
+   * of which one's promise the cache holds. The loser of the race
+   * sees the placeholder, awaits the same module promise, and never
+   * creates a duplicate cache entry — even though the verification
+   * hasn't completed yet at the moment they look up the cache.
+   */
+  pending: boolean;
 }
 
 const LIBRARY_CACHE = new Map<string, CacheEntry>();
@@ -67,9 +86,27 @@ export async function sha256Sri(bytes: Uint8Array): Promise<string> {
  * Blob URL + the same module Promise — chart.js bundled by two packs
  * is one module instance in memory.
  *
- * Throws synchronously on hash mismatch (the integrity check runs
- * before any caching), so a pack with a manifest-vs-bytes disagreement
- * can't poison the cache for a subsequent honest pack.
+ * Sequence (verify → trust, NOT trust → verify):
+ *
+ *   1. Cache hit on `declaredHash`? Return the cached module promise.
+ *   2. Otherwise, insert a "pending verification" placeholder
+ *      synchronously keyed by `declaredHash`. The placeholder carries
+ *      the module promise (so concurrent callers with identical
+ *      bytes await the same verification + same module instance) but
+ *      its `url` is the empty string until verification passes.
+ *   3. Inside the async verifier:
+ *        a. Compute SHA-256 of the bytes.
+ *        b. If the actual hash doesn't match `declaredHash`, DELETE
+ *           the placeholder and throw. Concurrent callers awaiting
+ *           the placeholder all reject — no zombie cache entry.
+ *        c. Only after verification passes do we construct the Blob
+ *           URL, upgrade the placeholder to a fully populated entry,
+ *           and dynamic-import the module.
+ *
+ * On hash mismatch the placeholder is removed before the throw
+ * propagates, so the cache snapshot post-rejection is empty (no
+ * lingering "trust → verify" residue). A subsequent honest call
+ * with the same declared hash can re-enter the cache cleanly.
  */
 export function resolveLibrary(
   declaredHash: string,
@@ -86,43 +123,49 @@ export function resolveLibrary(
     // line disappears and the test below catches it.
     // eslint-disable-next-line no-console
     console.info(
-      `[libraryCache] cache HIT (dedup): ${declaredHash.slice(0, 24)}…`,
+      `[libraryCache] cache ${cached.pending ? "HIT (pending verification)" : "HIT (dedup)"}: ${declaredHash.slice(0, 24)}…`,
     );
     return cached.module;
   }
-  // Race-safe: insert the cache entry SYNCHRONOUSLY before we await
-  // the hash verification. Two concurrent calls for the same bytes
-  // both fall into the `if (cached)` branch above on the second
-  // call's synchronous entry — without this, two `loadEditorPacks()`
-  // racing on the same chart.js would both miss the cache and parse
-  // chart.js twice. The hash verification still runs (inside the
-  // module-resolution Promise) and a mismatch turns the Promise
-  // rejection-final + the loader handles it as a load failure.
-  //
   // eslint-disable-next-line no-console
   console.info(
     `[libraryCache] cache MISS (first load): ${declaredHash.slice(0, 24)}… ` +
       `(${bytes.byteLength.toLocaleString()} B)`,
   );
+  // Build the verification + module-import promise. We DO insert a
+  // placeholder cache entry synchronously below so a concurrent
+  // call with identical declared hash + bytes shares this same
+  // promise — but the placeholder is REMOVED on hash mismatch
+  // BEFORE the rejection propagates. Architecturally the order is
+  // verify → trust: nothing trustworthy enters the cache until the
+  // SHA-256 check passes; the placeholder is purely a dedup-race
+  // primitive and its `url` stays empty until verification clears.
   const module = (async (): Promise<unknown> => {
     const actualHash = await sha256Sri(bytes);
     if (actualHash !== declaredHash) {
-      // Drop the cache entry so a subsequent call with the same
-      // declared hash but the correct bytes can succeed.
+      // Drop the placeholder so a subsequent call with the same
+      // declared hash but the correct bytes can succeed, and so the
+      // cache snapshot reflects "nothing was trusted" post-failure.
       LIBRARY_CACHE.delete(declaredHash);
       throw new Error(
         `[libraryCache] hash mismatch: declared ${declaredHash}, ` +
           `actual ${actualHash}`,
       );
     }
+    // Verification passed → upgrade the placeholder to a fully
+    // populated entry with a real Blob URL. From this point on the
+    // entry is "trusted" and any subsequent cache HIT skips
+    // re-verification (the hash is the integrity gate; the
+    // promise-identity dedup gate is downstream of it).
     const blob = new Blob([bytes as BlobPart], {
       type: "application/javascript",
     });
     const url = URL.createObjectURL(blob);
-    // Patch the entry's `url` once the Blob exists (we inserted a
-    // placeholder above so concurrent callers could dedup).
     const entry = LIBRARY_CACHE.get(declaredHash);
-    if (entry) entry.url = url;
+    if (entry) {
+      entry.url = url;
+      entry.pending = false;
+    }
     // String-indirection to defeat any static-analysis dynamic-import
     // scanner Bun's bundler (or a future plugin) might apply. The
     // `@vite-ignore` is documentation only — Bun doesn't honour it,
@@ -133,8 +176,18 @@ export function resolveLibrary(
       import(/* @vite-ignore */ s);
     return importDynamic(url);
   })();
-  // Placeholder `url` is replaced once the Blob is created above.
-  LIBRARY_CACHE.set(declaredHash, { url: "", module });
+  // Insert the placeholder. `url` is empty + `pending: true` until
+  // the verifier clears the integrity check. Concurrent callers
+  // that look up the cache while we're still hashing get this
+  // placeholder's promise and ride the same verification.
+  LIBRARY_CACHE.set(declaredHash, { url: "", module, pending: true });
+  // Swallow unhandled-rejection noise from the placeholder promise
+  // for the case where every caller's `.catch()` is registered
+  // asynchronously. The promise still rejects; callers' awaits /
+  // chained handlers still see the error. We just suppress the
+  // "(node:…) UnhandledPromiseRejection" diagnostic that fires
+  // when no handler is attached on the SAME microtask tick.
+  module.catch(() => {});
   return module;
 }
 

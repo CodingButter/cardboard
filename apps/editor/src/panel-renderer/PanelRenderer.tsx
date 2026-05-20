@@ -248,21 +248,48 @@ function useStoreBinding(path: string): {
 } {
   // Re-resolve only when the path string changes.
   const binding = React.useMemo(() => resolveBinding(path), [path]);
-  // Subscribe to the store the path roots into. We don't pass a
-  // selector — the hook returns the whole state — but we IMMEDIATELY
-  // re-read through `binding.get()` so the rendered value is the
-  // freshest resolved view. The subscription itself is what triggers
-  // re-render on change.
+  // Subscribe via a SINGLE `useSyncExternalStore` call whose
+  // subscribe + getSnapshot delegate to whichever store the binding
+  // resolves to at call time. One React hook, one subscription
+  // slot, regardless of whether the store is built-in, dynamic, or
+  // missing.
   //
-  // `getStoreHook` may return `undefined` for a dynamic store that hasn't
-  // been registered yet (a pack panel mounting before its script ran).
-  // To keep hook order stable across renders we ALWAYS subscribe to a
-  // fallback hook (`useLayerStore` — already imported, well-known
-  // shell store) in that case — the subscription is harmless and the
-  // binding.get() returns undefined until the real store appears, at
-  // which point the next render picks it up.
-  const storeHook = getStoreHook(binding.storeName) ?? useLayerStore;
-  storeHook((s) => s); // subscribe to all slice changes
+  // Why this matters (the audit's note at this line): the previous
+  // `getStoreHook(binding.storeName) ?? useLayerStore` form called
+  // a zustand hook as a fallback sentinel when the dynamic store
+  // wasn't registered. It happened to work because both branches
+  // are zustand hooks with the same hook count (1), but it
+  // violated rules-of-hooks in spirit — the IDENTITY of the hook
+  // function being called was branch-dependent. Swapping a dynamic
+  // store under a mounted panel could land us in a different
+  // branch on the next render, and a future change to either hook's
+  // internals (adding an internal useEffect, say) would silently
+  // diverge the hook order without a runtime error today. See
+  // `PanelRenderer.tsx:264` in the pack-loader edge-case audit.
+  //
+  // The new form calls `useSyncExternalStore` UNCONDITIONALLY,
+  // closing over `binding.storeName`. When the store is missing the
+  // subscribe is a no-op and the snapshot is `undefined` — `binding
+  // .get()` already returns `undefined` in that case, so the
+  // rendered output is unchanged from the old behavior.
+  const subscribe = React.useMemo(
+    () =>
+      (cb: () => void): (() => void) => {
+        const store = getStoreHook(binding.storeName);
+        if (!store) return () => {};
+        return store.subscribe(cb);
+      },
+    [binding.storeName],
+  );
+  const getSnapshot = React.useMemo(
+    () =>
+      (): unknown => {
+        const store = getStoreHook(binding.storeName);
+        return store ? store.getState() : undefined;
+      },
+    [binding.storeName],
+  );
+  React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const value = binding.get();
   return { value, binding };
 }
