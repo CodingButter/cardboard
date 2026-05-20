@@ -5,6 +5,7 @@ import { App } from "./src/App";
 import { assetUrl } from "./src/lib/assetUrl";
 import { installReactRuntime } from "./src/packs/reactRuntime";
 import { installShellSdkRuntime } from "./src/packs/shellSdkRuntime";
+import { attachDevHmrClient } from "./src/packs/devHmrClient";
 import { useToolStore } from "./src/state/useToolStore";
 import { useBrushStore } from "./src/state/useBrushStore";
 import { useTilePresetStore } from "./src/state/useTilePresetStore";
@@ -49,6 +50,14 @@ installReactRuntime();
 // import from `@cardboard/editor-shell`, which the pack-builder rewrites
 // to a virtual module reading from `globalThis.__cardboard_editor_shell`.
 installShellSdkRuntime();
+
+// Dev-only pack HMR — subscribes to the editor server's
+// `/__dev/pack-hmr` SSE channel and hot-swaps a pack whenever its
+// workspace source files change. See `docs/plans/CORE_EDITOR_PACK.md`
+// §11 risk #2 mitigation (c) for the rationale. Production builds
+// never serve the SSE route, so the EventSource open simply 404s and
+// the client logs a debug-level warning — no functional impact.
+attachDevHmrClient();
 
 if (typeof window !== "undefined") {
   window.__cardboard = {

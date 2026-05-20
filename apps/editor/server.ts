@@ -1,6 +1,21 @@
 /// <reference types="bun" />
 import index from "./index.html";
 import sidecarIndex from "./sidecar/index.html";
+import {
+  handleDevHmrSseRequest,
+  isDevHmrSseUrl,
+  tryServeDevPackApg,
+} from "./dev/dev-pack-server";
+
+// Dev-mode pack HMR (task #36 / CORE_EDITOR_PACK.md §11 risk #2 mitigation (c)).
+// Enabled when `bun --hot server.ts` is running (the editor's `dev`
+// script). In a production build (`bun build`), this file is never
+// executed — `server.ts` is dev-only. The dev module hooks
+// `/packs/<id>.apg` for workspace-resident packs (rebuilds the .apg
+// bytes in-memory from `packages/<pack>/`) and exposes an SSE channel
+// at `/__dev/pack-hmr` that pushes change events so the editor can
+// hot-swap the pack without a browser reload.
+const DEV_PACK_HMR_ENABLED = process.env.NODE_ENV !== "production";
 
 const PUBLIC_DIR = `${import.meta.dir}/public`;
 const SIDECAR_DIR = `${import.meta.dir}/sidecar`;
@@ -110,12 +125,28 @@ const server = Bun.serve({
     "/*": async (req) => {
       const { pathname } = new URL(req.url);
 
+      // Dev-mode pack HMR — `/__dev/pack-hmr` is an SSE stream pushing
+      // `{ type: "pack-changed", packId }` events whenever a workspace
+      // pack source file changes. The editor's `devHmrClient` subscribes
+      // and hot-swaps the pack without a browser reload.
+      if (DEV_PACK_HMR_ENABLED && isDevHmrSseUrl(pathname)) {
+        return handleDevHmrSseRequest();
+      }
+
       // Resolve `/packs/*` against the editor's own public/packs/
       // first (editor-scope `.apg` files emitted by `bun run
       // build-packs`), then fall back to apps/game/public/packs/ so
       // HomeScreen's "Create Project" templates (e.g. Cardboard.apg)
       // still resolve from the editor origin.
       if (pathname.startsWith("/packs/")) {
+        // Dev-mode: if the pack id maps to a workspace source dir,
+        // serve a freshly-compiled in-memory .apg instead of the
+        // on-disk artifact. This is the optimization that gives panel
+        // edits a ~1-2s feedback loop — see `dev/dev-pack-server.ts`.
+        if (DEV_PACK_HMR_ENABLED) {
+          const devResponse = await tryServeDevPackApg(pathname);
+          if (devResponse) return devResponse;
+        }
         const rel = pathname.slice("/packs".length);
         const editorFile = Bun.file(`${EDITOR_PACKS_DIR}${rel}`);
         if (await editorFile.exists()) return new Response(editorFile);
@@ -160,6 +191,12 @@ const server = Bun.serve({
     hmr: true,
     console: true,
   },
+  // Default Bun.serve idleTimeout is 10s; the dev pack-HMR SSE channel
+  // pushes a heartbeat every 5s, but a brief stall (file watcher
+  // re-scan after a save burst) shouldn't reset the SSE — bump to 60s
+  // so reconnect chatter doesn't fill the console. Non-SSE routes are
+  // unaffected; this is purely a connection-idle ceiling.
+  idleTimeout: 60,
 });
 
 console.log(`Listening on ${server.url}`);
