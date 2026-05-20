@@ -4,39 +4,46 @@ import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { registerCommand } from "../../../state/useCommandStore";
 import { SceneTabContextPicker } from "../SceneTabContextPicker";
-import { MOCK_LAYERS, MOCK_SCENE_SETTINGS, type LayerRow } from "../scene-fixtures";
+import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
+import { useSceneStore } from "../../../state/useSceneStore";
+import { useLayerStore, type CustomLayer } from "../../../state/useLayerStore";
+import { useSelectionStore } from "../../../state/useSelectionStore";
+import { useToolStore } from "../../../state/useToolStore";
+import { useDiagnosticsStore } from "../../../state/useDiagnosticsStore";
+import { useHistoryStore } from "../../../state/useHistoryStore";
 
 /**
  * MapCanvasPanel — the Scene page's primary top-down map canvas.
  *
- * Visual target: the centre region in `Editor Design/Map.png`. A 2D
- * top-down grid sized to the scene's `dimensions` (64×64 for the
- * fixture scene), letterboxed inside whatever the dock hands us. A
- * sparse set of pre-painted sample cells communicates the "tile per
- * layer" model — floors, walls, doors, sprites — and a floating
- * layer-chip strip pinned to the bottom edge exposes visibility +
- * active-layer state. Wave 3 swaps the sample cells for real
- * `EditorProjectStore` selectors; Wave 2's job is to wire the
- * canvas, selection, layer chip strip, and command-registry surface
- * so painting can land on top.
+ * Wave 3.3.14: this panel now reads ALL of its content state from the
+ * cross-panel stores (scene cells, layer order + visibility + active
+ * id, selection + hover + cursor). It used to keep a local sample-cell
+ * fixture and per-panel localStorage for selection/visibility/active
+ * layer; those are gone, replaced by `useSceneStore` / `useLayerStore`
+ * / `useSelectionStore`. The viewport (zoom + pan) is still
+ * panel-local until `useViewportStore` lands — `LS_ZOOM` and
+ * `LS_PAN_*` persistence remain.
+ *
+ * Paint-write loop + history entries are 3.4 scope and intentionally
+ * deferred — non-select tools surface a diagnostic via
+ * `useDiagnosticsStore.log("info", ...)` instead of mutating cells.
  *
  * The panel is registered with `surface: false` + `headerless: true`
  * in MapView so it renders flush against the dock — no panel chrome,
  * no card padding. That makes it the editor's centerpiece, mirroring
  * how the design comp shows the map filling the middle column.
  *
- * Persistence (per-page localStorage):
- *   - `cardboard.scene.mapCanvas.selectedCell`        JSON `{x,y}` or null
- *   - `cardboard.scene.mapCanvas.activeLayerId`       string layer id
- *   - `cardboard.scene.mapCanvas.layerVisibility`     JSON Record<id, bool>
- *   - `cardboard.scene.mapCanvas.viewZoom`            number, default 1
- *   - `cardboard.scene.mapCanvas.viewPanX`            number, default 0
- *   - `cardboard.scene.mapCanvas.viewPanY`            number, default 0
+ * Persistence (panel-local, viewport only):
+ *   - `cardboard.scene.mapCanvas.viewZoom`   number, default 1
+ *   - `cardboard.scene.mapCanvas.viewPanX`   number, default 0
+ *   - `cardboard.scene.mapCanvas.viewPanY`   number, default 0
  *
  * Commands registered:
  *   - scene.mapCanvas.fitToView
  *   - scene.mapCanvas.clearSelection
  *   - scene.mapCanvas.addLayer
+ *   - scene.mapCanvas.undo
+ *   - scene.mapCanvas.redo
  *   - scene.mapCanvas.toggleLayerVisibility.<layerId>   (dynamic)
  *   - scene.mapCanvas.setActiveLayer.<layerId>          (dynamic)
  */
@@ -44,9 +51,6 @@ import { MOCK_LAYERS, MOCK_SCENE_SETTINGS, type LayerRow } from "../scene-fixtur
 // ---------------------------------------------------------------------------
 // localStorage helpers — same shape as sibling panels.
 
-const LS_SELECTED_CELL = "cardboard.scene.mapCanvas.selectedCell";
-const LS_ACTIVE_LAYER = "cardboard.scene.mapCanvas.activeLayerId";
-const LS_LAYER_VIS = "cardboard.scene.mapCanvas.layerVisibility";
 const LS_ZOOM = "cardboard.scene.mapCanvas.viewZoom";
 const LS_PAN_X = "cardboard.scene.mapCanvas.viewPanX";
 const LS_PAN_Y = "cardboard.scene.mapCanvas.viewPanY";
@@ -103,175 +107,10 @@ function readLSNumber(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function readJSON<T>(key: string, fallback: T): T {
-  const raw = readLS(key);
-  if (raw == null) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJSON(key: string, value: unknown): void {
-  try {
-    writeLS(key, JSON.stringify(value));
-  } catch {
-    /* JSON.stringify can throw on circular refs — defensive only */
-  }
-}
-
 function clampZoom(z: number): number {
   if (!Number.isFinite(z)) return DEFAULT_ZOOM;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 }
-
-// ---------------------------------------------------------------------------
-// Sample painted cells. Hardcoded for Wave 2 so the canvas has visible
-// content before the real scene tile store lands. Wave 3 replaces with
-// `EditorProjectStore` cell reads.
-//
-// The cells in this fixture are intentionally shaped to read as a
-// small dungeon when drawn with the textured renderer below — a few
-// rooms connected by corridors, with doors at the breaks. The colors
-// on each cell act as a hue *tint* on top of the procedural brick /
-// stone-floor base palette so the renderer reads as "atmospheric
-// dungeon" rather than "saturated tile grid".
-
-interface PaintedCell {
-  x: number;
-  y: number;
-  layerId: string;
-  /** 6-digit `#RRGGBB`. Falls back to the layer's legend color if
-   *  omitted — leaving it set per-cell lets us suggest tile variety
-   *  (different brick tones, etc.) without inventing a tile fixture. */
-  color?: string;
-  /** Optional tile-type name surfaced under the selection chip.
-   *  Mirrors the `Brick Wall 7` label in Map.png. */
-  name?: string;
-}
-
-// Small helper — paint a filled axis-aligned rect of one layer/tone.
-function rect(
-  cells: PaintedCell[],
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  layerId: string,
-  color: string,
-  name: string,
-): void {
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      cells.push({ x, y, layerId, color, name });
-    }
-  }
-}
-
-// Outline of a rectangle (walls around a room — interior left empty).
-function wallRect(
-  cells: PaintedCell[],
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  color: string,
-  name: string,
-): void {
-  for (let x = x0; x <= x1; x++) {
-    cells.push({ x, y: y0, layerId: "walls", color, name });
-    cells.push({ x, y: y1, layerId: "walls", color, name });
-  }
-  for (let y = y0 + 1; y < y1; y++) {
-    cells.push({ x: x0, y, layerId: "walls", color, name });
-    cells.push({ x: x1, y, layerId: "walls", color, name });
-  }
-}
-
-const SAMPLE_CELLS: readonly PaintedCell[] = (() => {
-  const c: PaintedCell[] = [];
-
-  // ---- Room A — top-left "great hall" ----------------------------
-  rect(c, 9, 8, 19, 16, "floors", "#7a6a55", "Stone Floor 2");
-  wallRect(c, 8, 7, 20, 17, "#6b4a30", "Brick Wall 7");
-  // Door east of room A → corridor.
-  c.push({ x: 20, y: 12, layerId: "doors", color: "#caa46a", name: "Oak Door" });
-
-  // ---- Corridor east → Room B ------------------------------------
-  rect(c, 21, 11, 28, 13, "floors", "#6e5e4a", "Stone Floor 3");
-  // Corridor walls — north + south.
-  for (let x = 21; x <= 28; x++) {
-    c.push({ x, y: 10, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-    c.push({ x, y: 14, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-  }
-
-  // ---- Room B — middle "library" --------------------------------
-  rect(c, 29, 9, 38, 17, "floors", "#7a6a55", "Stone Floor 2");
-  wallRect(c, 28, 8, 39, 18, "#6b4a30", "Brick Wall 7");
-  // Re-open the corridor entrance.
-  c.push({ x: 28, y: 12, layerId: "doors", color: "#caa46a", name: "Oak Door" });
-  // Sprites inside room B — three barrels along the south wall.
-  c.push({ x: 31, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
-  c.push({ x: 33, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
-  c.push({ x: 35, y: 16, layerId: "sprites", color: "#b08050", name: "Barrel" });
-  // A light source at the centre of the room.
-  c.push({ x: 33, y: 12, layerId: "lights", color: "#f4c668", name: "Torch" });
-
-  // ---- South corridor from Room A ↓ to Room C --------------------
-  rect(c, 13, 18, 15, 26, "floors", "#6e5e4a", "Stone Floor 3");
-  for (let y = 18; y <= 26; y++) {
-    c.push({ x: 12, y, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-    c.push({ x: 16, y, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-  }
-  // Door at the room A south boundary.
-  c.push({ x: 14, y: 17, layerId: "doors", color: "#caa46a", name: "Oak Door" });
-
-  // ---- Room C — bottom-left "chamber" ---------------------------
-  rect(c, 9, 27, 19, 35, "floors", "#7a6a55", "Stone Floor 1");
-  wallRect(c, 8, 26, 20, 36, "#6b4a30", "Brick Wall 7");
-  c.push({ x: 14, y: 26, layerId: "doors", color: "#caa46a", name: "Oak Door" });
-  // A lone light + a sprite.
-  c.push({ x: 14, y: 31, layerId: "lights", color: "#f4c668", name: "Torch" });
-  c.push({ x: 11, y: 34, layerId: "sprites", color: "#b08050", name: "Barrel" });
-
-  // ---- East tower — Room D ---------------------------------------
-  rect(c, 41, 21, 50, 30, "floors", "#7a6a55", "Stone Floor 2");
-  wallRect(c, 40, 20, 51, 31, "#6b4a30", "Brick Wall 7");
-  // Connecting corridor west from room D to corridor under room B.
-  rect(c, 34, 25, 39, 26, "floors", "#6e5e4a", "Stone Floor 3");
-  for (let x = 34; x <= 39; x++) {
-    c.push({ x, y: 24, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-    c.push({ x, y: 27, layerId: "walls", color: "#6b4a30", name: "Brick Wall 5" });
-  }
-  c.push({ x: 40, y: 25, layerId: "doors", color: "#caa46a", name: "Oak Door" });
-  // Two sprites + a light in room D.
-  c.push({ x: 45, y: 25, layerId: "sprites", color: "#b08050", name: "Crate" });
-  c.push({ x: 48, y: 28, layerId: "sprites", color: "#b08050", name: "Crate" });
-  c.push({ x: 45, y: 26, layerId: "lights", color: "#f4c668", name: "Brazier" });
-
-  return c;
-})();
-
-// ---------------------------------------------------------------------------
-// Entity markers — entry / spawn / exit overlay glyphs. Hardcoded
-// fixtures for Wave 2; Wave 3 reads from the real entity store.
-
-interface EntityMarker {
-  x: number;
-  y: number;
-  glyph: string;
-  /** Background colour for the marker disc. */
-  color: string;
-  name: string;
-}
-
-const ENTITY_MARKERS: readonly EntityMarker[] = [
-  { x: 14, y: 12, glyph: "E", color: "#10b981", name: "Entry" },
-  { x: 33, y: 13, glyph: "S", color: "#3b82f6", name: "Spawn" },
-  { x: 14, y: 31, glyph: "S", color: "#3b82f6", name: "Spawn" },
-  { x: 45, y: 25, glyph: "X", color: "#ef4444", name: "Exit" },
-];
 
 // Layer descriptions for the chip tooltips — mirrored from LayersPanel.
 const LAYER_DESCRIPTIONS: Record<string, string> = {
@@ -282,71 +121,20 @@ const LAYER_DESCRIPTIONS: Record<string, string> = {
   lights: "Light sources — emissive points that bake into the scene.",
 };
 
-// ---------------------------------------------------------------------------
-// Color helpers — tiny RGB packers used by the textured-cell renderer.
-// Kept inline (no external dep) and stable so the renderer stays
-// <16ms even when sweeping every cell.
-
-function parseHex(hex: string): { r: number; g: number; b: number } {
-  const h = hex.replace("#", "");
-  if (h.length === 3) {
-    return {
-      r: parseInt(h[0]! + h[0]!, 16),
-      g: parseInt(h[1]! + h[1]!, 16),
-      b: parseInt(h[2]! + h[2]!, 16),
-    };
-  }
-  return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
-  };
-}
-
-/** Convert 0..255 channels to a `#rrggbb` string. Clamped + integerised
- *  so the return value is always re-parseable by `parseHex` — critical
- *  because `mix(mix(...), ...)` is the workhorse of the tile renderer
- *  and broken chaining produces accidental neon colors. */
-function rgbHex(r: number, g: number, b: number): string {
-  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
-  const toHex = (v: number) => clamp(v).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-/** Mix two colors at `t`. t=0 → a, t=1 → b. Returns a `#rrggbb` string
- *  so the result can feed back into `mix` again — `parseHex` only
- *  understands hex, not `rgba(...)` notation. */
-function mix(a: string, b: string, t: number): string {
-  const ca = parseHex(a);
-  const cb = parseHex(b);
-  return rgbHex(
-    ca.r + (cb.r - ca.r) * t,
-    ca.g + (cb.g - ca.g) * t,
-    ca.b + (cb.b - ca.b) * t,
-  );
-}
-
-/** Cheap deterministic 0..1 pseudo-random for tile variation, so
- *  bricks at the same coord look the same on every paint. */
-function hash01(x: number, y: number, seed = 0): number {
-  let h = (x * 374761393 + y * 668265263 + seed * 2147483647) | 0;
-  h = (h ^ (h >>> 13)) * 1274126177;
-  h = (h ^ (h >>> 16)) >>> 0;
-  return (h % 1000) / 1000;
-}
-
-// ---------------------------------------------------------------------------
-// Initial-state builders.
-
-function defaultVisibility(): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const l of MOCK_LAYERS) out[l.id] = l.visible;
-  return out;
-}
-
-function defaultActiveId(): string {
-  return MOCK_LAYERS[0]?.id ?? "";
-}
+/** Palette for newly-added custom layer chips. Cycled through so
+ *  sequential adds get visually distinct colors. Mirrors the LayersPanel
+ *  default but lives here as well so a from-scratch addLayer command in
+ *  this panel doesn't have to import a LayersPanel internal. */
+const CUSTOM_LAYER_PALETTE: readonly string[] = [
+  "#f59e0b",
+  "#38bdf8",
+  "#10b981",
+  "#a78bfa",
+  "#ef4444",
+  "#ec4899",
+  "#84cc16",
+  "#22d3ee",
+];
 
 // ---------------------------------------------------------------------------
 
@@ -361,40 +149,22 @@ export function MapCanvasPanel(): React.JSX.Element {
     h: 0,
   });
 
-  // Cursor coords (in cell space). null when the cursor isn't over a
-  // valid cell. Displayed in a small chip pinned to the canvas; future
-  // selection-store work feeds the same value into a centralized read.
-  const [hoverCell, setHoverCell] = React.useState<{ x: number; y: number } | null>(
-    null,
-  );
+  // ---- Cross-panel store subscriptions ------------------------------
+  // Wave 3.3.14 wiring. Read-only — writes happen via getState() in
+  // event handlers so they don't force re-renders on this component.
 
-  // Selected cell — sticky, persists across reloads. Wave 3 hooks this
-  // into the real selection store; today it just paints a marker.
-  const [selectedCell, setSelectedCell] = React.useState<{
-    x: number;
-    y: number;
-  } | null>(() => readJSON<{ x: number; y: number } | null>(LS_SELECTED_CELL, null));
+  const dims = useSceneStore((s) => s.dims);
+  const cells = useSceneStore((s) => s.cells);
+  const activeLayerId = useLayerStore((s) => s.activeId);
+  const visibility = useLayerStore((s) => s.visibility);
+  const order = useLayerStore((s) => s.order);
+  const customLayers = useLayerStore((s) => s.customLayers);
+  const selected = useSelectionStore((s) => s.selected);
+  const hover = useSelectionStore((s) => s.hover);
 
-  // Per-layer visibility — toggled by the chip strip.
-  const [visibility, setVisibility] = React.useState<Record<string, boolean>>(
-    () => {
-      const stored = readJSON<Record<string, boolean>>(
-        LS_LAYER_VIS,
-        defaultVisibility(),
-      );
-      return { ...defaultVisibility(), ...stored };
-    },
-  );
-
-  // Active painting layer.
-  const [activeLayerId, setActiveLayerId] = React.useState<string>(() => {
-    const stored = readLS(LS_ACTIVE_LAYER);
-    if (stored && MOCK_LAYERS.some((l) => l.id === stored)) return stored;
-    return defaultActiveId();
-  });
-
-  // Zoom + pan. Pan is in CSS pixels relative to the letterboxed center;
-  // zoom multiplies the fit-to-panel cell size. Persisted on settle.
+  // Zoom + pan remain panel-local until useViewportStore lands. Pan is
+  // in CSS pixels relative to the letterboxed center; zoom multiplies
+  // the fit-to-panel cell size. Persisted on settle.
   const [zoom, setZoom] = React.useState<number>(() =>
     clampZoom(readLSNumber(LS_ZOOM, DEFAULT_ZOOM)),
   );
@@ -403,17 +173,8 @@ export function MapCanvasPanel(): React.JSX.Element {
     y: readLSNumber(LS_PAN_Y, 0),
   }));
 
-  // ---- Persistence -------------------------------------------------
+  // ---- Persistence (viewport only) ---------------------------------
 
-  React.useEffect(() => {
-    writeJSON(LS_SELECTED_CELL, selectedCell);
-  }, [selectedCell]);
-  React.useEffect(() => {
-    writeJSON(LS_LAYER_VIS, visibility);
-  }, [visibility]);
-  React.useEffect(() => {
-    writeLS(LS_ACTIVE_LAYER, activeLayerId);
-  }, [activeLayerId]);
   React.useEffect(() => {
     writeLS(LS_ZOOM, String(zoom));
   }, [zoom]);
@@ -439,12 +200,45 @@ export function MapCanvasPanel(): React.JSX.Element {
     return () => ro.disconnect();
   }, []);
 
+  // ---- Resolved layer list (built-ins + custom, in `order`) ---------
+  // Mirrors LayersPanel's resolution so the chip strip and renderer
+  // see the same layer set with the same colors. Custom layers added
+  // via the store's `add()` action surface here automatically.
+  const layers: LayerRow[] = React.useMemo(() => {
+    const builtin: LayerRow[] = MOCK_LAYERS.map((l) => ({ ...l }));
+    const byId = new Map<string, LayerRow>(builtin.map((l) => [l.id, l]));
+    for (const c of customLayers) {
+      byId.set(c.id, {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        visible: true,
+      });
+    }
+    const out: LayerRow[] = [];
+    for (const id of order) {
+      const row = byId.get(id);
+      if (!row) continue;
+      out.push(row);
+    }
+    return out;
+  }, [order, customLayers]);
+
+  // Per-id layer color lookup. Derived from order + customLayers +
+  // MOCK_LAYERS so custom layers picked up via `add()` get the right
+  // tint when their cells render.
+  const layerColorById = React.useMemo(() => {
+    const out = new Map<string, string>();
+    for (const l of MOCK_LAYERS) out.set(l.id, l.color);
+    for (const c of customLayers) out.set(c.id, c.color);
+    return out;
+  }, [customLayers]);
+
   // Effective drawable area is the panel minus the bottom chip strip
   // AND the bottom scene-picker strip (so the canvas never paints
   // under either). Width is unchanged. We also reserve a ruler band on
   // the TOP and LEFT — the playfield letterbox is computed within that
   // inset region so the rulers sit outside (not on top of) the grid.
-  const dims = MOCK_SCENE_SETTINGS.dimensions;
   const layout = React.useMemo(() => {
     const canvasW = size.w;
     const canvasH = Math.max(0, size.h - CHIP_STRIP_HEIGHT - PICKER_STRIP_HEIGHT);
@@ -488,12 +282,14 @@ export function MapCanvasPanel(): React.JSX.Element {
     return { cell, offX, offY, gridW, gridH, canvasW, canvasH, playW, playH };
   }, [size.w, size.h, dims.w, dims.h, zoom, pan.x, pan.y]);
 
-  // Per-id layer color lookup. Falls back to a neutral gray.
-  const layerColorById = React.useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const l of MOCK_LAYERS) out[l.id] = l.color;
-    return out;
-  }, []);
+  // Precomputed integer cell edges. Shared between the renderer + the
+  // hit-test so `cellAt` matches what the user sees byte-for-byte.
+  // Held in a ref because the renderer effect computes them at paint
+  // time and `cellAt` needs to read whatever the last render saw.
+  const edgesRef = React.useRef<{ cols: number[]; rows: number[] }>({
+    cols: [],
+    rows: [],
+  });
 
   // ---- Canvas paint ------------------------------------------------
 
@@ -527,25 +323,6 @@ export function MapCanvasPanel(): React.JSX.Element {
     ctx.fillStyle = "#1a1814";
     ctx.fillRect(offX, offY, gridW, gridH);
 
-    // Painted sample cells — drawn before the grid so the lattice
-    // reads on top. We respect MOCK_LAYERS order so higher-index
-    // layers (sprites, lights) draw on top of lower-index ones.
-    const layerIndex = new Map<string, number>(
-      MOCK_LAYERS.map((l, i) => [l.id, i]),
-    );
-    const cellsByOrder = SAMPLE_CELLS.slice().sort(
-      (a, b) =>
-        (layerIndex.get(a.layerId) ?? 0) - (layerIndex.get(b.layerId) ?? 0),
-    );
-
-    // Detail thresholds — below these zooms we collapse procedural
-    // patterns back to a flat fill so the render stays cheap on small
-    // cells. (At zoom-out, 4096 cells × dozens of strokes = jank.)
-    // Keep these aggressive so even ~6px cells get a hint of brick
-    // texture — that's what makes Map.png read as a dungeon.
-    const showDetail = cell >= 5;
-    const showFineDetail = cell >= 12;
-
     // Compute pixel-aligned cell boundaries up-front. Every overlay
     // (painted cells, hover, selection, grid lattice) snaps to these
     // same boundaries, which is what makes the visuals align. Using
@@ -557,114 +334,42 @@ export function MapCanvasPanel(): React.JSX.Element {
     for (let i = 0; i <= dims.w; i++) colEdges[i] = Math.floor(offX + i * cell);
     const rowEdges = new Array<number>(dims.h + 1);
     for (let i = 0; i <= dims.h; i++) rowEdges[i] = Math.floor(offY + i * cell);
+    edgesRef.current = { cols: colEdges, rows: rowEdges };
 
-    for (const c of cellsByOrder) {
-      if (!visibility[c.layerId]) continue;
-      const x = colEdges[c.x]!;
-      const y = rowEdges[c.y]!;
-      const w = colEdges[c.x + 1]! - x;
-      const h = rowEdges[c.y + 1]! - y;
-      const tint = c.color ?? layerColorById[c.layerId] ?? "#888";
-
-      if (c.layerId === "walls") {
-        // Brick pattern — warm brown base + per-cell tint mix +
-        // staggered mortar lines so consecutive walls read as bricks
-        // rather than a solid bar. Per-cell jitter on the base keeps
-        // long wall runs from reading as one flat slab; kept small
-        // so neighboring cells read as the same wall, not a quilt.
-        const jitter = hash01(c.x, c.y, 7) * 0.06 - 0.03;
-        const base = mix("#5a3a22", tint, 0.3 + jitter);
-        const dark = mix(base, "#1a0e08", 0.6);
-        ctx.fillStyle = base;
-        ctx.fillRect(x, y, w, h);
-        if (showDetail) {
-          // Horizontal mortar line at cell midpoint.
-          ctx.fillStyle = dark;
-          ctx.fillRect(x, y + Math.round(cell * 0.5), w, 1);
-          // Single vertical mortar — staggered every other row so
-          // adjacent walls read as offset brick courses.
-          const stagger = c.y % 2 === 0 ? Math.round(cell * 0.5) : 0;
-          ctx.fillRect(x + stagger, y, 1, Math.round(cell * 0.5));
-          ctx.fillRect(
-            x + Math.round(cell * 0.5) - stagger,
-            y + Math.round(cell * 0.5),
-            1,
-            Math.round(cell * 0.5),
-          );
-        }
-      } else if (c.layerId === "floors") {
-        // Stone-tile floor — warm gray base, per-cell jitter, and a
-        // faint diagonal division. We deliberately keep this LOW
-        // contrast so the floor reads as atmospheric backdrop rather
-        // than competing with the brick walls.
-        const jitter = hash01(c.x, c.y, 11) * 0.08 - 0.04;
-        const base = mix("#3a3530", tint, 0.28 + jitter);
-        ctx.fillStyle = base;
-        ctx.fillRect(x, y, w, h);
-        if (showFineDetail) {
-          // A faint single division at the cell midpoint — gives the
-          // floor a tiled look without becoming a checkerboard. Only
-          // when each cell is wide enough that 1px reads as a seam.
-          const mid = mix(base, "#231f1c", 0.45);
-          ctx.fillStyle = mid;
-          ctx.fillRect(x + Math.round(w / 2), y, 1, h);
-          ctx.fillRect(x, y + Math.round(h / 2), w, 1);
-        }
-      } else if (c.layerId === "doors") {
-        // Door — wood plank with a `D` glyph centered.
-        const base = mix("#8b5a2b", tint, 0.4);
-        ctx.fillStyle = base;
-        ctx.fillRect(x, y, w, h);
-        if (showDetail) {
-          // Two vertical plank divisions.
-          const dark = mix(base, "#000", 0.4);
-          ctx.fillStyle = dark;
-          ctx.fillRect(x + Math.round(w / 3), y, 1, h);
-          ctx.fillRect(x + Math.round((w * 2) / 3), y, 1, h);
-          if (showFineDetail) {
-            // Iron hinges as small dark dots.
-            ctx.fillStyle = "#1a1410";
-            ctx.fillRect(x + 1, y + 2, 2, 1);
-            ctx.fillRect(x + 1, y + h - 3, 2, 1);
-          }
-        }
-      } else if (c.layerId === "sprites") {
-        // Sprite — smaller diamond in the cell center, doesn't fill.
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-        const r = Math.max(2, cell * 0.32);
-        ctx.fillStyle = tint;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - r);
-        ctx.lineTo(cx + r, cy);
-        ctx.lineTo(cx, cy + r);
-        ctx.lineTo(cx - r, cy);
-        ctx.closePath();
-        ctx.fill();
-        if (showDetail) {
-          ctx.strokeStyle = mix(tint, "#000", 0.5);
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-      } else if (c.layerId === "lights") {
-        // Light — soft radial glow, not a hard square.
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-        const r = Math.max(2, cell * 0.9);
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-        grad.addColorStop(0, mix(tint, "#fff", 0.4));
-        grad.addColorStop(0.4, tint);
-        grad.addColorStop(1, "rgba(244,198,104,0)");
-        ctx.fillStyle = grad;
-        ctx.fillRect(x - cell, y - cell, w + cell * 2, h + cell * 2);
-      } else {
-        // Fallback — flat fill for any future layer id.
-        ctx.fillStyle = tint;
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(x, y, w, h);
-        ctx.globalAlpha = 1;
+    // Painted cells — sourced from `useSceneStore.cells`. Iterate
+    // layers in `order` (bottom-to-top render order) and within each
+    // layer pull every cell that has a preset assigned for that
+    // layer. Coloring is per-layer for now — tile-preset color
+    // resolution is a future gap (TODO 3.4+).
+    const layerIndex = new Map<string, number>(
+      order.map((id, i) => [id, i]),
+    );
+    for (const layerId of order) {
+      if (visibility[layerId] === false) continue;
+      const color = layerColorById.get(layerId) ?? "#888";
+      ctx.fillStyle = color;
+      for (const key in cells) {
+        const c = cells[key];
+        if (!c) continue;
+        const presetId = c.layers[layerId];
+        if (!presetId) continue;
+        const [xs, ys] = key.split(",");
+        const x = Number(xs);
+        const y = Number(ys);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (x < 0 || x >= dims.w || y < 0 || y >= dims.h) continue;
+        const px = colEdges[x]!;
+        const py = rowEdges[y]!;
+        const pw = colEdges[x + 1]! - px;
+        const ph = rowEdges[y + 1]! - py;
+        ctx.fillRect(px, py, pw, ph);
       }
     }
+
+    // TODO(Wave 3.4+): entity markers (entry / spawn / exit). Awaiting
+    // a real entity store; the old hardcoded ENTITY_MARKERS were
+    // removed as part of the 3.3.14 cleanup so the canvas doesn't
+    // lie about scene contents.
 
     // Grid lattice — warm gray-brown so the lines feel like floor
     // grout in a stone dungeon, not pure white-alpha. Skip when each
@@ -691,45 +396,6 @@ export function MapCanvasPanel(): React.JSX.Element {
         ctx.lineTo(latticeRight, py);
       }
       ctx.stroke();
-    }
-
-    // Entity markers — entry/spawn/exit glyphs over their cells.
-    // Drawn AFTER the grid so they sit on top like map pins. Center
-    // is computed from the precomputed cell edges so the disc sits
-    // exactly in the middle of the cell as drawn (not as floated).
-    if (cell >= 6) {
-      for (const m of ENTITY_MARKERS) {
-        if (m.x < 0 || m.x >= dims.w || m.y < 0 || m.y >= dims.h) continue;
-        const cx = (colEdges[m.x]! + colEdges[m.x + 1]!) / 2;
-        const cy = (rowEdges[m.y]! + rowEdges[m.y + 1]!) / 2;
-        const r = Math.max(4, cell * 0.42);
-        // Drop-shadow halo for legibility.
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.beginPath();
-        ctx.arc(cx + 1, cy + 1, r, 0, Math.PI * 2);
-        ctx.fill();
-        // Colored disc.
-        ctx.fillStyle = m.color;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fill();
-        // Bright outline so the disc reads against the brick.
-        ctx.strokeStyle = mix(m.color, "#fff", 0.4);
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Glyph.
-        if (cell >= 7) {
-          ctx.fillStyle = "#0b0a08";
-          ctx.font = `bold ${Math.max(8, Math.round(r * 1.3))}px ui-sans-serif, system-ui, sans-serif`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(m.glyph, cx, cy + 0.5);
-          // Reset text alignment for any subsequent draw calls so we
-          // don't leak state into the selection chip below.
-          ctx.textAlign = "start";
-          ctx.textBaseline = "alphabetic";
-        }
-      }
     }
 
     // Atmospheric vignette — soft radial darkening from the playfield
@@ -777,17 +443,17 @@ export function MapCanvasPanel(): React.JSX.Element {
     // so the outline sits exactly on the cell boundary (no 1px drift
     // from the lattice).
     if (
-      hoverCell &&
-      hoverCell.x >= 0 &&
-      hoverCell.x < dims.w &&
-      hoverCell.y >= 0 &&
-      hoverCell.y < dims.h &&
+      hover &&
+      hover.x >= 0 &&
+      hover.x < dims.w &&
+      hover.y >= 0 &&
+      hover.y < dims.h &&
       cell >= 2
     ) {
-      const hx = colEdges[hoverCell.x]!;
-      const hy = rowEdges[hoverCell.y]!;
-      const hw = colEdges[hoverCell.x + 1]! - hx;
-      const hh = rowEdges[hoverCell.y + 1]! - hy;
+      const hx = colEdges[hover.x]!;
+      const hy = rowEdges[hover.y]!;
+      const hw = colEdges[hover.x + 1]! - hx;
+      const hh = rowEdges[hover.y + 1]! - hy;
       ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(hx + 0.5, hy + 0.5, hw - 1, hh - 1);
@@ -797,49 +463,54 @@ export function MapCanvasPanel(): React.JSX.Element {
     // floating label below the selection mirroring Map.png's
     // `Brick Wall 7` chip.
     if (
-      selectedCell &&
-      selectedCell.x >= 0 &&
-      selectedCell.x < dims.w &&
-      selectedCell.y >= 0 &&
-      selectedCell.y < dims.h
+      selected &&
+      selected.x >= 0 &&
+      selected.x < dims.w &&
+      selected.y >= 0 &&
+      selected.y < dims.h
     ) {
-      const sx = colEdges[selectedCell.x]!;
-      const sy = rowEdges[selectedCell.y]!;
-      const sw = colEdges[selectedCell.x + 1]! - sx;
-      const sh = rowEdges[selectedCell.y + 1]! - sy;
+      const sx = colEdges[selected.x]!;
+      const sy = rowEdges[selected.y]!;
+      const sw = colEdges[selected.x + 1]! - sx;
+      const sh = rowEdges[selected.y + 1]! - sy;
       ctx.fillStyle = "rgba(245, 158, 11, 0.18)";
       ctx.fillRect(sx, sy, sw, sh);
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 2;
       ctx.strokeRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1);
 
-      // Lookup the topmost painted cell's tile-type name at this
-      // coord (highest layer wins). If nothing's painted, surface
-      // the active layer's name + an `Empty` qualifier.
+      // Lookup the topmost painted layer at this coord (highest layer
+      // wins). If nothing's painted, surface "Empty".
       if (cell >= 8) {
-        const stack = SAMPLE_CELLS.filter(
-          (c) => c.x === selectedCell.x && c.y === selectedCell.y,
-        );
+        const cellAtSel = cells[`${selected.x},${selected.y}`];
         let label = "Empty";
-        if (stack.length > 0) {
-          stack.sort(
-            (a, b) =>
-              (layerIndex.get(b.layerId) ?? 0) -
-              (layerIndex.get(a.layerId) ?? 0),
-          );
-          label = stack[0]!.name ?? stack[0]!.layerId;
+        if (cellAtSel) {
+          // Walk layers from top to bottom (reverse `order`) and
+          // pick the first layer that has a preset assigned. Use the
+          // layer name as the chip label until tile-preset name
+          // resolution lands.
+          for (let i = order.length - 1; i >= 0; i--) {
+            const lid = order[i]!;
+            if (cellAtSel.layers[lid]) {
+              const layerRow =
+                MOCK_LAYERS.find((l) => l.id === lid) ??
+                customLayers.find((l) => l.id === lid);
+              label = layerRow?.name ?? lid;
+              break;
+            }
+          }
         }
         // Measure + draw the chip background below the selection.
         ctx.font =
           "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
         const padX = 6;
         const padY = 3;
+        void padY;
         const textW = ctx.measureText(label).width;
         const chipW = Math.ceil(textW + padX * 2);
         const chipH = 18;
         // Center the chip on the selection; clamp to playfield.
         const playLeft = colEdges[0]!;
-        const playTop = rowEdges[0]!;
         const playRight = colEdges[dims.w]!;
         const playBottom = rowEdges[dims.h]!;
         let chipX = sx + sw / 2 - chipW / 2;
@@ -883,22 +554,13 @@ export function MapCanvasPanel(): React.JSX.Element {
     if (cell > 0) {
       // Stride — number every Nth cell. At low zoom the labels get
       // crowded so we widen the stride; at high zoom we narrow it.
-      // Picked so that at default zoom (cell ~10-14px on a typical
-      // panel) we get a label every 5 cells, matching Map.png.
       const stride = cell >= 18 ? 5 : cell >= 9 ? 5 : cell >= 5 ? 10 : 20;
-      // Tick marks: a thin dash at every cell boundary. Skip when
-      // cells are sub-6px wide — at that point the ticks just merge
-      // into a smeared bar and only the numbers carry meaning.
       const showTicks = cell >= 6;
-      // Per-cell vertical lines inside the ruler when zoomed in
-      // tightly (cell > 30px) — gives the ruler a thin grid look
-      // matching the design comp at zoom.
       const showFineTicks = cell >= 30;
 
       // ---- Top ruler band ----
       ctx.fillStyle = RULER_BG_COLOR;
       ctx.fillRect(0, 0, layout.canvasW, RULER_TOP_PX);
-      // Inner shadow / lower border so the band reads as recessed.
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.fillRect(0, RULER_TOP_PX - 1, layout.canvasW, 1);
 
@@ -909,9 +571,6 @@ export function MapCanvasPanel(): React.JSX.Element {
       ctx.fillRect(RULER_LEFT_PX - 1, 0, 1, layout.canvasH);
 
       // ---- Corner cell ----
-      // A clean dark square where the two rulers meet. Slight inner
-      // shadow on the two playfield-facing edges anchors the corner
-      // visually — same trick Photoshop / Aseprite use.
       ctx.fillStyle = "#0e0c0a";
       ctx.fillRect(0, 0, RULER_LEFT_PX, RULER_TOP_PX);
       ctx.fillStyle = "rgba(0,0,0,0.5)";
@@ -919,25 +578,17 @@ export function MapCanvasPanel(): React.JSX.Element {
       ctx.fillRect(0, RULER_TOP_PX - 1, RULER_LEFT_PX, 1);
 
       // ---- Tick marks ----
-      // Ticks scroll WITH the playfield — they sit at every
-      // cell-boundary x/y, clipped to the visible playfield extent so
-      // they don't bleed into the corner cell.
       if (showTicks) {
         ctx.fillStyle = RULER_TICK_COLOR;
         const tickH = 4;
         const tickW = 4;
-        // X-axis ticks — vertical dashes at the bottom of the top band.
-        // Use the same `colEdges` as the cell grid so ticks land on the
-        // visible cell boundaries (not on a re-rounded approximation).
         for (let x = 0; x <= dims.w; x++) {
           const px = colEdges[x]!;
           if (px < RULER_LEFT_PX || px > layout.canvasW) continue;
-          // Major ticks (every stride) reach further into the band.
           const isMajor = x % stride === 0;
           const reach = isMajor ? tickH + 2 : tickH;
           ctx.fillRect(px, RULER_TOP_PX - reach, 1, reach);
         }
-        // Y-axis ticks — horizontal dashes at the right of the left band.
         for (let y = 0; y <= dims.h; y++) {
           const py = rowEdges[y]!;
           if (py < RULER_TOP_PX || py > layout.canvasH) continue;
@@ -968,22 +619,14 @@ export function MapCanvasPanel(): React.JSX.Element {
       }
 
       // ---- Labels ----
-      // Tabular monospaced 10px, muted gray-brown. Numbers scroll WITH
-      // the playfield (i.e. label at column N sits exactly above the
-      // visible column N), and we skip any label that would land
-      // inside the corner cell.
       ctx.fillStyle = RULER_TEXT_COLOR;
       ctx.font =
         "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.textBaseline = "middle";
 
-      // X axis — column numbers along the top band. Use cell-center
-      // derived from the integer edges so labels sit dead-center over
-      // the visible cells.
+      // X axis — column numbers along the top band.
       ctx.textAlign = "center";
       for (let x = 0; x <= dims.w; x += stride) {
-        // Don't label x=0 if it would crash into the corner cell —
-        // start at the next stride instead.
         if (x >= dims.w) break;
         const px = (colEdges[x]! + colEdges[x + 1]!) / 2;
         if (px < RULER_LEFT_PX + 8) continue;
@@ -1005,12 +648,20 @@ export function MapCanvasPanel(): React.JSX.Element {
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
     }
+
+    // Suppress unused-var lint for layerIndex — kept as a stable
+    // ordinal lookup for future render-order branches (e.g. sprite vs
+    // light z-ordering inside a single layer).
+    void layerIndex;
   }, [
     layout,
+    cells,
+    order,
     visibility,
-    hoverCell,
-    selectedCell,
     layerColorById,
+    customLayers,
+    hover,
+    selected,
     dims.w,
     dims.h,
   ]);
@@ -1018,30 +669,42 @@ export function MapCanvasPanel(): React.JSX.Element {
   // ---- Pointer handlers --------------------------------------------
 
   // Translate a canvas-local mouse position into a cell coord pair, or
-  // null if the cursor is outside the playfield. Shared by hover +
-  // click handlers.
+  // null if the cursor is outside the playfield. Uses the same integer
+  // colEdges/rowEdges as the renderer so the hit-test matches the
+  // pixels the user sees byte-for-byte (the old `Math.floor((localX -
+  // offX) / cell)` drifted by ±1px from the lattice at certain zooms).
   const cellAt = React.useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
+    (localX: number, localY: number): { x: number; y: number } | null => {
+      const cols = edgesRef.current.cols;
+      const rows = edgesRef.current.rows;
+      if (cols.length < 2 || rows.length < 2) return null;
+      if (localX < cols[0]! || localY < rows[0]!) return null;
+      if (localX >= cols[dims.w]! || localY >= rows[dims.h]!) return null;
+      // Linear walk — dims ≤ 64 in practice, so a binary search would
+      // be measurably slower per call due to the extra branching.
+      let cx = 0;
+      while (cx < dims.w && localX >= cols[cx + 1]!) cx++;
+      let cy = 0;
+      while (cy < dims.h && localY >= rows[cy + 1]!) cy++;
+      if (cx >= dims.w || cy >= dims.h) return null;
+      return { x: cx, y: cy };
+    },
+    [dims.w, dims.h],
+  );
+
+  // Compute the canvas-local position for a mouse event. Encapsulated
+  // so handlers don't repeat the getBoundingClientRect dance.
+  const localAt = React.useCallback(
+    (event: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
-      const localX = clientX - rect.left;
-      const localY = clientY - rect.top;
-      const { cell, offX, offY, gridW, gridH } = layout;
-      if (cell <= 0) return null;
-      if (
-        localX < offX ||
-        localX > offX + gridW ||
-        localY < offY ||
-        localY > offY + gridH
-      )
-        return null;
-      const cx = Math.floor((localX - offX) / cell);
-      const cy = Math.floor((localY - offY) / cell);
-      if (cx < 0 || cx >= dims.w || cy < 0 || cy >= dims.h) return null;
-      return { x: cx, y: cy };
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
     },
-    [layout, dims.w, dims.h],
+    [],
   );
 
   // Pan-drag state — held in a ref so the listener callbacks read the
@@ -1062,14 +725,21 @@ export function MapCanvasPanel(): React.JSX.Element {
         setPan({ x: drag.startPanX + dx, y: drag.startPanY + dy });
         return;
       }
-      const c = cellAt(event.clientX, event.clientY);
-      setHoverCell(c);
+      const local = localAt(event);
+      if (!local) return;
+      const c = cellAt(local.x, local.y);
+      // Selection store throttles hover + cursor broadcasts at ~33Hz
+      // internally, so we do NOT need to panel-throttle here — calling
+      // setHover / setCursor on every mousemove is the intended flow.
+      useSelectionStore.getState().setHover(c);
+      useSelectionStore.getState().setCursor({ x: local.x, y: local.y });
     },
-    [cellAt],
+    [cellAt, localAt],
   );
 
   const handleMouseLeave = React.useCallback(() => {
-    setHoverCell(null);
+    useSelectionStore.getState().setHover(null);
+    useSelectionStore.getState().setCursor(null);
   }, []);
 
   const handleMouseDown = React.useCallback(
@@ -1099,11 +769,36 @@ export function MapCanvasPanel(): React.JSX.Element {
       if (panDragRef.current) return;
       // Alt+click is reserved for pan-drag — don't double-fire on it.
       if (event.altKey) return;
-      const c = cellAt(event.clientX, event.clientY);
-      if (!c) return;
-      setSelectedCell(c);
+      const local = localAt(event);
+      if (!local) return;
+      const c = cellAt(local.x, local.y);
+      // Tool dispatcher. `select` is the only tool wired to a real
+      // store action in Wave 3.3.14; the paint family is intentionally
+      // deferred to Wave 3.4 (paint-write loop + history entries).
+      const tool = useToolStore.getState().activeTool;
+      switch (tool) {
+        case "select":
+          useSelectionStore.getState().select(c);
+          break;
+        case "paint":
+        case "eraser":
+        case "fill":
+        case "dropper":
+        case "entity-place":
+          useDiagnosticsStore
+            .getState()
+            .log("info", `Tool "${tool}" not wired yet (Wave 3.4)`);
+          break;
+        default:
+          // Unknown / future tool ids — also surface a diagnostic so
+          // the gap is visible in OutputPanel rather than silent.
+          useDiagnosticsStore
+            .getState()
+            .log("info", `Tool "${tool}" not handled by MapCanvas`);
+          break;
+      }
     },
-    [cellAt],
+    [cellAt, localAt],
   );
 
   const handleWheel = React.useCallback(
@@ -1126,22 +821,41 @@ export function MapCanvasPanel(): React.JSX.Element {
   }, []);
 
   const clearSelection = React.useCallback(() => {
-    setSelectedCell(null);
+    useSelectionStore.getState().select(null);
   }, []);
 
   const addLayer = React.useCallback(() => {
-    // Wave 3 wires this to the real scene-layer store. Today we log so
-    // the affordance is reachable end-to-end via button + palette.
-    // eslint-disable-next-line no-console
-    console.log("[MapCanvasPanel] scene.mapCanvas.addLayer invoked (stub)");
+    const state = useLayerStore.getState();
+    const n = state.customLayers.length + 1;
+    const color =
+      CUSTOM_LAYER_PALETTE[
+        state.customLayers.length % CUSTOM_LAYER_PALETTE.length
+      ] ?? "#f59e0b";
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `layer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const layer: CustomLayer = { id, name: `Layer ${n}`, color };
+    state.add(layer);
   }, []);
 
   const toggleLayerVisibility = React.useCallback((layerId: string) => {
-    setVisibility((prev) => ({ ...prev, [layerId]: !(prev[layerId] ?? true) }));
+    useLayerStore.getState().toggleVisibility(layerId);
   }, []);
 
   const setActiveLayer = React.useCallback((layerId: string) => {
-    setActiveLayerId(layerId);
+    useLayerStore.getState().activate(layerId);
+  }, []);
+
+  const undo = React.useCallback(() => {
+    // 3.3.14 wires the cursor mover; payload dispatch (replaying the
+    // inverse op into scene state) lands in 3.4 alongside the paint
+    // loop that creates the entries in the first place.
+    useHistoryStore.getState().undo();
+  }, []);
+
+  const redo = React.useCallback(() => {
+    useHistoryStore.getState().redo();
   }, []);
 
   // ---- Command-registry refs --------------------------------------
@@ -1151,6 +865,8 @@ export function MapCanvasPanel(): React.JSX.Element {
   const addLayerRef = React.useRef(addLayer);
   const toggleVisRef = React.useRef(toggleLayerVisibility);
   const setActiveRef = React.useRef(setActiveLayer);
+  const undoRef = React.useRef(undo);
+  const redoRef = React.useRef(redo);
 
   React.useEffect(() => {
     fitToViewRef.current = fitToView;
@@ -1167,6 +883,12 @@ export function MapCanvasPanel(): React.JSX.Element {
   React.useEffect(() => {
     setActiveRef.current = setActiveLayer;
   }, [setActiveLayer]);
+  React.useEffect(() => {
+    undoRef.current = undo;
+  }, [undo]);
+  React.useEffect(() => {
+    redoRef.current = redo;
+  }, [redo]);
 
   // Static commands — registered once.
   React.useEffect(() => {
@@ -1192,8 +914,24 @@ export function MapCanvasPanel(): React.JSX.Element {
         title: "Add Layer",
         category: "Map",
         keywords: ["map", "layer", "add", "new", "create"],
-        description: "Add a new scene layer (stub).",
+        description: "Add a new scene layer.",
         run: () => addLayerRef.current(),
+      }),
+      registerCommand({
+        id: "scene.mapCanvas.undo",
+        title: "Undo",
+        category: "Map",
+        keywords: ["undo", "history", "revert"],
+        description: "Undo the most recent edit (history dispatcher lands in Wave 3.4).",
+        run: () => undoRef.current(),
+      }),
+      registerCommand({
+        id: "scene.mapCanvas.redo",
+        title: "Redo",
+        category: "Map",
+        keywords: ["redo", "history", "reapply"],
+        description: "Redo the most recently undone edit (history dispatcher lands in Wave 3.4).",
+        run: () => redoRef.current(),
       }),
     ];
     return () => {
@@ -1201,14 +939,9 @@ export function MapCanvasPanel(): React.JSX.Element {
     };
   }, []);
 
-  // Dynamic per-layer commands — re-register when the layer roster
-  // changes. (For Wave 2 this is static since MOCK_LAYERS is fixed,
-  // but the shape mirrors LayersPanel so Wave 3 lands cleanly.)
-  const layers: LayerRow[] = React.useMemo(
-    () => MOCK_LAYERS.map((l) => ({ ...l })),
-    [],
-  );
-
+  // Dynamic per-layer commands — re-register when the resolved layer
+  // list changes (order or customLayers). Matches LayersPanel's
+  // re-registration cadence.
   React.useEffect(() => {
     const unregs: Array<() => void> = [];
     for (const l of layers) {
@@ -1246,7 +979,7 @@ export function MapCanvasPanel(): React.JSX.Element {
     (size.w < MIN_RENDER_PX ||
       size.h < MIN_RENDER_PX + CHIP_STRIP_HEIGHT + PICKER_STRIP_HEIGHT);
 
-  const coordsLabel = hoverCell ? `${hoverCell.x}, ${hoverCell.y}` : "—, —";
+  const coordsLabel = hover ? `${hover.x}, ${hover.y}` : "—, —";
 
   return (
     <div
@@ -1399,8 +1132,9 @@ export function MapCanvasPanel(): React.JSX.Element {
                 <div>
                   <div className="font-semibold">Add Layer</div>
                   <div className="text-[10px] text-(--color-fg-muted) mt-1 max-w-[400px] whitespace-normal">
-                    Create a new scene layer. Wave 3 will prompt for a
-                    name + color; today this is a stub.
+                    Create a new scene layer. Appends to{" "}
+                    <code>useLayerStore.order</code> with a generated id +
+                    palette color; rename UI lands later.
                   </div>
                 </div>
               ),
