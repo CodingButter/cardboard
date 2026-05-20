@@ -28,28 +28,51 @@ claim becomes suspect.
 
 **How to apply:**
 
-1. **Before claiming a duration** ("for weeks", "for months",
-   "since Phase 2"): run `git log --reverse --format='%ad %s'
-   --date=short | head -3` or check specific file's git log.
+**Pre-send self-audit (Jamie, 2026-05-20 — operative rule).**
+Before sending any response, re-read the draft with the lens *"how
+do I prove each statement here is true?"* For every factual claim
+in the draft:
 
-2. **Before claiming a count** ("24 panels", "8 stores", "12 plan
-   docs"): grep + `wc -l` the actual matches.
+  - **Can it be verified cheaply** (grep / Read / git / ls / typecheck)?
+    → verify it BEFORE sending; rewrite if the claim turns out wrong.
+  - **Is it expensive to verify** (e.g. would require running the dev
+    server + reproducing a user-flow)? → hedge the claim explicitly
+    in the response: *"I think X but haven't verified"*, or omit it.
+  - **Is it a subjective recommendation or analysis** (not a factual
+    claim)? → no verification needed; ship as-is.
 
-3. **Before naming a file or function** ("see X.tsx:42",
-   "registerPrefab in modAPI"): grep first. Never quote a path or
-   identifier from memory of "what I think the codebase looks like."
+This is a structural pre-flight check, not just a rule about
+"important" claims. The bug isn't claims I knew were uncertain — it's
+claims I was confidently wrong about WITHOUT noticing. The scan
+catches the second category by running on every response, not just
+the ones I flag in advance.
 
-4. **When caught wrong**: the next tool call should be a verification
-   (grep / Read / git), not a defensive explanation. Format:
-   *"Let me check"* → run the tool → *"You're right, actual is X."*
-   Never: *"What I meant was..."* or *"The reason is..."* without
-   verifying first.
+**Specific categories that always need verification:**
 
-5. **In voice (TTS) specifically**: voice can't be edited after
-   playback. Calibrate down even harder — say *"a few days"* rather
-   than risking a wrong number. If the substantive content of a
-   voice message depends on a fact, verify the fact BEFORE
-   synthesizing.
+1. **Durations** ("for weeks", "for N days", "since Phase 2"):
+   run `git log --reverse --format='%ad %s' --date=short | head -3`
+   or check specific file's git log.
+
+2. **Counts** ("24 panels", "8 stores", "12 plan docs"): grep +
+   `wc -l` the actual matches.
+
+3. **File or function names** ("see X.tsx:42", "registerPrefab in
+   modAPI"): grep first. Never quote a path or identifier from
+   memory of "what I think the codebase looks like."
+
+4. **Commit hashes / status claims** ("pushed at abc1234",
+   "tests pass", "tsc clean"): verify the hash exists, run the
+   check, or hedge.
+
+**When caught wrong**: the next tool call is a verification (grep /
+Read / git), not a defensive explanation. Format: *"Let me check"*
+→ run the tool → *"You're right, actual is X."* Never: *"What I
+meant was..."* or *"The reason is..."* without verifying first.
+
+**In voice (TTS) specifically**: voice can't be edited after
+playback. Calibrate down even harder — say *"a few days"* rather
+than risking a wrong number. If a voice message's substantive
+content depends on a fact, verify BEFORE synthesizing.
 
 Related:
 - Global CLAUDE.md rule #3 ("DOUBT YOURSELF, VERIFY, RESEARCH") —
