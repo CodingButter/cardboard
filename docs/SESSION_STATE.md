@@ -1,261 +1,250 @@
-# Session State — 2026-05-20 handoff
+# Session State — 2026-05-20 (late) handoff
 
 A handoff snapshot for the next Claude instance picking up this work.
 **Read this file, then `.claude/memory/MEMORY.md`, then
-`docs/plans/EDITOR_ENGINE.md` — that's the architectural north star.**
+`docs/plans/EDITOR_ENGINE.md` (architectural north star), then
+`docs/plans/PERFORMANCE_PROFILER.md` (current build target).**
 
 ## Where main is right now
 
-Branch `main` at commit **`2558489`** — pushed to origin, tree clean.
-The last 10 commits in chronological order:
+Branch `main` at commit **`39a210c`** — pushed to origin, tree
+clean. Today's session shipped 26+ commits (see "What just landed"
+below). The Performance Profiler build agent is currently in
+flight; when it lands the count will jump again.
 
-```
-2558489  editor: wave 3.4 — MapCanvas painting + undo/redo replay
-72e6e1c  editor+sidecar: peerjs proper ESM import (fixes Pages production bundle)
-3648dce  chore: rebuild Cardboard.apg pack
-e318474  editor+sidecar: D10b desktop pairing modal + sidecar Pages build
-dff2245  editor: tile-texture rendering on Map/Mini/Preview (real sprites)
-f87f5ca  docs+memory: EDITOR_ENGINE plan doc + dogfooding principle
-8c94e13  editor: render cells by tile-preset color (replaces flat layer fill)
-8326b24  docs+chore: delete 6 stale docs + clean every soft-ref to point at git log
-56ddd03  editor: hydrate Zustand stores from IDB on project-load (P0 regression fix)
-ad12c70  docs: reorg content updates + LIGHTING merge + new 2026-05-19 audit
-```
+## What just landed today (2026-05-20)
 
-## What just landed (since the 2026-05-19 snapshot)
+### Bug fixes (early session)
 
-### Scene Wave 3 is functionally complete
+- `861bf42` — modals — z-index bumped above dockview's `z-index:
+  999` sash/drop overlays (user reported drag-handles activating
+  through modal backdrop).
+- `7db84d0` — required `category` on every `DockPanelDef` +
+  `PanelSpec`; DocksModal renders grouped cards under Tools /
+  Viewport / Scene / Inspector / Browse / Diagnostics headers.
+  24 panel MANIFESTs updated.
+- `ee165aa` — Wave 3.5 audit fixes: destructive-hydration guard
+  (`lastHydratedProjectId` in `hydration.ts`), tile-preset id
+  mismatch wired to real registry, Ctrl+Z keybinding moved off
+  the opt-in HistoryPanel onto MapCanvasPanel.
+- `31828b1` — **Tailwind `@source` directive added for
+  `./src/**/*.{ts,tsx}`** in `apps/editor/index.css`. ROOT CAUSE
+  of the user's repeated "no styling" reports — dev CSS came
+  back at 148KB without editor utilities; now 270KB with them.
+  Production was always fine, dev wasn't.
 
-- **3.3** — all 14 scene panels migrated off `MOCK_` fixtures onto the
-  eight Zustand stores. Audit-then-fix loop pattern (per
-  `feedback_audit_then_fix_loop.md`).
-- **Hydration fix** — `apps/editor/src/state/hydration.ts` bridges IDB
-  → Zustand on project-load. Reads scene manifest + `scene1.json`,
-  walks walls/floors/ceilings grids, populates
-  `useSceneStore.cells/dims/settings` + `useLayerStore` +
-  `useTilePresetRegistryStore`. Uses scene-level `idMap` for
-  int→preset-id resolution. **This was the root cause of the
-  "empty map after Wave 3.3" P0 regression** — loading a pack only
-  wrote to IDB, never refreshed Zustand.
-- **Tile-preset color rendering** — `useTilePresetRegistryStore`
-  separates the read-only preset registry from the UI-selection
-  store. MapCanvas + Minimap + Preview render cells by
-  preset color/texture, not flat layer fill.
-- **Tile texture rendering** — `tileTextureCache.ts` (async loader
-  + sync getter + de-dup). Cache map values: `ImageBitmap | null`
-  (null = known-failed → no retry storm). `texturesEpoch` on the
-  registry triggers reactivity when bitmaps finish loading.
-- **3.4** — MapCanvas painting + undo/redo replay (`2558489`):
-  - `useSceneStore.paintCells/eraseCells` bulk actions — single
-    `set` callback folding N writes into one cells-record
-    replacement. **One stroke = one storage event regardless of
-    stroke length.** Critical for popout sync.
-  - `historyDispatcher.ts` — `applyEntryUndo/Redo` + `undoOnce/
-    redoOnce`. Batches reverse-dispatch into one paintCells +
-    one eraseCells call.
-  - `MapCanvasPanel.tsx` paint state machine: `paintDragRef`
-    locks `layerId` + `presetId` at mousedown (layer changes
-    mid-drag don't split stroke). `stampBrush` uses
-    `footprintCells` (point / square / circle / line / rect).
-    BFS 4-connected flood-fill. Dropper reads topmost layer
-    preset. Undo/redo wired through dispatcher.
-  - 9 passing unit tests in `historyDispatcher.test.ts`.
+### Memory rules captured
 
-### Sidecar PWA + D10/D10b pairing
+- `feedback_verify_before_asserting.md` — pre-send self-audit
+  rule: scan every drafted response for factual claims, verify
+  cheap ones, hedge expensive ones. Voice especially.
+- `feedback_audits_parallel.md` — audits are read-only by
+  nature; never sit idle waiting. Dispatch in parallel with
+  other work.
 
-- `apps/editor/sidecar/` — cold-launch QR scanner + identity wizard +
-  service worker + Tailwind. Routes from `/sidecar/?desktop=<peerId>`.
-- `desktopPairingSingleton.ts` — non-serializable Peer +
-  DataConnection live outside Zustand (can't go in `createSyncedStore`).
-- `PairDeviceModal.tsx` — qrcode lib + copy-URL fallback +
-  connected-state body showing sidecar identity.
-- `scripts/build-sidecar-for-docs.ts` — 5-step pipeline (bun build +
-  Tailwind CLI + sw.ts transpile + manifest copy + stage to
-  `apps/docs/public/sidecar/`).
-- **PeerJS tree-shake bug fix** — switched from side-effect
-  `import "peerjs/dist/peerjs.min.js"` to proper
-  `import { Peer } from "peerjs"`. Required installing peer deps:
-  `peerjs-js-binarypack`, `webrtc-adapter`, `@msgpack/msgpack@^2.8.0`
-  (pinned 2.x because peerjs wants 2.x). Verified 175 peerjs symbols
-  in production bundle.
+### Editor-engine architectural pivot (mid-late session)
 
-### Architectural decisions (large)
+- `aa8013b` — Phase 0 wiring: JSON panel renderer + store-path
+  resolver + script-ref invoker + demo route at `?renderer-demo`.
+- `a18174c` — wire JSON demo as a real `DockPanelDef`; user
+  flagged that the previous wiring was a standalone route, not
+  a dockable panel. Renamed `JSON: Selection Info`.
+- `6d65b44` — **first editor pack + dynamic loader** (dogfooding
+  proof point). `packages/cardboard-editor-pack-demo/` workspace
+  shipping `manifest.json` + `panels/selection-info.json`.
+  Editor-side `editorPackLoader.ts` walks the manifest, fetches
+  panel JSONs from a static route, registers DockPanelDefs at
+  startup. Hardcoded `JsonDemoPanel` deleted from MapView.tsx.
+- `cc90d80` — load editor pack as a real `.apg` via JSZip. Pack
+  shipped as actual zip at
+  `apps/editor/public/packs/cardboard-editor-pack-demo.apg`; loader
+  uses `ZipAssetPack.loadFromBytes` (same code path as game
+  packs); one network fetch instead of N JSON requests.
+- `9cac87f` — Editor Settings → Extensions tab. Per-pack
+  enable/disable toggle with "Reload to apply" banner. LS-persisted
+  store at `cardboard.sync.editor-packs`.
+- `39a210c` — **pack-bundled scripts** (THE dogfooding closure).
+  Packs ship JS that registers commands at load time via
+  `EditorPackContext`. `manifest.scripts[]` schema added.
+  Pack-builder bundles `.ts → .js` via Bun.Transpiler.
+  Loader dynamic-imports each script via Blob URL + invokes
+  default export with the context. **DELETED**
+  `demo.selection.clear` registration from MapView.tsx — the
+  command now exists in the running editor ONLY because the
+  pack script registered it. A third-party pack author has the
+  same surface.
 
-A long architecture conversation produced multiple project memories
-and one plan doc:
+### Phase 1b panel migrations (mid session, then user halted)
 
-- `docs/plans/EDITOR_ENGINE.md` — synthesis. Two engines (Game +
-  Editor) on one pack-chain. Shell vs pack scoping rules. Dock-type
-  catalog. JSON composition. Pack-bundled libraries. Phased
-  migration plan ending in Performance Profiler demo pack milestone.
-- `docs/plans/REMOTE_DOCK_QR.md` — heavy iteration. Sidecar PWA +
-  PeerJS architecture. Three pairing paths. Device identity
-  (name+color+icon). Drag-to-device-icon UX. Game-as-dock.
-  `container-dockview`. Sketchfab-style overlay.
+Five panels migrated to JSON specs before the user correctly
+called out that further migrations were practice problems:
 
-New project memories (in `.claude/memory/`):
+- `7682a3d` — SelectionInfo (388 → 171 lines TSX, 251-line JSON
+  spec). Renderer gained Tooltip + Icon + Text variant/format
+  + Layout extensions + `layer` store in resolver.
+- `cfa404b` — ToolPalette (283 → 109). ToggleButton + ScrollRow
+  + Layout grid mode + Conditional `equals`.
+- `c02f2b5` — Brush (459 → 85). NumberInput + Slider + Button
+  `shape:"icon"` + `disabledWhen`. First writable bindings
+  (brush.size, brush.kind).
+- `c56a6c1` — QuickTools (322 → 105). Zero new node types.
+  `ToggleButton.activeWhenContains`, `Conditional.notEmpty`,
+  `Text.format:"applyCount"`.
+- `7a44fac` — CellInspector (hybrid — 4 rows JSON, 3 rows
+  inline TSX pending Repeat/ForEach + dynamic-indexer-depth +
+  panel-local-state primitives). Added `Select` node + first
+  dynamic-indexer writer (`scene.cells[selected].height`).
+  Shell Slider primitive swap (renderer had been emitting raw
+  `<input type="range">`).
 
-- `project_dogfooding_principle.md` — shell ships ONLY primitives +
-  Tailwind defaults + Zustand sync + IDB + pack-chain loader +
-  extension manager. Everything else is a pack, including the
-  editor.
-- `project_editor_package_injection.md` — bridge pack the editor
-  injects into the user's chain at dev-time. Hot-reload +
-  remote-dock + live-on-device testing. Tree-shaken out of prod
-  builds.
-- `project_idb_source_of_truth.md` — IDB holds project data; asset/
-  content stores are reactive views over `EditorProjectStore` +
-  `IdbAssetPack`, NOT LS-persisted Zustand.
-- `project_prefabs_declarative_assets.md` — prefabs are JSON files
-  declared in the pack manifest. Runtime modAPI is read + spawn
-  only; no `registerPrefab` in modAPI.
-- `project_remote_dock_via_qr.md` — phones/tablets are companion
-  surfaces hosting touch-friendly variants of mountable panels.
-- `project_dnd_day_one.md` — cross-window drag-and-drop is
-  foundational; scaffold BEFORE Wave 3.3 panel migrations so panels
-  are DnD-aware from the start. Plan at
-  `docs/plans/CROSS_WINDOW_DND.md`.
+### Doc cleanup (mid session)
 
-### Doc audit (2026-05-19)
+- `4775fcf` — modAPI audit Stream A: PLAN.md §4 rewritten
+  (removed registerPrefab/spawn/registerDeclarativePrefab/
+  api.inventory dead surfaces, corrected api.anim signature,
+  moved api.console out of "Pending", added 9 missing surfaces).
+  Per-plan-doc rot cleaned in ENGINE_PACK_SPLIT / ANIMATIONS /
+  MULTIPLAYER_PLAN / EVENTS / CONSOLE.
+- `698c8ab` — modAPI audit Stream B: concepts.mdx +
+  writing-your-first-pack.mdx + modapi-cookbook.mdx rewritten
+  off removed surfaces.
+- `cb443ab` — engine source comment rot: PackManifest.prefabs
+  JSDoc no longer references the removed `api.spawn`.
+- `363c822` — manifest-shape MDX audit: tutorial guides taught
+  retired `manifest.items[]` + `manifest.defaultInventory`;
+  rewritten to current PackManifest shape.
 
-`8326b24` deleted 6 stale docs (MATERIALS, MONOREPO_PLAN,
-PREFABS_EDITOR_ONLY, AUDIT_2026-05-16, EDITOR_DOCK_EVALUATION,
-EDITOR_UI_AUDIT). 51 files cleaned of soft-refs to point at git log.
-Operating principle: "more recent docs trump older ones with
-conflicting information."
+### Planning (this session)
 
-## Where Wave 3 is in the plan
+- `ae5f296` — `docs/plans/PERFORMANCE_PROFILER.md` (975 lines).
+  Complete implementation blueprint for the proof-by-construction
+  milestone. 6 phases (P1 skeleton → P6 acceptance). Key
+  decisions locked: separate workspace, Canvas + imperative-
+  script split, dynamic stores via `ctx.createStore`, no
+  declarative Chart node. Risks verified against actual code.
 
-Phases per `docs/plans/SCENE_WAVE_3_WIRING.md`:
+### Currently in flight
 
-- ✅ **3.1** — sync utility foundation
-- ✅ **3.2** — define 8 stores
-- ✅ **3.3** — migrate all 14 panels off MOCK_ fixtures
-- ✅ **3.4** — MapCanvas painting + undo/redo replay
-- ⏳ **3.5** — popout validation **(AUDIT in flight as of this snapshot)**
+- **Performance Profiler build agent** (started after `39a210c`).
+  Building against `docs/plans/PERFORMANCE_PROFILER.md`. Expected
+  outcome: green (all 6 phases) OR partial at the P3/P4
+  boundary. When it lands, the platform proof-by-construction is
+  complete — a third-party pack bundling chart.js, shipping
+  scripts that register commands + drive a live FPS chart,
+  installs via the Extensions tab.
 
-The Wave 3.5 audit agent is running a Playwright sweep checking:
-- Storage event count per stroke (must be exactly 1)
-- Cross-window paint sync
-- Tool/selection/layer/tile-preset sync
-- History replay across windows
-- Hydration consistency
+## Architectural state
 
-Outcome dictates whether a 3.5 FIX agent dispatches next, or 3.5
-closes green.
+### What's actually dogfooded now
 
-## Architectural pivot ahead
+- Editor packs ship as real `.apg` zips at
+  `apps/editor/public/packs/`.
+- Pack manifest schema: `scope`, `editorPanels[]`, `scripts[]`
+  fields all extending the game-pack `PackManifest`.
+- Pack scripts run at load time with full `EditorPackContext`
+  access — same `registerCommand` API the shell uses.
+- The first-party editor TSX no longer registers any
+  pack-specific commands. **The dogfooding loop is honest.**
+- Extensions tab toggles enabled set; reload applies.
 
-Once Wave 3.5 lands, the "make sure things actually work" runway is
-complete and the architectural pivot starts. Per
-`docs/plans/EDITOR_ENGINE.md`, the rough sequence is:
+### What's NOT yet built (Performance Profiler dependencies)
 
-1. **Pack-bundled libraries with hash dedup** — pack manifest
-   declares npm deps; pack-builder bundles them at dev-time;
-   pack-chain loader dedupes by content hash. Offline-first; no
-   in-browser bundling.
-2. **Core Editor Pack extraction** — move `apps/editor/src/views/`
-   + `panels/` + page chrome to `packages/core-editor-pack/`.
-   `apps/editor/` shrinks to the shell.
-3. **JSON panel composition Phase 1** — wire the JSON spec format
-   (store-path bindings like `"store.scene.cells[selected].name"`).
-4. **JSON panel composition Phase 2** — migrate panels from `.tsx`
-   to JSON manifests.
-5. **JSON panel composition Phase 3** — visual builder for panels.
-6. **Editor Settings → Extensions tab** — install / enable /
-   disable editor packs.
-7. **Milestone** — Performance Profiler demo pack: a third-party
-   pack that ships a panel, contributes commands, registers a
-   diagnostics source, and works in popouts. Proof by
-   construction.
+If the Profiler agent reports PARTIAL, these are the gaps to
+chase next:
 
-Task IDs #19 (core editor pack), #20 (library bundling), #21–#23
-(JSON composition phases), #24 (Performance Profiler milestone)
-track these.
+- `manifest.libraries[]` schema + pack-builder library bundling
+  + loader `ctx.importLibrary(name)` (task #20). Plan §4 + §5.
+- `Canvas` node in the renderer (refName + heightPx).
+- Dynamic-store registration: `ctx.createStore(name, initial,
+  actions)` + DYNAMIC_STORES map in resolveBinding.ts.
+- `ctx.getCanvasRef(refName)`, `ctx.onPanelMount(panelId, cb)`,
+  `ctx.share/consume`.
 
-## Other open tasks (post Wave 3.5)
+### Deferred (post-Profiler)
 
-- **#8** — Doc audit for modAPI vs editor-only concepts.
-- **#9** — Cross-window command dispatch.
-- **#16** — Sidecar QR drag target + Pair new device modal polish.
-- **#17** — Preview engine-rendered toggle + fly/god controls
-  (preview is currently a flat canvas render — long-term it should
-  be an iframe to the game app with editor-only pack loaded, per
-  the user's "it just ends up being its a iframe" framing).
-- **#18** — Editor Settings → Extensions tab.
-- **#25** — Investigate dockview/ResizeObserver feedback loop
-  (panel grows unbounded; non-blocking ergonomic bug; predates
-  Wave 3.4).
-
-## What NOT to do
-
-- Don't use `isolation: "worktree"` on Agent dispatches.
-  WSL VHDX corrupts.
-- Don't put native `title=` attributes — use the `Tooltip`
-  primitive. Progressive stages (2s short label, 5s full
-  description), portal rendering, `wrapperClassName` for flex-fill.
-- Don't bypass `registerCommand` for new actions or `registerSetting`
-  for new settings.
-- Don't write to `MOCK_` fixtures — they're retired. Use store
-  hooks.
-- Don't add per-cell paint loops back — bulk actions are required
-  for popout sync to scale.
-- Don't import `peerjs/dist/peerjs.min.js` as a side-effect import.
-  Tree-shakes in production. Use `import { Peer } from "peerjs"`.
-- Don't push to main without committing through the harness with a
-  Co-Authored-By trailer.
-
-## The dev server
-
-Default port 3001. Restart if needed:
-
-```bash
-cd apps/editor
-nohup bun dev > /tmp/cardboard-dev.log 2>&1 &
-```
-
-If 3001 is busy use 3010-3099 range per
-`feedback_agent_dev_server_ports.md`.
-
-## The deploy
-
-GH Pages deploys via `.github/workflows/docs.yml` only.
-`build-sidecar-for-docs.ts` stages the sidecar PWA into
-`apps/docs/public/sidecar/`. Pages CSS verified healthy (210KB
-Tailwind v4.3.0, 200 OK) — if the user reports "no styling" again
-it's almost certainly browser/SW cache; hard-refresh → unregister
-SW → clear site data.
-
-## Memory rules to read first
-
-`.claude/memory/MEMORY.md` is the canonical index. The Wave 3
-pickup priorities are:
-
-- `feedback_popout_state_sync.md`
-- `feedback_voice_carries_content.md`
-- `feedback_text_for_remote_sessions.md`
-- `feedback_audit_then_fix_loop.md`
-- `feedback_command_registry_required.md`
-- `feedback_no_worktrees.md`
-- `feedback_wave_merge_gate.md`
-- `project_dogfooding_principle.md`
-- `project_idb_source_of_truth.md`
-- `project_editor_package_injection.md`
-- `project_remote_dock_via_qr.md`
+- Pack chain integration (`requires[]` resolution between
+  editor packs, like game packs already do).
+- Live unregister-without-reload on Extensions toggle (today a
+  toggle requires reload; `disposeEditorPackScripts` is exported
+  but unwired).
+- Sandbox tightening (SRI hash, untrusted-source warning, CSP).
+- The 3 remaining inline-TSX rows in CellInspector (Type / Tags
+  / Properties) — need Repeat/ForEach + dynamic-indexer-depth-2
+  + panel-local-state primitives.
+- Pack-author icon refs (today every loaded panel gets FileJson).
 
 ## How to verify state on pickup
 
 ```bash
 git pull origin main
-git log --oneline -3
-# expected: 2558489 ... wave 3.4 — MapCanvas painting + undo/redo replay
+git log --oneline -5
+# expected: 39a210c (or higher if Profiler landed) at HEAD
 
 git status
-# expected: clean tree (modulo .envrc + this file if mid-edit)
+# expected: clean
 
-cd apps/editor && bun run typecheck
-# expected: tsc --noEmit clean
+cd apps/editor && bunx tsc --noEmit --skipLibCheck
+# expected: exit 0
 
-bun test src/state/historyDispatcher.test.ts
-# expected: 9 pass, 0 fail
+bun test src/panel-renderer/ src/state/ src/packs/
+# expected: 106 pass / 0 fail (or higher)
+
+# Verify dogfooding closure:
+grep -r "demo.selection.clear" apps/editor/src/views/
+# expected: NO HITS (the command exists only via pack script now)
+
+# Verify .apg is real:
+unzip -l apps/editor/public/packs/cardboard-editor-pack-demo.apg
+# expected: 10 entries including scripts/setup.js
 ```
+
+## Dev server
+
+`bun --hot apps/editor/server.ts` from `apps/editor/`. Listens on
+port **3001** (NOT 3010 like the previous session — docs server
+no longer occupies 3001 since it was killed during the
+no-styling investigation today).
+
+The CLAUDE.md note about not starting dev servers from the agent
+shell still applies. User starts it; agents read state only.
+
+## Memory rules to read first
+
+`.claude/memory/MEMORY.md` is the index. Today's session
+specifically activated these rules:
+
+- `feedback_verify_before_asserting.md` — pre-send self-audit
+  IS the operative discipline. The user caught me hallucinating
+  twice today; this rule was written in response.
+- `feedback_audits_parallel.md` — audits run in parallel with
+  every other work stream. Never idle-wait.
+- `project_dogfooding_principle.md` — non-negotiable. The user
+  enforced it sharply today when I shipped TSX-wrapper cheating.
+- `project_editor_package_injection.md` — the bridge model that
+  pack-bundled scripts now implements.
+
+## What NOT to do
+
+- Don't grind through more TSX → JSON panel migrations as
+  Phase 1b "practice" — the user explicitly halted that. The
+  next migrations come after the Profiler proves the full
+  third-party pack model end-to-end.
+- Don't add TSX wrappers that secretly register commands on
+  behalf of packs. That's the dogfooding violation we just
+  closed.
+- Don't use `isolation: "worktree"` on Agent dispatches —
+  VHDX corruption risk.
+- Don't quote facts about project state without grepping first.
+  See `feedback_verify_before_asserting`.
+
+## The deploy
+
+GH Pages deploys via `.github/workflows/docs.yml` only. Editor
++ docs + game all stage into `apps/docs/public/` via build
+scripts. `bun run build-packs` produces both
+`apps/game/public/packs/Cardboard.apg` AND
+`apps/editor/public/packs/cardboard-editor-pack-demo.apg`.
+
+Pages CSS verified healthy (210KB Tailwind v4.3.0). If user
+reports "no styling" again it's almost certainly browser/SW
+cache; hard-refresh → unregister SW → clear site data.
