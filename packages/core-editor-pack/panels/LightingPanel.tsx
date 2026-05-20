@@ -10,15 +10,23 @@ import {
   Sun,
   Trash2,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { EmptyState } from "../../../components/ui";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — see OutputPanel.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Pack-local fixture file — see `scene-fixtures.ts` in this directory.
+// The slimmed fixture lives in the pack rather than reaching back into
+// the editor's `views/scene/scene-fixtures.ts` because fixtures are
+// pack content, not shell surface area (CORE_EDITOR_PACK.md §3.1).
 import {
   MOCK_LIGHTS,
   type LightKind,
   type LightRow,
-} from "../scene-fixtures";
+} from "./scene-fixtures";
+// Externalised — `registerCommand` routes into the host's command
+// store + palette. `EmptyState` rides along through the SDK because
+// the shell primitive imports a binary asset the pack-builder can't
+// bundle. See `apps/editor/src/packs/shellSdkRuntime.ts`.
+import { EmptyState, registerCommand } from "@cardboard/editor-shell";
 
 /**
  * LightingPanel — scene-light list + per-light enable toggle + selection

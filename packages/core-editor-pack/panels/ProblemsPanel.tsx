@@ -7,15 +7,22 @@ import {
   Trash2,
   ArrowRightCircle,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — see note in OutputPanel.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import type {
+  DiagnosticLine,
+  DiagnosticSeverity,
+} from "../../../apps/editor/src/state/useDiagnosticsStore";
+// Externalised via the pack-builder's shell-externals plugin — see
+// OutputPanel for the rationale. Diagnostics is a singleton-backed
+// store; routing through the host's instance is the only way the
+// panel's `clear()` call propagates to OutputPanel + popout windows.
 import {
+  EmptyState,
+  registerCommand,
   useDiagnosticsStore,
-  type DiagnosticLine,
-  type DiagnosticSeverity,
-} from "../../../state/useDiagnosticsStore";
+} from "@cardboard/editor-shell";
 
 /**
  * ProblemsPanel — diagnostics surface for the active scene.
@@ -33,9 +40,9 @@ import {
  * fallback for older messages that embedded the coord in plain text.
  *
  * Surface contract:
- *   This panel is registered with `surface: false` in MapView, so
- *   DockShell does NOT wrap it in a PanelSurface card. We render flush
- *   against the dock background and own our own padding.
+ *   This panel is registered with `surface: false` by the core-editor
+ *   pack, so DockShell does NOT wrap it in a PanelSurface card. We
+ *   render flush against the dock background and own our own padding.
  *
  * Persistence:
  *   - `cardboard.scene.problems.filter` — "all" | "warn" | "error"

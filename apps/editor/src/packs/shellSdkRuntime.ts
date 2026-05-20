@@ -27,6 +27,9 @@
 
 import { registerCommand, useCommandStore } from "../state/useCommandStore";
 import { useActiveScene } from "../shell/ActiveSceneContext";
+import { useDiagnosticsStore } from "../state/useDiagnosticsStore";
+import { useHistoryStore } from "../state/useHistoryStore";
+import { EmptyState } from "../components/ui/EmptyState";
 
 /**
  * The runtime surface published into the `globalThis` slot. Pack-shipped
@@ -36,11 +39,36 @@ import { useActiveScene } from "../shell/ActiveSceneContext";
  * Adding a new entry: append a property here AND a matching named
  * re-export in the pack-builder's stub-module body (the
  * `cardboard-shell-externals` plugin's onLoad handler).
+ *
+ * Why each store appears here individually rather than bundled in the
+ * pack: each Wave-3 store is a module-level singleton with its own
+ * BroadcastChannel for cross-window sync. A bundled-in duplicate inside
+ * a pack `.apg` would have its own (disconnected) channel + zero shared
+ * state with the host's store — log lines written by the pack would
+ * never reach the OutputPanel rendered in the host, and vice-versa.
+ * Routing the hook through the host singleton is mandatory, not
+ * cosmetic. Any third-party pack that wants to consume diagnostics or
+ * undo/redo history hits the same need, so the symbols belong in the
+ * public SDK.
  */
 export const shellSdk = {
   registerCommand,
   useCommandStore,
   useActiveScene,
+  // P3 batch A — OutputPanel + ProblemsPanel consume the live
+  // diagnostics buffer.
+  useDiagnosticsStore,
+  // P3 batch A — HistoryPanel reads + mutates the undo/redo stack.
+  useHistoryStore,
+  // P3 batch A — `EmptyState` is presentational, but it pulls in a
+  // binary asset import (`logo.png with { type: "file" }`) that the
+  // pack-builder's `Bun.build` can't resolve cleanly when bundling
+  // pack scripts. Exposing it via the shell SDK keeps the pack bundle
+  // small AND solves the build issue without forking the primitive.
+  // Any third-party pack that wants a Cardboard-styled empty surface
+  // hits the same need; routing through the SDK is the
+  // dogfooding-correct shape.
+  EmptyState,
 } as const;
 
 export type ShellSdk = typeof shellSdk;

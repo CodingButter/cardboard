@@ -42,14 +42,9 @@ import {
   QuickToolsPanel,
   MANIFEST as QUICK_TOOLS_MANIFEST,
 } from "./scene/panels/QuickToolsPanel";
-import {
-  OutputPanel,
-  MANIFEST as OUTPUT_MANIFEST,
-} from "./scene/panels/OutputPanel";
-import {
-  ProblemsPanel,
-  MANIFEST as PROBLEMS_MANIFEST,
-} from "./scene/panels/ProblemsPanel";
+// OutputPanel + ProblemsPanel migrated to the core-editor-pack
+// (CORE_EDITOR_PACK.md §10 P3 batch A). Registered via the pack's
+// `scripts/setup.tsx` with `surface: false`.
 import {
   SelectionInfoPanel,
   MANIFEST as SELECTION_INFO_MANIFEST,
@@ -62,18 +57,12 @@ import {
   MinimapPanel,
   MANIFEST as MINIMAP_MANIFEST,
 } from "./scene/panels/MinimapPanel";
-import {
-  HistoryPanel,
-  MANIFEST as HISTORY_MANIFEST,
-} from "./scene/panels/HistoryPanel";
+// HistoryPanel migrated to the core-editor-pack (P3 batch A).
 import {
   PrefabBrowserPanel,
   MANIFEST as PREFAB_BROWSER_MANIFEST,
 } from "./scene/panels/PrefabBrowserPanel";
-import {
-  LightingPanel,
-  MANIFEST as LIGHTING_MANIFEST,
-} from "./scene/panels/LightingPanel";
+// LightingPanel migrated to the core-editor-pack (P3 batch A).
 // NotesPanel migrated to `packages/core-editor-pack/panels/NotesPanel.tsx`
 // (CORE_EDITOR_PACK.md §10 P2). The pack's `scripts/setup.tsx` calls
 // `ctx.registerPanel({...NOTES_MANIFEST, component: NotesPanel})` at
@@ -83,7 +72,10 @@ import {
   AssetReferencesPanel,
   MANIFEST as ASSET_REFERENCES_MANIFEST,
 } from "./scene/panels/AssetReferencesPanel";
-import { useEditorPackPanels } from "../packs/editorPackLoader";
+import {
+  useEditorPackPanels,
+  useEditorPacksLoaded,
+} from "../packs/editorPackLoader";
 
 /**
  * MapView — Scene page shell.
@@ -136,16 +128,16 @@ const PANELS: readonly DockPanelDef[] = [
   { ...LAYERS_MANIFEST, component: LayersPanel },
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
   { ...QUICK_TOOLS_MANIFEST, component: QuickToolsPanel },
-  { ...OUTPUT_MANIFEST, component: OutputPanel, surface: false },
-  { ...PROBLEMS_MANIFEST, component: ProblemsPanel, surface: false },
+  // OutputPanel + ProblemsPanel — contributed via the core-editor-pack
+  // at runtime (P3 batch A; registered with `surface: false`).
   { ...SELECTION_INFO_MANIFEST, component: SelectionInfoPanel, surface: false, headerless: true },
   { ...SCENE_SETTINGS_MANIFEST, component: SceneSettingsPanel },
   // Opt-in Wave-2 panels — discoverable via the DocksModal but
   // intentionally absent from the default layout below.
   { ...MINIMAP_MANIFEST, component: MinimapPanel },
-  { ...HISTORY_MANIFEST, component: HistoryPanel },
+  // HistoryPanel — contributed via the core-editor-pack (P3 batch A).
   { ...PREFAB_BROWSER_MANIFEST, component: PrefabBrowserPanel },
-  { ...LIGHTING_MANIFEST, component: LightingPanel },
+  // LightingPanel — contributed via the core-editor-pack (P3 batch A).
   // NotesPanel — contributed via the core-editor-pack at runtime.
   { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
   // Editor packs (loaded asynchronously via `useEditorPackPanels`)
@@ -398,6 +390,20 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
     [editorPackPanels],
   );
 
+  // Gate the DockShell mount on the editor-pack load. The default
+  // scene layout references panel ids (`output`, `problems`, …) whose
+  // components are CONTRIBUTED by the core-editor-pack (P3 batch A).
+  // Mounting the dockview before the pack registers them would crash
+  // dockview's deserializer with "Only React.memo / ForwardRef /
+  // functional components are accepted as components" — the saved
+  // layout names an id whose `components[id]` is still `undefined`.
+  //
+  // The load is module-cached (see `loadEditorPacks()`), so this
+  // splash typically appears for <100ms on a warm reload. After
+  // Phase 4 every panel in the default layout will be pack-contributed,
+  // so there is no useful intermediate render to show anyway.
+  const packsLoaded = useEditorPacksLoaded();
+
   // `demo.selection.clear` is now owned by the editor-pack-demo's
   // pack-bundled `scripts/setup.ts` (Phase 2a, task #30). The editor
   // app no longer holds any first-party registration on a third-party
@@ -425,6 +431,19 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
   // call api.fromJSON / api.toJSON / api.addPanel against the same
   // instance DockShell creates.
   const apiRef = React.useRef<DockviewApi | null>(null);
+
+  // Pre-load splash — see `packsLoaded` note above.
+  if (!packsLoaded) {
+    return (
+      <div className="h-full w-full p-6 flex items-center justify-center">
+        <EmptyState
+          icon={<Construction size={28} />}
+          title="Loading editor packs…"
+          description="Resolving panels contributed by enabled editor packs."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full w-full min-h-0 flex">

@@ -14,14 +14,22 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — see OutputPanel for the pack-relative pattern.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import type {
+  HistoryEntry,
+  HistoryEntryType,
+} from "../../../apps/editor/src/state/useHistoryStore";
+// Externalised via the pack-builder's shell-externals plugin. Same
+// reasoning as OutputPanel/ProblemsPanel — the history store is a
+// module-singleton with cross-window broadcast; bundling a duplicate
+// would give the pack its own undo stack disconnected from the host's
+// MapCanvas keybindings.
 import {
+  registerCommand,
   useHistoryStore,
-  type HistoryEntry,
-  type HistoryEntryType,
-} from "../../../state/useHistoryStore";
+} from "@cardboard/editor-shell";
 
 /**
  * HistoryPanel — undo/redo stack visualization.

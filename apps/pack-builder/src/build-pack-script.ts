@@ -357,6 +357,9 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const registerCommand = __mod.registerCommand;
               export const useCommandStore = __mod.useCommandStore;
               export const useActiveScene = __mod.useActiveScene;
+              export const useDiagnosticsStore = __mod.useDiagnosticsStore;
+              export const useHistoryStore = __mod.useHistoryStore;
+              export const EmptyState = __mod.EmptyState;
             `,
           }));
         },

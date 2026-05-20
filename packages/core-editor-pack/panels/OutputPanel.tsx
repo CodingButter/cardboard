@@ -5,15 +5,39 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — Bun erases this. Reaching back into the editor's source
+// for the structural `DockPanelDef` type keeps the pack's MANIFEST
+// shape byte-identical to a hand-written panel's.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Tooltip is pure presentational React (createPortal + refs only); the
+// pack-builder bundles it into the .apg script. No host singleton to
+// coordinate with — bundling is safe.
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Type-only — the runtime shape comes from the host's
+// `useDiagnosticsStore` (routed via the shell SDK). Importing the
+// types from the editor source keeps the panel's API surface aligned
+// with the store of record without dragging the value imports back in.
+import type {
+  DiagnosticLine,
+  DiagnosticSeverity,
+} from "../../../apps/editor/src/state/useDiagnosticsStore";
+// Externalised via the pack-builder's `cardboard-shell-externals`
+// plugin → reads from `globalThis.__cardboard_editor_shell` at
+// runtime. Routes the panel's `registerCommand` call into the host's
+// `useCommandStore` (palette + keybindings), and binds the
+// diagnostics-store subscription to the SAME module-singleton the
+// other panels + popped-out windows are subscribed to. Bundling a
+// duplicate copy of the store would give the pack its own
+// BroadcastChannel + isolated `lines` slice that nothing else reads,
+// which defeats the panel's purpose. `EmptyState` rides along through
+// the SDK because the editor's primitive imports a binary asset that
+// the pack-builder's `Bun.build` can't resolve. See
+// `apps/editor/src/packs/shellSdkRuntime.ts`.
 import {
+  EmptyState,
+  registerCommand,
   useDiagnosticsStore,
-  type DiagnosticLine,
-  type DiagnosticSeverity,
-} from "../../../state/useDiagnosticsStore";
+} from "@cardboard/editor-shell";
 
 /**
  * OutputPanel — log-stream surface for engine and build output.
@@ -30,16 +54,16 @@ import {
  * The active filter remains panel-local UI state (LS-persisted) — the
  * diagnostics store does NOT model display filters.
  *
- * Registry note: this panel is registered with `surface: false` in
- * `MapView.tsx`, so DockShell does NOT wrap it in a `<PanelSurface/>`.
- * The body renders flush against the dock content area — we OWN our
- * own padding, and there is no card chrome/background.
+ * Registry note: this panel is registered with `surface: false` by
+ * the core-editor-pack, so DockShell does NOT wrap it in a
+ * `<PanelSurface/>`. The body renders flush against the dock content
+ * area — we OWN our own padding, and there is no card chrome/background.
  *
  * Persistence contract:
  *   - `cardboard.scene.output.filter` — `LogSeverity | "all"`, default `"all"`.
  *
  * Command registry contract — every action here registers a command
- * via `registerCommand` (see `state/README.md`):
+ * via `registerCommand`:
  *   - `scene.output.clear`
  *   - `scene.output.filter.all|info|warn|error`
  *   - `scene.output.copyAll`

@@ -663,10 +663,25 @@ export function disposeEditorPackScripts(packId: string): void {
 }
 
 /**
+ * Module-level promise cache. Multiple call sites (e.g.
+ * `useEditorPackPanels` AND `useEditorPacksLoaded`) hit
+ * `loadEditorPacks()` in parallel during a single editor mount; the
+ * cached promise lets them share the same in-flight load so pack
+ * scripts run exactly once. Without this, two concurrent callers
+ * would both call `loadOneEditorPack()` which runs the pack's setup
+ * script, which calls `registerCommand(...)` etc. — duplicate
+ * registrations log "command id … already registered" warnings AND
+ * leave dangling cleanups. P3 batch A added the second consumer
+ * (`useEditorPacksLoaded`); previously this was a single-consumer
+ * call.
+ */
+let loadEditorPacksPromise: Promise<DockPanelDef[]> | null = null;
+
+/**
  * Load every editor pack the editor knows about and collect their
  * contributed `DockPanelDef`s. Designed to be called ONCE at editor
- * startup; subsequent calls re-fetch + re-decode (idempotent — there's
- * no global side effect outside of the returned list).
+ * startup; subsequent calls within the same session return the
+ * already-resolved promise (see the module-level cache above).
  *
  * Errors during load (404, decode fail, missing scope, invalid spec)
  * are logged to the console and the offending file/pack is skipped.
@@ -674,13 +689,17 @@ export function disposeEditorPackScripts(packId: string): void {
  * any editor pack to function.
  */
 export async function loadEditorPacks(): Promise<DockPanelDef[]> {
-  const enabledIds = getEnabledEditorPackIds();
-  const defs: DockPanelDef[] = [];
-  for (const packId of enabledIds) {
-    const packDefs = await loadOneEditorPack(packId);
-    defs.push(...packDefs);
-  }
-  return defs;
+  if (loadEditorPacksPromise) return loadEditorPacksPromise;
+  loadEditorPacksPromise = (async () => {
+    const enabledIds = getEnabledEditorPackIds();
+    const defs: DockPanelDef[] = [];
+    for (const packId of enabledIds) {
+      const packDefs = await loadOneEditorPack(packId);
+      defs.push(...packDefs);
+    }
+    return defs;
+  })();
+  return loadEditorPacksPromise;
 }
 
 /**
@@ -723,4 +742,42 @@ export function useEditorPackPanels(): DockPanelDef[] {
     for (const def of tsxDefs) byId.set(def.id, def);
     return Array.from(byId.values());
   }, [jsonDefs, tsxDefs]);
+}
+
+/**
+ * React hook: returns `true` once the first `loadEditorPacks()` call
+ * after mount has resolved. Used by view shells whose default layouts
+ * reference panels CONTRIBUTED by a pack — gating the dock mount on
+ * this flag prevents dockview's deserializer from throwing "Only
+ * React.memo / ForwardRef / functional components are accepted as
+ * components" when the saved/default layout names a panel id whose
+ * component is still in-flight.
+ *
+ * Trade-off: the view shell renders an empty splash for the duration
+ * of the pack-load (typically <100ms for cached `.apg`s). Acceptable
+ * because:
+ *   1. The shell is a `cardboard-core-editor` consumer post-Phase-4;
+ *      every Scene panel that lives in the default layout is pack-
+ *      contributed, so there's no "shell-only" content that could
+ *      meaningfully render in this window.
+ *   2. The pack-load is idempotent + cached at the module level
+ *      (`loadEditorPacks()` resolves a single shared promise), so a
+ *      remount doesn't pay the cost twice.
+ *
+ * Returns `false` synchronously on first mount; flips to `true` after
+ * the load resolves.
+ */
+export function useEditorPacksLoaded(): boolean {
+  const [loaded, setLoaded] = React.useState<boolean>(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    void loadEditorPacks().then(() => {
+      if (cancelled) return;
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return loaded;
 }
