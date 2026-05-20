@@ -10,12 +10,23 @@
 @import "dockview/dist/styles/dockview.css";
 
 /*
- * The engine's modal screens (InventoryScreen, SettingsScreen) live
- * in `packages/default-pack/scripts/ui/` and mount inside the engine
- * viewport when the user opens them in play mode. Without these
- * @source directives Tailwind tree-shakes their utility classes out
- * of the editor's compiled CSS and the modals render unstyled.
+ * Tailwind v4 source-scan directives. Without these the JIT scanner
+ * misses utility-class usages and emits an under-baked stylesheet —
+ * the editor renders unstyled while the file still LOOKS valid.
+ *
+ *   - `apps/editor/src/**` is the editor's own JSX. Missing this
+ *     directive was the root cause of "no styling" reports — dev
+ *     CSS came back at 148KB (vs production's 210KB) because no
+ *     editor utility (h-full, bg-zinc-950, flex, etc.) was being
+ *     emitted. Production builds happened to find them via a
+ *     different code path.
+ *   - `packages/engine/src/**` covers the engine's modal screens
+ *     (InventoryScreen, SettingsScreen) that mount inside the
+ *     engine viewport during play mode.
+ *   - `packages/default-pack/scripts/**` covers default-pack's UI
+ *     scripts.
  */
+@source "./src/**/*.{ts,tsx}";
 @source "../../packages/engine/src/**/*.{ts,tsx}";
 @source "../../packages/default-pack/scripts/**/*.{js,ts,tsx}";
 
