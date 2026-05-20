@@ -374,6 +374,14 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const loadTileTexture = __mod.loadTileTexture;
               export const getTileTextureSync = __mod.getTileTextureSync;
               export const SceneTabContextPicker = __mod.SceneTabContextPicker;
+              export const DockShell = __mod.DockShell;
+              export const WorkspaceRail = __mod.WorkspaceRail;
+              export const useTabContextSlot = __mod.useTabContextSlot;
+              export const useTabContextSlotValue = __mod.useTabContextSlotValue;
+              export const useRoute = __mod.useRoute;
+              export const buildHash = __mod.buildHash;
+              export const useEditorPackPanels = __mod.useEditorPackPanels;
+              export const useEditorPacksLoaded = __mod.useEditorPacksLoaded;
             `,
           }));
         },

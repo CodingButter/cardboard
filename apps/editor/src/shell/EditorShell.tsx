@@ -15,8 +15,6 @@ import {
 import type { PackManifest } from "@two_5_d/engine";
 import { HomeScreen } from "../views/HomeScreen";
 import { ProjectView, type WorkflowMode } from "../views/ProjectView";
-import { MapView } from "../views/MapView";
-import { PrefabsView } from "../views/PrefabsView";
 import { ProjectTabView } from "../views/project/ProjectTabView";
 import { AssetsView } from "../views/AssetsView";
 import { SET_TAB_EVENT, type SetTabEventDetail } from "../views/AssetsView";
@@ -35,8 +33,6 @@ import {
 import { ActiveSceneProvider } from "./ActiveSceneContext";
 import {
   PrimaryTabs,
-  PRIMARY_TABS,
-  PRIMARY_TAB_ORDER,
   readPersistedTab,
   writePersistedTab,
   type PrimaryTabId,
@@ -51,6 +47,12 @@ import { registerSetting } from "../state/useSettingsStore";
 import { useFileIndex, classifyAssetPath } from "../state/useFileIndex";
 import { hydrateStoresFromIdb } from "../state/hydration";
 import { matchKeybinding } from "../lib/keybinding";
+import {
+  useRegisteredTabs,
+  useTabRegistryStore,
+} from "../state/useTabRegistryStore";
+import { useRegisteredView } from "../state/useViewRegistryStore";
+import { loadEditorPacks } from "../packs/editorPackLoader";
 
 /**
  * localStorage mirror of the current project id, used as a fallback
@@ -79,11 +81,13 @@ function writePersistedProject(projectId: string | null): void {
   }
 }
 
-function isPrimaryTabId(value: string | null): value is PrimaryTabId {
-  return (
-    value !== null &&
-    (PRIMARY_TAB_ORDER as ReadonlyArray<string>).includes(value)
-  );
+/** Narrow a hash-segment string to a registered tab id. Reads the
+ *  live tab registry so a pack disabling itself collapses unknown
+ *  segments to the appropriate fallback (home / scene). */
+function isRegisteredTabId(value: string | null): value is PrimaryTabId {
+  if (value === null) return false;
+  const tabs = useTabRegistryStore.getState().tabs;
+  return value in tabs;
 }
 
 /**
@@ -134,6 +138,18 @@ const PROJECT_PLACEHOLDER_TABS: ReadonlyArray<PrimaryTabId> = [
 export function EditorShell() {
   const [route, navigate] = useRoute();
 
+  // P4 — kick off the editor-pack load at shell mount. Post-P4 the
+  // top-level tab strip, every view, and every panel is pack-
+  // contributed; the shell renders an empty strip + an empty body
+  // until `loadEditorPacks()` resolves. Triggering the load here
+  // (rather than inside individual views like the pre-P4 shell did)
+  // is mandatory — there are no shell-side views left that could
+  // trigger it before the registry-driven routing decides what to
+  // render.
+  React.useEffect(() => {
+    void loadEditorPacks();
+  }, []);
+
   // Track whether we've finished the first-mount hydration so the
   // mirror effect below doesn't clobber the persisted value before
   // hydration has had a chance to run.
@@ -169,16 +185,26 @@ export function EditorShell() {
     writePersistedProject(route.projectId);
   }, [route.projectId]);
 
+  // Subscribe to the tab registry so the active-tab fallback
+  // re-resolves when packs (re)register their tab contributions on
+  // mount. Without this, the very first render after pack load would
+  // still see the empty registry from before the script ran.
+  const registeredTabs = useRegisteredTabs();
+  const registeredTabIds = React.useMemo(
+    () => new Set(registeredTabs.map((t) => t.id)),
+    [registeredTabs],
+  );
+
   // Derive the active tab from the route. A null tab segment means
   // we're on Home — either project-less (`#/`) or project-scoped
   // (`#/p/<id>`). Both render HomeScreen. Otherwise the tab segment
-  // is narrowed to `PrimaryTabId`; invalid values collapse to "scene"
-  // (the workflow default) when a project is open, or "home" when not.
+  // is narrowed to a registered tab id; unrecognised segments collapse
+  // to "scene" when a project is open, "home" when not.
   const tab: PrimaryTabId = React.useMemo(() => {
     if (route.tab === null) return "home";
-    if (isPrimaryTabId(route.tab)) return route.tab;
+    if (registeredTabIds.has(route.tab)) return route.tab as PrimaryTabId;
     return route.projectId ? "scene" : "home";
-  }, [route.projectId, route.tab]);
+  }, [route.projectId, route.tab, registeredTabIds]);
 
   // Whenever the resolved tab changes, mirror it to the legacy
   // workflow-mode localStorage key so a fresh-tab open with no hash
@@ -543,25 +569,29 @@ function ShellChrome({
 
   // ── Navigation commands. One per primary tab; their `run` handlers
   // close over the live `setTab` setter. Disabled tabs (no open
-  // project) still register so the palette can SHOW them, but invoking
-  // them when no project is open is a no-op via PrimaryTabs' own
-  // `hasProject` gate.
+  // project) still register so the palette can SHOW them.
+  //
+  // P4 sources the tab list from `useRegisteredTabs()` (pack-contributed)
+  // rather than the legacy static PRIMARY_TABS array. Re-registers
+  // whenever the registry changes so a pack toggling its tabs in/out
+  // flips the navigation commands too.
+  const tabs = useRegisteredTabs();
   const setTabRef = React.useRef(setTab);
   React.useEffect(() => {
     setTabRef.current = setTab;
   }, [setTab]);
   React.useEffect(() => {
-    const unregs = PRIMARY_TABS.map((tab) =>
+    const unregs = tabs.map((t) =>
       registerCommand({
-        id: `navigation.open${tab.id.charAt(0).toUpperCase()}${tab.id.slice(1)}`,
-        title: `Go to ${tab.label}`,
+        id: `navigation.open${t.id.charAt(0).toUpperCase()}${t.id.slice(1)}`,
+        title: `Go to ${t.label}`,
         category: "Navigation",
-        keywords: [tab.id, tab.label, "tab", "open"],
-        run: () => setTabRef.current(tab.id),
+        keywords: [t.id, t.label, "tab", "open"],
+        run: () => setTabRef.current(t.id),
       }),
     );
     return () => unregs.forEach((u) => u());
-  }, []);
+  }, [tabs]);
 
   // ── Demo setting registration. `editor.userInitials` already flows
   // through TopBar as a prop; register it here so the settings store
@@ -782,6 +812,15 @@ function ShellBody({
   onOpenProject,
   onNavigateHome,
 }: ShellBodyProps) {
+  // P4 — view registry lookup. The core-editor-pack registers
+  // MapView under "scene" and PrefabsView under "prefabs"; the shell
+  // renders whatever the pack contributed via the registry. Tabs that
+  // still have a shell-side view (HomeScreen, ProjectTabView,
+  // AssetsView, ScriptsView, ComponentsView, the placeholder labs,
+  // ProjectView) fall through to the legacy branches below until a
+  // future commit migrates them into the pack too.
+  const PackView = useRegisteredView(tab);
+
   // Home: always rendered as-is. HomeScreen lists every project and
   // lets the user open one. When `projectId` is set (route is
   // `#/p/<id>` with no tab segment) Home highlights that project so
@@ -895,24 +934,15 @@ function ShellBody({
     );
   }
 
-  // Scene tab routes to MapView so the view can register the Scene
-  // picker into the tab strip's per-tab right slot. MapView is a stub
-  // today; subsequent waves rebuild it from the Map.png mockup.
-  if (tab === "scene") {
+  // Scene + Prefabs tabs route through the pack-contributed view
+  // registry (CORE_EDITOR_PACK.md §10 P4). The core-editor-pack
+  // registers MapView under "scene" and PrefabsView under "prefabs";
+  // the shell here is fully dynamic — `PackView` is whichever
+  // component the pack contributed.
+  if (PackView !== null && (tab === "scene" || tab === "prefabs")) {
     return (
       <div className="h-full overflow-hidden">
-        <MapView key={`scene::${projectId}`} />
-      </div>
-    );
-  }
-
-  // Prefabs tab routes to PrefabsView — the dockview-driven entity
-  // definition editor mirroring `Editor Design/Entities.png`. Wave 1
-  // ships the shell + empty panel stubs; Wave 2 fills the bodies.
-  if (tab === "prefabs") {
-    return (
-      <div className="h-full overflow-hidden">
-        <PrefabsView key={`prefabs::${projectId}`} />
+        <PackView key={`${tab}::${projectId}`} />
       </div>
     );
   }

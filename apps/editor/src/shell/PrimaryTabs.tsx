@@ -1,168 +1,36 @@
 import React from "react";
-import {
-  Home,
-  Grid3x3,
-  Boxes,
-  Blocks,
-  Image as ImageIcon,
-  Code2,
-  Film,
-  Palette,
-  AudioLines,
-  LayoutPanelTop,
-  Package,
-} from "lucide-react";
 import { TabStrip, type TabDescriptor } from "../components/ui/TabStrip";
 import { useTabContextSlotValue } from "../lib/tabContextSlot";
+import { useRegisteredTabs } from "../state/useTabRegistryStore";
 
 /**
- * PrimaryTabs — the 11-tab horizontal strip below the TopBar.
+ * PrimaryTabs — the top-of-shell horizontal tab strip.
  *
- * Tab list: Home / Scene / Prefabs / Components / Assets / Scripts /
- * Animation / Image Lab / Sound Lab / UI Builder / Project. (Scene =
- * the legacy "Map" tab renamed; Prefabs = the legacy "Entities" tab
- * renamed — see EDITOR_REDESIGN.md §6.3 + §12 Q4. Components is the
- * sister-to-Prefabs Component Builder — see
- * docs/EDITOR_DESIGN_INVENTORY.md §1.)
+ * Pre-P4 this file declared a hardcoded `PRIMARY_TABS` array. Post-P4
+ * (CORE_EDITOR_PACK.md §10) the array is fully pack-contributed —
+ * `useRegisteredTabs()` reads from `useTabRegistryStore`, which the
+ * core-editor-pack populates via `ctx.registerTab(...)` calls in its
+ * `scripts/setup.tsx`. A bare shell with no editor packs installed
+ * renders an empty strip (no tabs to render = no chrome above the
+ * body region).
  *
  * The active tab is persisted to localStorage under `editor.workflowMode`
  * so a tab reload lands the user back where they were. Keys are
  * cardboard-specific so they don't collide with other tools in the
  * browser profile.
  *
- * Tabs without a real implementation (Assets, Image Lab, Sound Lab,
- * UI Builder) are still selectable; the shell's body region renders an
- * EmptyState placeholder for them — they get real content in R4.
- *
  * Keyboard nav: when focus is on a tab button, ←/→ moves selection
  * between non-disabled tabs.
  */
 
-export type PrimaryTabId =
-  | "home"
-  | "scene"
-  | "prefabs"
-  | "components"
-  | "assets"
-  | "scripts"
-  | "animation"
-  | "imageLab"
-  | "soundLab"
-  | "uiBuilder"
-  | "project";
-
-export const PRIMARY_TAB_ORDER: ReadonlyArray<PrimaryTabId> = [
-  "home",
-  "scene",
-  "prefabs",
-  "components",
-  "assets",
-  "scripts",
-  "animation",
-  "imageLab",
-  "soundLab",
-  "uiBuilder",
-  "project",
-];
-
 /**
- * Canonical labels and icon assignments. Icons are 16px Lucide
- * glyphs — they match the §6.3 spec (Home/Grid3X3/Cuboid/ImageIcon/
- * Code2/Film/Package) where lucide-react has a direct equivalent, and
- * use the closest substitute otherwise (Boxes for "Cuboid"; Palette
- * for Image Lab, AudioLines for Sound Lab, LayoutPanelTop for UI
- * Builder — all new tabs added in §12 Q4).
+ * Tab id type — narrows to whatever ids the registered tabs ship with.
+ * Kept as a `string` alias so the runtime is fully dynamic — the
+ * shell no longer enumerates a closed union of valid ids. Pack
+ * authors are free to ship any id; the shell narrows on string
+ * equality when routing.
  */
-export const PRIMARY_TABS: ReadonlyArray<{
-  id: PrimaryTabId;
-  label: string;
-  icon: React.ReactNode;
-  /** Whether this tab requires an open project to be useful. */
-  requiresProject: boolean;
-  /** 1-sentence description shown as the stage-2 progressive tooltip
-   *  body (after ~5s hover). The tab's `label` doubles as the stage-1
-   *  label. Keep these short — they're surfaced inline, not in a docs
-   *  drawer. */
-  description: string;
-}> = [
-  {
-    id: "home",
-    label: "Home",
-    icon: <Home size={16} />,
-    requiresProject: false,
-    description: "Recent projects, import / create new.",
-  },
-  {
-    id: "scene",
-    label: "Scene",
-    icon: <Grid3x3 size={16} />,
-    requiresProject: true,
-    description: "Top-down 2D editor for cell layout, tiles, lighting.",
-  },
-  {
-    id: "prefabs",
-    label: "Prefabs",
-    icon: <Boxes size={16} />,
-    requiresProject: true,
-    description: "Entity prefab library — enemies, items, triggers, decor.",
-  },
-  {
-    id: "components",
-    label: "Components",
-    icon: <Blocks size={16} />,
-    requiresProject: true,
-    description: "Reusable scene-graph components.",
-  },
-  {
-    id: "assets",
-    label: "Assets",
-    icon: <ImageIcon size={16} />,
-    requiresProject: true,
-    description: "Project asset browser — textures, sounds, music, scripts.",
-  },
-  {
-    id: "scripts",
-    label: "Scripts",
-    icon: <Code2 size={16} />,
-    requiresProject: true,
-    description: "Game scripting editor — TypeScript / Lua / JS.",
-  },
-  {
-    id: "animation",
-    label: "Animation",
-    icon: <Film size={16} />,
-    requiresProject: true,
-    description: "Sprite + entity animation timeline.",
-  },
-  {
-    id: "imageLab",
-    label: "Image Lab",
-    icon: <Palette size={16} />,
-    requiresProject: true,
-    description: "Built-in pixel painter / image utility.",
-  },
-  {
-    id: "soundLab",
-    label: "Sound Lab",
-    icon: <AudioLines size={16} />,
-    requiresProject: true,
-    description: "Built-in audio editor / chiptune utility.",
-  },
-  {
-    id: "uiBuilder",
-    label: "UI Builder",
-    icon: <LayoutPanelTop size={16} />,
-    requiresProject: true,
-    description: "Game HUD + menu layout editor.",
-  },
-  {
-    id: "project",
-    label: "Project",
-    icon: <Package size={16} />,
-    requiresProject: true,
-    description: "Project-level settings — manifest, pack chain, build targets.",
-  },
-];
+export type PrimaryTabId = string;
 
 const WORKFLOW_MODE_KEY = "editor.workflowMode";
 
@@ -189,9 +57,7 @@ export function readPersistedTab(): PrimaryTabId | null {
       }
       return migrated;
     }
-    if ((PRIMARY_TAB_ORDER as ReadonlyArray<string>).includes(raw)) {
-      return raw as PrimaryTabId;
-    }
+    return raw;
   } catch {
     // localStorage may throw in sandboxed contexts. Fall through.
   }
@@ -209,7 +75,8 @@ export function writePersistedTab(id: PrimaryTabId): void {
 export interface PrimaryTabsProps {
   value: PrimaryTabId;
   onChange: (next: PrimaryTabId) => void;
-  /** When false, all tabs except `home` are disabled (no project open). */
+  /** When false, all tabs that declared `requiresProject: true` are
+   *  disabled. */
   hasProject: boolean;
   className?: string;
 }
@@ -220,23 +87,22 @@ export function PrimaryTabs({
   hasProject,
   className,
 }: PrimaryTabsProps) {
+  const registered = useRegisteredTabs();
+
   const tabs: ReadonlyArray<TabDescriptor<PrimaryTabId>> = React.useMemo(
     () =>
-      PRIMARY_TABS.map((t) => ({
+      registered.map((t) => ({
         id: t.id,
         label: t.label,
         icon: t.icon,
         disabled: t.requiresProject && !hasProject,
-        // Visual category dividers (no labels):
-        //   [home, scene, prefabs, components] | [assets, scripts,
-        //   animation, imageLab, soundLab, uiBuilder] | [project]
-        dividerAfter: t.id === "components" || t.id === "uiBuilder",
+        dividerAfter: t.dividerAfter,
         // Progressive tooltip wiring — TabStrip wraps each button in a
         // <Tooltip stages={...}/> when these are present.
         tooltipLabel: t.label,
         tooltipDescription: t.description,
       })),
-    [hasProject],
+    [registered, hasProject],
   );
 
   // Keyboard nav: ←/→ on the tablist moves selection between enabled
@@ -258,10 +124,6 @@ export function PrimaryTabs({
 
   // The active view registers what (if anything) shows at the right
   // edge of the tab strip via `useTabContextSlot` from `lib/tabContextSlot`.
-  // Reading the value here keeps the slot in sync with whatever the
-  // currently-mounted view installs. When no view registers content
-  // the value is null and TabStrip renders the strip without a right
-  // slot.
   const rightSlot = useTabContextSlotValue();
 
   return (

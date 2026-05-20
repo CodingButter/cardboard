@@ -1,44 +1,26 @@
 import React from "react";
-import { Tooltip } from "../../components/ui/Tooltip";
-import { useActiveScene } from "../../shell/ActiveSceneContext";
-import { MOCK_SCENE_SETTINGS } from "./scene-fixtures";
+import { Tooltip } from "../../../../apps/editor/src/components/ui/Tooltip";
+import { useActiveScene } from "@cardboard/editor-shell";
+import { MOCK_SCENE_SETTINGS } from "../../panels/scene-fixtures";
 
 /**
  * SceneTopBarSlot — the per-tab right-slot content for the Scene view.
  *
- * Replaces the old SceneTabContextPicker that used to live in this slot.
- * The picker has been relocated under the MapCanvas (see
- * `MapCanvasPanel`), freeing up the top-bar slot for at-a-glance scene
- * context readouts — mirroring the design comp in `Editor Design/Map.png`.
+ * Moved into the core-editor-pack as part of P4 (view-shell migration).
+ * The component is presentational chrome; it reads the active scene
+ * via the shell-SDK `useActiveScene` hook (singleton-bound) and the
+ * remaining values from pack-local fixtures.
  *
- * The readouts surface:
- *   - The active scene's NAME (e.g. "level-01") — a quick orientation
- *     anchor for which scene the panels are bound to.
- *   - The active scene's dimensions ("64 × 64") in tabular numerals.
- *   - The painted-cell count in the fixture scene ("247 cells"), which
- *     gives the user a sense of scene density without opening a panel.
+ * Tooltip is bundled into the pack — it's pure presentational primitive
+ * with no React Context / Zustand store dependency, so the pack-side
+ * copy and the host-side copy are byte-equivalent.
  *
- * NOTE: This slot previously rendered an "All changes saved" pip. That
- * indicator has been removed to avoid duplicating the SaveStatusPill
- * already shown in the shell TopBar (next to the Playtest/Save action
- * cluster). Save state is a global concern and lives in TopBar; this
- * slot is reserved for SCENE-scoped readouts only.
- *
- * Why a separate component (not inline in MapView):
- *   - Keeps `MapView` short and the slot content easy to swap.
- *   - The component can read its own context — `useActiveScene` gives us
- *     the active scene name for the tooltip without prop drilling.
- *   - Wave 3 will wire the cell-count and dimensions to real stores;
- *     keeping this self-contained makes that a one-file change.
- *
- * Progressive tooltips:
- *   - Every readout pairs with a 2-stage Tooltip (label at 1s, full
- *     description at 3s) per the project-wide hover standard.
+ * Wave 3 will swap the fixture cell count / dimensions for live
+ * `EditorProjectStore` / Wave-3 store reads.
  */
 
 /** Mock painted-cell count. Mirrors the fixture cells used by the
- *  MapCanvasPanel (~247 cells in the sample dungeon). Wave 3 reads the
- *  real count from `EditorProjectStore.cells`. */
+ *  MapCanvasPanel (~247 cells in the sample dungeon). */
 const MOCK_CELL_COUNT = 247;
 
 export function SceneTopBarSlot(): React.JSX.Element {

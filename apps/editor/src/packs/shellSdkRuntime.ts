@@ -44,6 +44,24 @@ import {
 import { EmptyState } from "../components/ui/EmptyState";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
 import { SceneTabContextPicker } from "../views/scene/SceneTabContextPicker";
+// P4 view-shell migration — views moving into the pack need access to
+// the DockShell primitive, the WorkspaceRail chrome, the per-tab
+// context-slot hook, the URL-hash router, and the editor-pack registry
+// hooks. Each one keys on a shell-singleton (React Context, Zustand
+// store, window.location.hash, or the module-level pack-load promise),
+// so bundling a duplicate inside the pack would silently fork the
+// state. CORE_EDITOR_PACK.md §10 P4.
+import { DockShell } from "../components/dock/DockShell";
+import { WorkspaceRail } from "../components/dock/WorkspacePanel";
+import {
+  useTabContextSlot,
+  useTabContextSlotValue,
+} from "../lib/tabContextSlot";
+import { useRoute, buildHash } from "../lib/router";
+import {
+  useEditorPackPanels,
+  useEditorPacksLoaded,
+} from "./editorPackLoader";
 
 /**
  * P3 batch D-light — narrow public surface over `tileTextureCache`.
@@ -205,6 +223,20 @@ export const shellSdk = {
   // pack-shipped surface that wants the same picker reaches for the
   // shared component, same as `EmptyState` / `PanelRenderer`.
   SceneTabContextPicker,
+  // P4 — view shells moving into the pack. Each entry below is
+  // singleton-bound (React Context, Zustand store, window.location,
+  // or a module-level promise cache). Bundling a duplicate inside
+  // the pack would create a shadow copy disconnected from the host
+  // — the dock layout wouldn't persist, the URL wouldn't drive route
+  // state, etc.
+  DockShell,
+  WorkspaceRail,
+  useTabContextSlot,
+  useTabContextSlotValue,
+  useRoute,
+  buildHash,
+  useEditorPackPanels,
+  useEditorPacksLoaded,
 } as const;
 
 export type ShellSdk = typeof shellSdk;

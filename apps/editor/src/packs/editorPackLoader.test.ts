@@ -50,6 +50,11 @@ function makeStubContext(): EditorPackContext {
     share: () => {},
     consume: () => undefined,
     registerPanel: () => () => {},
+    // P4 — view + layout + tab contributions (CORE_EDITOR_PACK.md §10).
+    registerView: () => () => {},
+    registerLayout: () => () => {},
+    registerPredefinedLayout: () => () => {},
+    registerTab: () => () => {},
     _registerCanvasRef: () => {},
     _unregisterCanvasRef: () => {},
     _firePanelMount: () => {},

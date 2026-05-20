@@ -46,6 +46,7 @@
 import React from "react";
 import { FileJson } from "lucide-react";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+import type { SerializedDockview } from "dockview";
 import type { DockPanelDef } from "../components/dock/DockShell";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
 import type { PanelSpec } from "../panel-renderer/types";
@@ -60,6 +61,18 @@ import {
   useDockPanelRegistryStore,
   useRegisteredPackPanels,
 } from "../state/useDockPanelRegistryStore";
+import {
+  useViewRegistryStore,
+  type ViewComponent,
+} from "../state/useViewRegistryStore";
+import {
+  useLayoutRegistryStore,
+  type RegisteredPredefinedLayout,
+} from "../state/useLayoutRegistryStore";
+import {
+  useTabRegistryStore,
+  type RegisteredTab,
+} from "../state/useTabRegistryStore";
 import { registerDynamicStore } from "../panel-renderer/resolveBinding";
 import { resolveLibrary } from "./libraryCache";
 import {
@@ -189,6 +202,45 @@ export interface EditorPackContext extends RendererPackContextSlice {
    */
   registerPanel: (def: DockPanelDef) => () => void;
   /**
+   * Register a TOP-LEVEL VIEW component for the given view id. The
+   * shell maps the active primary-tab id 1:1 to a view id and renders
+   * the registered component in the shell's main body region when the
+   * tab is active. Returns an unregister fn.
+   *
+   * The view component receives no shell-supplied props — it should
+   * read whatever it needs (route, active scene, project id) from the
+   * shell SDK hooks. See `docs/plans/CORE_EDITOR_PACK.md` §10 P4 for
+   * the design intent + the routing decision.
+   */
+  registerView: (viewId: string, component: ViewComponent) => () => void;
+  /**
+   * Register the DEFAULT dockview layout for a view id. The view shell
+   * reads this via `useDefaultLayout(viewId)` when no user-saved layout
+   * exists. Replaces the previous hardcoded `buildDefaultLayout()`
+   * functions in MapView / PrefabsView. Returns an unregister fn.
+   */
+  registerLayout: (viewId: string, layout: SerializedDockview) => () => void;
+  /**
+   * Register a NAMED PREDEFINED layout for a view id. Appears in the
+   * Workspace Layouts modal alongside any shell-side predefined
+   * layouts the WorkspacePanel still surfaces during P4. The `name`
+   * argument is the human-facing label; `entry` carries everything
+   * else (id, optional description, layout JSON). Returns an
+   * unregister fn.
+   */
+  registerPredefinedLayout: (
+    viewId: string,
+    name: string,
+    entry: Omit<RegisteredPredefinedLayout, "name">,
+  ) => () => void;
+  /**
+   * Register a primary-tab descriptor on the shell's top-level tab
+   * strip. Tabs render in registration order. The `id` doubles as
+   * the URL hash segment + `useRoute().tab` value the shell narrows
+   * on. Returns an unregister fn.
+   */
+  registerTab: (tab: RegisteredTab) => () => void;
+  /**
    * Read a value stashed via `share`. Returns `undefined` if no
    * sibling script wrote the key yet. Scripts can poll, or order
    * declarations in `manifest.scripts[]` so the consumer runs
@@ -279,6 +331,12 @@ interface PackLoadState {
    * DocksModal without a reload.
    */
   panelUnregistrars: Array<() => void>;
+  /** Unregister fns for views + layouts + tabs the pack contributed
+   *  via the P4 APIs. Aggregated into `packScriptCleanups` so disable
+   *  flushes everything in one shot. */
+  viewUnregistrars: Array<() => void>;
+  layoutUnregistrars: Array<() => void>;
+  tabUnregistrars: Array<() => void>;
   /** Mount counter per panel — defensive for future split-mount work. */
   mountCounters: Map<string, number>;
 }
@@ -343,6 +401,9 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     sharedSlots: new Map(),
     storeUnregistrars: [],
     panelUnregistrars: [],
+    viewUnregistrars: [],
+    layoutUnregistrars: [],
+    tabUnregistrars: [],
     mountCounters: new Map(),
   };
 
@@ -540,6 +601,49 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
         unregister();
       };
     },
+    registerView: (viewId, component) => {
+      const unregister = useViewRegistryStore
+        .getState()
+        .register(viewId, component);
+      state.viewUnregistrars.push(unregister);
+      return () => {
+        const idx = state.viewUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.viewUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
+    registerLayout: (viewId, layout) => {
+      const unregister = useLayoutRegistryStore
+        .getState()
+        .registerLayout(viewId, layout);
+      state.layoutUnregistrars.push(unregister);
+      return () => {
+        const idx = state.layoutUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.layoutUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
+    registerPredefinedLayout: (viewId, name, entry) => {
+      const full: RegisteredPredefinedLayout = { ...entry, name };
+      const unregister = useLayoutRegistryStore
+        .getState()
+        .registerPredefinedLayout(viewId, full);
+      state.layoutUnregistrars.push(unregister);
+      return () => {
+        const idx = state.layoutUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.layoutUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
+    registerTab: (tab) => {
+      const unregister = useTabRegistryStore.getState().register(tab);
+      state.tabUnregistrars.push(unregister);
+      return () => {
+        const idx = state.tabUnregistrars.indexOf(unregister);
+        if (idx >= 0) state.tabUnregistrars.splice(idx, 1);
+        unregister();
+      };
+    },
   };
 
   for (const scriptPath of scriptPaths) {
@@ -621,6 +725,21 @@ async function runEditorPackScript(
       }
       const moved = state.panelUnregistrars.splice(0);
       cleanups.push(...moved);
+    }
+    // P4 view + layout + tab unregistrars share the same lifecycle.
+    if (
+      state.viewUnregistrars.length > 0 ||
+      state.layoutUnregistrars.length > 0 ||
+      state.tabUnregistrars.length > 0
+    ) {
+      let cleanups = packScriptCleanups.get(packId);
+      if (!cleanups) {
+        cleanups = [];
+        packScriptCleanups.set(packId, cleanups);
+      }
+      cleanups.push(...state.viewUnregistrars.splice(0));
+      cleanups.push(...state.layoutUnregistrars.splice(0));
+      cleanups.push(...state.tabUnregistrars.splice(0));
     }
     console.debug(
       `[editorPackLoader] ${packId}/${scriptPath}: loaded`,

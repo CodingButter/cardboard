@@ -42,6 +42,30 @@
 // editor's pack loader (`apps/editor/src/packs/editorPackLoader.ts`).
 import type { EditorPackContext } from "../../../apps/editor/src/packs/editorPackLoader";
 
+// P4 view-shell + tab-strip + default-layout contributions. The
+// view components depend on `@cardboard/editor-shell` for the DockShell
+// primitive + the URL-hash router; the pack-builder rewrites those
+// imports into the host-populated `globalThis.__cardboard_editor_shell`
+// slot at bundle time (see `apps/editor/src/packs/shellSdkRuntime.ts`).
+import React from "react";
+import {
+  Home,
+  Grid3x3,
+  Boxes,
+  Blocks,
+  Image as ImageIcon,
+  Code2,
+  Film,
+  Palette,
+  AudioLines,
+  LayoutPanelTop,
+  Package,
+} from "lucide-react";
+import { MapView } from "../views/MapView";
+import { PrefabsView } from "../views/PrefabsView";
+import { SCENE_DEFAULT_LAYOUT } from "../layouts/scene-default";
+import { PREFABS_DEFAULT_LAYOUT } from "../layouts/prefabs-default";
+
 import { NotesPanel, MANIFEST as NOTES_MANIFEST } from "../panels/NotesPanel";
 import { OutputPanel, MANIFEST as OUTPUT_MANIFEST } from "../panels/OutputPanel";
 import { ProblemsPanel, MANIFEST as PROBLEMS_MANIFEST } from "../panels/ProblemsPanel";
@@ -240,6 +264,112 @@ export default function setup(ctx: EditorPackContext): () => void {
       ...JSON_PREVIEW_MANIFEST,
       component: JsonPreviewPanel,
       surface: false,
+    }),
+    // P4 — view-shell migration. MapView + PrefabsView are now
+    // pack-contributed; the editor shell reads the view registry to
+    // route the active primary tab.
+    ctx.registerView("scene", MapView),
+    ctx.registerView("prefabs", PrefabsView),
+    // P4 — default-layout contributions. Each view shell reads
+    // `useDefaultLayout(viewId)` to find these.
+    ctx.registerLayout("scene", SCENE_DEFAULT_LAYOUT),
+    ctx.registerLayout("prefabs", PREFABS_DEFAULT_LAYOUT),
+    // P4 — primary-tab contributions. Tabs render in registration
+    // order, so this ordering mirrors the legacy hardcoded
+    // PRIMARY_TABS array exactly. The shell-side `PrimaryTabs` strip
+    // reads `useRegisteredTabs()` — a fully disabled core pack leaves
+    // the strip empty + the editor renders the bare shell per the
+    // CORE_EDITOR_PACK.md §1 endpoint.
+    //
+    // Views for `scene` + `prefabs` are pack-contributed (registerView
+    // above). The remaining tabs still resolve to shell-rendered
+    // views (HomeScreen, ComponentsView, AssetsView, …) — those view
+    // migrations land in subsequent commits. The TAB STRIP itself is
+    // P4-complete: every tab descriptor is pack-owned.
+    ctx.registerTab({
+      id: "home",
+      label: "Home",
+      icon: <Home size={16} />,
+      requiresProject: false,
+      description: "Recent projects, import / create new.",
+    }),
+    ctx.registerTab({
+      id: "scene",
+      label: "Scene",
+      icon: <Grid3x3 size={16} />,
+      requiresProject: true,
+      description:
+        "Top-down 2D editor for cell layout, tiles, lighting.",
+    }),
+    ctx.registerTab({
+      id: "prefabs",
+      label: "Prefabs",
+      icon: <Boxes size={16} />,
+      requiresProject: true,
+      description:
+        "Entity prefab library — enemies, items, triggers, decor.",
+    }),
+    ctx.registerTab({
+      id: "components",
+      label: "Components",
+      icon: <Blocks size={16} />,
+      requiresProject: true,
+      description: "Reusable scene-graph components.",
+      // Visual divider matches the pre-P4 PrimaryTabs grouping:
+      // [home, scene, prefabs, components] | [assets, …] | [project]
+      dividerAfter: true,
+    }),
+    ctx.registerTab({
+      id: "assets",
+      label: "Assets",
+      icon: <ImageIcon size={16} />,
+      requiresProject: true,
+      description:
+        "Project asset browser — textures, sounds, music, scripts.",
+    }),
+    ctx.registerTab({
+      id: "scripts",
+      label: "Scripts",
+      icon: <Code2 size={16} />,
+      requiresProject: true,
+      description: "Game scripting editor — TypeScript / Lua / JS.",
+    }),
+    ctx.registerTab({
+      id: "animation",
+      label: "Animation",
+      icon: <Film size={16} />,
+      requiresProject: true,
+      description: "Sprite + entity animation timeline.",
+    }),
+    ctx.registerTab({
+      id: "imageLab",
+      label: "Image Lab",
+      icon: <Palette size={16} />,
+      requiresProject: true,
+      description: "Built-in pixel painter / image utility.",
+    }),
+    ctx.registerTab({
+      id: "soundLab",
+      label: "Sound Lab",
+      icon: <AudioLines size={16} />,
+      requiresProject: true,
+      description: "Built-in audio editor / chiptune utility.",
+    }),
+    ctx.registerTab({
+      id: "uiBuilder",
+      label: "UI Builder",
+      icon: <LayoutPanelTop size={16} />,
+      requiresProject: true,
+      description: "Game HUD + menu layout editor.",
+      dividerAfter: true,
+    }),
+    ctx.registerTab({
+      id: "project",
+      label: "Project",
+      icon: <Package size={16} />,
+      requiresProject: true,
+      description:
+        "Project-level settings — manifest, pack chain, build targets.",
     }),
   ];
 
