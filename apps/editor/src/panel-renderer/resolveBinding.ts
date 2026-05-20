@@ -231,6 +231,28 @@ const WRITERS: Record<string, Writer> = {
   "brush.kind": (value) => {
     if (typeof value === "string") useBrushStore.getState().setKind(value);
   },
+  // Active layer — written by the CellInspector layer dropdown via the
+  // Select node. Read-only `store.layer.activeId` had no writer
+  // because Phase 1 panels only READ it for the layer-name readout;
+  // the CellInspector migration adds the write path so the dropdown
+  // round-trips through the same `activate()` action LayersPanel uses.
+  "layer.activeId": (value) => {
+    if (typeof value === "string") useLayerStore.getState().activate(value);
+  },
+  // Per-cell height — the CellInspector NumberInput binds to
+  // `scene.cells[selected].height`. The lookup key is the FULL
+  // canonical path including the `[selected]` indexer — the resolver
+  // matches it verbatim against the WRITERS map. The writer reads
+  // the current selection at write-time via getState() so the
+  // resolved coord is fresh on every commit (the dropdown / number
+  // input fires after the selection has been mutated, never during).
+  "scene.cells[selected].height": (value) => {
+    const sel = useSelectionStore.getState().selected;
+    if (!sel) return;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    useSceneStore.getState().setCellHeight(sel.x, sel.y, n);
+  },
 };
 
 // ---------------------------------------------------------------------------

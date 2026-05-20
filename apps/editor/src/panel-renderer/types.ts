@@ -427,6 +427,52 @@ export interface ScrollRowNode {
 }
 
 /**
+ * Select — two-way bound single-value dropdown.
+ *
+ * Added for the CellInspector migration where the Layer field is a
+ * native `<select>` listing every registered layer (built-in + custom).
+ * Maps to the shell's `<Select>` primitive (styled native `<select>`
+ * with a custom chevron).
+ *
+ * Options can be:
+ *   • A static array of `{ value, label }` — known at spec-author time.
+ *   • A binding source `{ from: "<source-id>" }` — the renderer looks
+ *     the id up against a small allowlist of authored option sources
+ *     and emits the resolved list. Phase 1c only ships the `layers`
+ *     source (built-in `MOCK_LAYERS` + `useLayerStore.customLayers`,
+ *     ordered by `useLayerStore.order`), which is what the
+ *     CellInspector needs. Adding a new source is a one-line entry
+ *     in the renderer's `OPTION_SOURCES` map.
+ *
+ * Single-select only. Multi-select would need a distinct node — the
+ * CellInspector doesn't have one and we resist adding capacity ahead
+ * of need. (Phase 2 if a real panel asks for it.)
+ */
+export interface SelectOptionSpec {
+  value: string;
+  label: string;
+}
+
+export type SelectOptionsSource = "layers";
+
+export interface SelectNode {
+  type: "Select";
+  /** Two-way binding — must point at a string-valued store path. */
+  bind: StorePath;
+  /** Either a static option list OR `{ from: "<source>" }`. Mutually
+   *  exclusive — the renderer warns when both are present. */
+  options?: ReadonlyArray<SelectOptionSpec>;
+  /** Bind options to a renderer-managed source. See `SelectOptionsSource`. */
+  optionsFrom?: SelectOptionsSource;
+  /** Accessibility label. Defaults to `label`. */
+  ariaLabel?: string;
+  /** Optional label rendered above the input. Omit for inline use. */
+  label?: string;
+  /** Size variant — maps to the shell `<Select size>` prop. Defaults to "sm". */
+  size?: "sm" | "md";
+}
+
+/**
  * Discriminated union of every node type the Phase 0 renderer
  * understands. Adding a new node type is a four-step process:
  *   1. Add the interface above.
@@ -450,7 +496,8 @@ export type NodeSpec =
   | TooltipNode
   | IconNode
   | ToggleButtonNode
-  | ScrollRowNode;
+  | ScrollRowNode
+  | SelectNode;
 
 /**
  * Optional per-panel local-state slice. Phase 0 doesn't actually wire

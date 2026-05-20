@@ -35,6 +35,7 @@ import selectionInfoSpec from "./specs/selection-info.json";
 import toolPaletteSpec from "./specs/tool-palette.json";
 import brushSpec from "./specs/brush.json";
 import quickToolsSpec from "./specs/quick-tools.json";
+import cellInspectorSpec from "./specs/cell-inspector.json";
 import { MOCK_QUICK_TOOLS } from "../views/scene/scene-fixtures";
 import type { NodeSpec, PanelSpec } from "./types";
 
@@ -323,12 +324,17 @@ describe("resolveBinding — layer store", () => {
     expect(b.get()).toBe("walls");
   });
 
-  test("layer store has no writers registered (read-only)", () => {
+  test("writes layer.activeId through the store action", () => {
+    // Phase 1c (CellInspector migration) added a writer entry so the
+    // new Select node bound to `store.layer.activeId` round-trips
+    // through the same `activate()` action the LayersPanel uses.
     const b = resolveBinding("store.layer.activeId");
-    expect(b.set("walls")).toBe(false);
-    // Activate via the store action stayed available — the binding's
-    // write is just disallowed.
-    expect(useLayerStore.getState().activeId).toBe("floors");
+    expect(b.set("walls")).toBe(true);
+    expect(useLayerStore.getState().activeId).toBe("walls");
+    // Non-string writes degrade gracefully (the writer guards on
+    // typeof === "string") without throwing.
+    expect(b.set(42)).toBe(true);
+    expect(useLayerStore.getState().activeId).toBe("walls");
   });
 });
 
@@ -1304,5 +1310,238 @@ describe("New node-types (Phase 1b — QuickToolsPanel)", () => {
       format: "applyCount",
     };
     expect(node.format).toBe("applyCount");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-cell height writer — Phase 1c (CellInspector migration)
+// ---------------------------------------------------------------------------
+
+describe("resolveBinding — cells[selected].height writer", () => {
+  test("writes through setCellHeight on the selected cell", () => {
+    const b = resolveBinding("store.scene.cells[selected].height");
+    // No selection → writer no-ops without throwing.
+    expect(b.set(1.5)).toBe(true);
+    expect(useSceneStore.getState().cells).toEqual({});
+
+    useSelectionStore.getState().select({ x: 2, y: 3 });
+    expect(b.set(1.5)).toBe(true);
+    expect(useSceneStore.getState().cells["2,3"]?.height).toBe(1.5);
+    // Coerces numeric strings.
+    expect(b.set("3.25")).toBe(true);
+    expect(useSceneStore.getState().cells["2,3"]?.height).toBe(3.25);
+  });
+
+  test("reads through [selected] indexer round-trips with the writer", () => {
+    useSelectionStore.getState().select({ x: 7, y: 8 });
+    const b = resolveBinding("store.scene.cells[selected].height");
+    expect(b.set(2)).toBe(true);
+    expect(b.get()).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Select node — Phase 1c (CellInspector migration)
+// ---------------------------------------------------------------------------
+
+describe("New node-types (Phase 1c — CellInspector)", () => {
+  test("Select node accepts bind + optionsFrom + size", () => {
+    const node: NodeSpec = {
+      type: "Select",
+      bind: "store.layer.activeId",
+      optionsFrom: "layers",
+      ariaLabel: "Cell layer",
+      size: "sm",
+    };
+    expect(node.type).toBe("Select");
+    expect(node.optionsFrom).toBe("layers");
+    expect(node.size).toBe("sm");
+  });
+
+  test("Select node accepts a static options array", () => {
+    const node: NodeSpec = {
+      type: "Select",
+      bind: "store.layer.activeId",
+      options: [
+        { value: "a", label: "Alpha" },
+        { value: "b", label: "Beta" },
+      ],
+    };
+    expect(node.type).toBe("Select");
+    expect(node.options?.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CellInspector JSON spec — Phase 1c migration target
+// ---------------------------------------------------------------------------
+
+describe("CellInspector JSON spec", () => {
+  test("loads as a PanelSpec with id 'cell-inspector'", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    expect(spec.id).toBe("cell-inspector");
+    expect(spec.title).toBe("Cell Inspector");
+    expect(spec.category).toBe("Inspector");
+    expect(spec.dockKind).toBe("dockable-window");
+    expect(spec.root.type).toBe("Layout");
+  });
+
+  test("has an empty-state Conditional gated on selection === null", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Conditional" &&
+        obj.when === "store.selection.selected" &&
+        obj.equals === null
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("contains a NumberInput bound to cells[selected].height", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "NumberInput" &&
+        obj.bind === "store.scene.cells[selected].height"
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("contains a Select bound to layer.activeId with optionsFrom: layers", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Select" &&
+        obj.bind === "store.layer.activeId" &&
+        obj.optionsFrom === "layers"
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("Deselect button onClick points at scene.cell.deselect", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    const scripts: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (obj.type === "Button") {
+        const oc = obj.onClick as { script?: unknown } | undefined;
+        if (oc && typeof oc.script === "string") scripts.push(oc.script);
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(scripts).toContain("scene.cell.deselect");
+  });
+
+  test("uses the cell text formatter for the coord readout", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    let found = false;
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      if (
+        obj.type === "Text" &&
+        obj.format === "cell" &&
+        obj.text === "store.selection.selected"
+      ) {
+        found = true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(found).toBe(true);
+  });
+
+  test("every binding path in the spec resolves without throwing", () => {
+    const spec = cellInspectorSpec as PanelSpec;
+    const paths: string[] = [];
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      const obj = n as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if ((k === "bind" || k === "when") && typeof v === "string") {
+          paths.push(v);
+        }
+        if (
+          k === "text" &&
+          typeof v === "string" &&
+          (v.startsWith("store.") || v.startsWith("$store."))
+        ) {
+          paths.push(v);
+        }
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (typeof v === "object") visit(v);
+      }
+    };
+    visit(spec);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => resolveBinding(p).get()).not.toThrow();
+    }
+  });
+
+  test("invoking scene.cell.deselect via the registry clears the selection", async () => {
+    useCommandStore.getState().register({
+      id: "scene.cell.deselect",
+      title: "Deselect Cell",
+      run: () => {
+        useSelectionStore.getState().select(null);
+      },
+    });
+    useSelectionStore.getState().select({ x: 4, y: 4 });
+    expect(useSelectionStore.getState().selected).not.toBeNull();
+    await invokeScript({ script: "scene.cell.deselect" });
+    expect(useSelectionStore.getState().selected).toBeNull();
+  });
+
+  test("Select node bound to layer.activeId round-trips through the writer", () => {
+    // Direct binding-level test — the renderer's <Select onChange>
+    // calls binding.set(e.target.value), so this exercises the same
+    // path without a DOM.
+    const b = resolveBinding("store.layer.activeId");
+    expect(b.get()).toBe("floors");
+    expect(b.set("walls")).toBe(true);
+    expect(useLayerStore.getState().activeId).toBe("walls");
+    expect(b.get()).toBe("walls");
   });
 });

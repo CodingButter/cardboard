@@ -9,6 +9,7 @@
     "panels/selection-info-migrated.json",
     "panels/tool-palette-migrated.json",
     "panels/brush-migrated.json",
-    "panels/quick-tools-migrated.json"
+    "panels/quick-tools-migrated.json",
+    "panels/cell-inspector-migrated.json"
   ]
 }

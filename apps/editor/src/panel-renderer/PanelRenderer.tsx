@@ -48,8 +48,10 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { Slider } from "../components/ui/controls";
 import { NumberInput } from "../components/ui/NumberInput";
 import { ScrollRow } from "../components/ui/ScrollRow";
+import { Select } from "../components/ui/Select";
 import { TextInput } from "../components/ui/TextInput";
 import { Tooltip } from "../components/ui/Tooltip";
 import { cn } from "../lib/cn";
@@ -72,6 +74,8 @@ import type {
   NumberInputNode,
   PanelSpec,
   ScrollRowNode,
+  SelectNode,
+  SelectOptionSpec,
   SliderNode,
   SpacerNode,
   StorePath,
@@ -521,27 +525,26 @@ function SliderRenderer({ node }: { node: SliderNode }): React.JSX.Element {
       : Number(value);
   const displayValue = Number.isFinite(numericValue) ? numericValue : node.min;
   const fill = node.fill ?? true;
-  // The shell does not export a dedicated `<Slider>` primitive yet
-  // (brush-size was the first caller). Emitting `<input type="range">`
-  // directly with the same `accent-amber-500` styling matches the
-  // original BrushPanel TSX one-for-one — when a primitive lands, this
-  // is the swap site.
   const wrapper = fill ? "flex-1 min-w-0 flex items-center" : "flex items-center";
+  // Now routes through the shell's `<Slider>` primitive (from
+  // `components/ui/controls.tsx`) — gradient track, themed thumb,
+  // focus ring, and disabled-state styling all come for free. The
+  // shell primitive's API is a superset of what the JSON spec needs;
+  // we just don't expose the optional `valueLabel` / `valueChipVariant`
+  // until a real panel needs them.
   return (
     <div className={wrapper}>
-      <input
-        type="range"
+      <Slider
+        value={displayValue}
         min={node.min}
         max={node.max}
         step={node.step ?? 1}
-        value={displayValue}
-        aria-label={node.ariaLabel}
-        onChange={(e) => {
-          const parsed = Number.parseFloat(e.target.value);
-          if (Number.isFinite(parsed)) binding.set(parsed);
-        }}
-        className="w-full accent-amber-500"
+        onChange={(next: number) => binding.set(next)}
+        className="w-full"
       />
+      {node.ariaLabel ? (
+        <span className="sr-only">{node.ariaLabel}</span>
+      ) : null}
     </div>
   );
 }
@@ -824,6 +827,83 @@ function ScrollRowRenderer({
 }
 
 // ---------------------------------------------------------------------------
+// Select — two-way bound single-value dropdown.
+// ---------------------------------------------------------------------------
+
+/**
+ * Option-source registry — each entry produces an ordered
+ * `SelectOptionSpec[]` from the live store state. Sources are
+ * authored-side opaque ids so JSON spec authors don't reach into
+ * private store internals.
+ *
+ * Adding a new source = one entry here + an enum value in the
+ * `SelectOptionsSource` type union (types.ts).
+ *
+ * The `layers` source mirrors the CellInspector's TSX layerOptions
+ * memo: MOCK_LAYERS + customLayers ordered by `useLayerStore.order`.
+ * Names come from the fixture row for built-ins and from the custom-
+ * layer record otherwise; ids not present in either source are
+ * skipped (matches the original TSX behaviour).
+ */
+function useSelectOptions(
+  source: SelectNode["optionsFrom"],
+  staticOptions: SelectNode["options"],
+): ReadonlyArray<SelectOptionSpec> {
+  // Subscribe to the layer store unconditionally so hook order stays
+  // stable across renders. When the source isn't `layers` the
+  // subscription is a benign no-op (it just re-runs the static path).
+  const layerOrder = useLayerStore((s) => s.order);
+  const customLayers = useLayerStore((s) => s.customLayers);
+  return React.useMemo<ReadonlyArray<SelectOptionSpec>>(() => {
+    if (source === "layers") {
+      const nameById = new Map<string, string>();
+      for (const l of MOCK_LAYERS) nameById.set(l.id, l.name);
+      for (const c of customLayers) nameById.set(c.id, c.name);
+      const out: SelectOptionSpec[] = [];
+      for (const id of layerOrder) {
+        const name = nameById.get(id);
+        if (!name) continue;
+        out.push({ value: id, label: name });
+      }
+      return out;
+    }
+    if (staticOptions && staticOptions.length > 0) return staticOptions;
+    return [];
+  }, [source, staticOptions, layerOrder, customLayers]);
+}
+
+function SelectRenderer({ node }: { node: SelectNode }): React.JSX.Element {
+  const { value, binding } = useStoreBinding(node.bind);
+  const options = useSelectOptions(node.optionsFrom, node.options);
+  // Coerce the bound value into a string for the native <select>. Null
+  // / undefined → empty string (no option pre-selected). Booleans /
+  // numbers shouldn't be bound here but degrade to String() rather
+  // than throwing.
+  const displayValue =
+    typeof value === "string"
+      ? value
+      : value == null
+      ? ""
+      : String(value);
+  const select = (
+    <Select
+      value={displayValue}
+      options={options}
+      size={node.size ?? "sm"}
+      aria-label={node.ariaLabel ?? node.label}
+      onChange={(e) => binding.set(e.target.value)}
+    />
+  );
+  if (!node.label) return select;
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-zinc-400">{node.label}</span>
+      {select}
+    </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Recursive dispatch
 // ---------------------------------------------------------------------------
 
@@ -860,6 +940,8 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return <ToggleButtonRenderer node={node} />;
     case "ScrollRow":
       return <ScrollRowRenderer node={node} />;
+    case "Select":
+      return <SelectRenderer node={node} />;
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.

@@ -1,9 +1,42 @@
-// Wave 3.3 panel migration #6: wired to useSelectionStore (selected cell),
-// useSceneStore (per-cell data, multi-layer), and useLayerStore (active
-// layer + ordered layer list). The panel synthesizes a flat render-time
-// `cell` view at the active layer so the body JSX stays compact.
+// Wave 3.4 — TSX → JSON migration (Phase 1b, fifth cut).
+//
+// CellInspectorPanel is the most complex panel migrated so far. The
+// JSON renderer can express MOST of the body:
+//
+//   - Empty-state ("No cell selected")
+//   - Header — `(x, y)` coord + Deselect button
+//   - Height — NumberInput round-tripping through a new writer entry
+//     `scene.cells[selected].height` (dynamic-indexer write path; the
+//     resolver matches the canonical key string verbatim).
+//   - Layer — new `Select` node bound to `store.layer.activeId`, with
+//     options sourced from the renderer's `layers` source (MOCK_LAYERS
+//     + `useLayerStore.customLayers` ordered by `useLayerStore.order`).
+//
+// What stays in TSX (no renderer support yet):
+//
+//   - Type field — bound to `cells[selected].layers[<activeId>]` which
+//     would require a SECOND dynamic indexer. The resolver only
+//     special-cases `[selected]` today.
+//   - Tags chip wrap — needs an iteration node (map over a bound
+//     array). No `Repeat`/`ForEach` primitive exists today.
+//   - Add-tag inline input — needs panel-local state (the original
+//     `addingTag` / `tagDraft` pair). The renderer has no local-state
+//     surface yet.
+//   - Properties list — needs the same iteration primitive over a
+//     dynamic key set.
+//
+// Both halves render inside the same scrolling root so the panel still
+// feels like one inspector. Width-responsive narrow/tiny fallbacks
+// from the original TSX panel are dropped — the renderer has no
+// panel-width reactive context yet. Same gap as Brush / QuickTools;
+// flagged in the deliverable report.
+//
+// State source: Wave 3.3 — reads / writes via `useSceneStore`,
+// `useSelectionStore`, `useLayerStore`. The JSON spec binds directly
+// through the resolver; the inline TSX continues to call the store
+// actions imperatively for the un-migrated rows.
 import React from "react";
-import { SlidersHorizontal, X, Plus, ChevronDown } from "lucide-react";
+import { SlidersHorizontal, Plus } from "lucide-react";
 import type { DockPanelDef } from "../../../components/dock/DockShell";
 import { Tooltip } from "../../../components/ui/Tooltip";
 import { Chip } from "../../../components/ui/Chip";
@@ -14,51 +47,11 @@ import { registerCommand } from "../../../state/useCommandStore";
 import { useSelectionStore } from "../../../state/useSelectionStore";
 import { useSceneStore, cellKey } from "../../../state/useSceneStore";
 import { useLayerStore } from "../../../state/useLayerStore";
-import { MOCK_LAYERS } from "../scene-fixtures";
+import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
+import type { PanelSpec } from "../../../panel-renderer/types";
+import cellInspectorSpecJson from "../../../panel-renderer/specs/cell-inspector.json";
 
-/**
- * CellInspectorPanel — per-cell property editor.
- *
- * Visual target: the right column of `Editor Design/Map.png` — a
- * property-sheet for the selected cell. Header shows the cell coords
- * + type chip + a Deselect button. Body is a vertical list of:
- *   - Tags (flex-wrap pill row, each chip toggles on click, with a
- *     `+` button at the end that reveals an inline TextInput).
- *   - Properties (one row per `properties[k]`, control matches value
- *     type — boolean → ToggleSwitch, number → NumberInput, string →
- *     TextInput).
- *
- * Responsive behaviour: the panel watches its own size with a
- * `ResizeObserver`. Below `NARROW_WIDTH_PX` (currently 220px) the
- * property rows switch from a side-by-side `[label] [control]`
- * layout to a stacked `[label]\n[control]` two-row layout so labels
- * and inputs both stay readable on the narrow rail. Tag chips
- * naturally flex-wrap; no horizontal scroll is ever introduced.
- * Vertical overflow uses the themed scrollbar.
- *
- * Commands registered:
- *   - `scene.cell.deselect`
- *   - `scene.cell.addTag`
- *   - `scene.cell.tag.toggle.<tag>` (dynamic, one per current tag)
- *   - `scene.cell.property.toggle.<key>` (dynamic, per boolean prop)
- *   - `scene.cell.editProperty.<key>` (dynamic, per non-boolean prop;
- *     focuses the input)
- */
-
-/** Width below which the panel collapses to a single-column stacked
- *  layout. Picked empirically — at 160px the side-by-side label/control
- *  grid is still readable for short labels + compact controls; below
- *  that, controls need their own row. Kept low so the default rail
- *  width (content ~172px after scrollbar) stays side-by-side. */
-const NARROW_WIDTH_PX = 160;
-
-/** Below this width the panel hides the "CELL" eyebrow label so the
- *  (x,y) coord + deselect button still fit without clipping. */
-const COMPACT_HEADER_WIDTH_PX = 120;
-
-/** Below this width the panel renders a minimal "resize me" fallback —
- *  the full property sheet is unusable in that little space. */
-const TINY_WIDTH_PX = 120;
+const CELL_INSPECTOR_SPEC = cellInspectorSpecJson as PanelSpec;
 
 /** Format a camelCase property key as spaced uppercase for display.
  *  `blocksMovement` → `BLOCKS MOVEMENT`. The underlying `key` is
@@ -109,66 +102,21 @@ function propertyDescription(key: string, value: unknown): string {
   return `Property: ${key}.`;
 }
 
-/** Synthesized render-time view of a cell at the active layer. The body
- *  JSX consumes this flat shape; it is derived from the multi-layer
- *  `SceneCell` on every render and is never written to directly. */
-interface CellView {
-  x: number;
-  y: number;
-  /** Tile preset id at the active layer, or empty string if unset. */
-  type: string;
-  height: number;
-  layer: string;
-  tags: string[];
-  properties: Record<string, unknown>;
-}
-
+/**
+ * Hybrid CellInspector panel — JSON renderer for the header + Height +
+ * Layer rows, inline TSX for Type + Tags + Properties (renderer gaps
+ * documented at top of file). Both halves share the same scrolling
+ * root via `<PanelRenderer>` first + the TSX-driven extension after.
+ */
 export function CellInspectorPanel(): React.JSX.Element {
-  // Cross-panel store subscriptions. Keep each selector keyed/primitive
-  // so this panel does not re-render on every paint elsewhere on the map.
+  // Cross-panel store subscriptions for the un-migrated TSX rows. The
+  // JSON spec subscribes through its own bindings — these hooks are
+  // ONLY for the TSX-driven Type/Tags/Properties tail below.
   const selected = useSelectionStore((s) => s.selected);
   const activeLayer = useLayerStore((s) => s.activeId);
-  const layerOrder = useLayerStore((s) => s.order);
-  const customLayers = useLayerStore((s) => s.customLayers);
   const cellData = useSceneStore((s) =>
     selected ? s.cells[cellKey(selected.x, selected.y)] : undefined,
   );
-
-  // Synthesized flat view at the active layer. `null` ↔ no selection
-  // OR no painted content at the selected coord (the body switches on
-  // `selected` + `cellData` separately so an empty cell still renders
-  // a header).
-  const cell = React.useMemo<CellView | null>(() => {
-    if (!selected || !cellData) return null;
-    return {
-      x: selected.x,
-      y: selected.y,
-      type: cellData.layers[activeLayer] ?? "",
-      height: cellData.height,
-      layer: activeLayer,
-      tags: cellData.tags,
-      properties: cellData.properties,
-    };
-  }, [selected, cellData, activeLayer]);
-
-  // Resolved layer dropdown list — built-in fixtures + custom layers,
-  // ordered by `useLayerStore.order`. Names come from the fixture row
-  // for built-ins and from the custom layer record otherwise. Ids not
-  // present in either source are skipped (the active layer is always
-  // present in `order`, so the dropdown never has to fall back to an
-  // "unknown layer" option).
-  const layerOptions = React.useMemo<Array<{ id: string; name: string }>>(() => {
-    const nameById = new Map<string, string>();
-    for (const l of MOCK_LAYERS) nameById.set(l.id, l.name);
-    for (const c of customLayers) nameById.set(c.id, c.name);
-    const out: Array<{ id: string; name: string }> = [];
-    for (const id of layerOrder) {
-      const name = nameById.get(id);
-      if (!name) continue;
-      out.push({ id, name });
-    }
-    return out;
-  }, [layerOrder, customLayers]);
 
   const [addingTag, setAddingTag] = React.useState(false);
   const [tagDraft, setTagDraft] = React.useState("");
@@ -180,30 +128,14 @@ export function CellInspectorPanel(): React.JSX.Element {
     {},
   );
 
-  // Container width tracking for responsive layout.
-  const rootRef = React.useRef<HTMLDivElement>(null);
-  const [width, setWidth] = React.useState<number>(NARROW_WIDTH_PX + 1);
-  React.useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const narrow = width > 0 && width < NARROW_WIDTH_PX;
-  const compactHeader = width > 0 && width < COMPACT_HEADER_WIDTH_PX;
-  const tiny = width > 0 && width < TINY_WIDTH_PX;
-
   // Focus the add-tag input when entering "adding tag" mode.
   React.useEffect(() => {
     if (addingTag) addTagInputRef.current?.focus();
   }, [addingTag]);
 
   // ────────────────────────────────────────────────────────────────
-  // Mutators — all writes go to the scene store (or the selection /
-  // layer stores). Each mutator is a no-op when no cell is selected.
+  // Mutators — all writes go to the scene store (or the selection
+  // store). Each mutator is a no-op when no cell is selected.
 
   const toggleTag = React.useCallback(
     (tag: string) => {
@@ -257,14 +189,6 @@ export function CellInspectorPanel(): React.JSX.Element {
     [selected],
   );
 
-  const setHeight = React.useCallback(
-    (next: number) => {
-      if (!selected) return;
-      useSceneStore.getState().setCellHeight(selected.x, selected.y, next);
-    },
-    [selected],
-  );
-
   const setType = React.useCallback(
     (next: string) => {
       if (!selected) return;
@@ -281,10 +205,6 @@ export function CellInspectorPanel(): React.JSX.Element {
     },
     [selected, activeLayer],
   );
-
-  const changeActiveLayer = React.useCallback((next: string) => {
-    useLayerStore.getState().activate(next);
-  }, []);
 
   const deselect = React.useCallback(() => {
     useSelectionStore.getState().select(null);
@@ -310,7 +230,11 @@ export function CellInspectorPanel(): React.JSX.Element {
   }, [deselect]);
 
   // ────────────────────────────────────────────────────────────────
-  // Static command registrations (deselect + addTag).
+  // Static command registrations:
+  //   - `scene.cell.deselect` — invoked by the JSON Deselect button.
+  //   - `scene.cell.addTag` — invoked by the command palette /
+  //     keybinding entry; the TSX "+" button calls setAddingTag
+  //     directly because the JSON renderer can't toggle local state.
 
   React.useEffect(() => {
     const unregs = [
@@ -337,9 +261,9 @@ export function CellInspectorPanel(): React.JSX.Element {
 
   // ────────────────────────────────────────────────────────────────
   // Dynamic registrations: one toggle command per current tag.
-  const currentTags = cell?.tags ?? [];
+  const currentTags = cellData?.tags ?? [];
   React.useEffect(() => {
-    if (!cell) return;
+    if (!cellData || !selected) return;
     const unregs = currentTags.map((tag) =>
       registerCommand({
         id: `scene.cell.tag.toggle.${tag}`,
@@ -354,7 +278,7 @@ export function CellInspectorPanel(): React.JSX.Element {
     // keeps the effect deps stable (re-runs when the set genuinely
     // changes, not just when React re-renders).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTags.join("|"), cell !== null]);
+  }, [currentTags.join("|"), cellData !== undefined, selected !== null]);
 
   // ────────────────────────────────────────────────────────────────
   // Dynamic registrations: one command per property key — toggle for
@@ -362,19 +286,19 @@ export function CellInspectorPanel(): React.JSX.Element {
   const propertyEntries = React.useMemo<
     Array<{ key: string; value: unknown }>
   >(() => {
-    if (!cell) return [];
-    return Object.entries(cell.properties).map(([key, value]) => ({
+    if (!cellData) return [];
+    return Object.entries(cellData.properties).map(([key, value]) => ({
       key,
       value,
     }));
-  }, [cell]);
+  }, [cellData]);
 
   const propertyKeysSig = propertyEntries
     .map((p) => `${p.key}:${typeof p.value}`)
     .join("|");
 
   React.useEffect(() => {
-    if (!cell) return;
+    if (!cellData || !selected) return;
     const unregs: Array<() => void> = [];
     for (const { key, value } of propertyEntries) {
       if (typeof value === "boolean") {
@@ -401,88 +325,15 @@ export function CellInspectorPanel(): React.JSX.Element {
     }
     return () => unregs.forEach((u) => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyKeysSig, cell !== null]);
+  }, [propertyKeysSig, cellData !== undefined, selected !== null]);
 
   // ────────────────────────────────────────────────────────────────
   // Render — three states:
-  //   1. No selection         → "No cell selected" empty state.
-  //   2. Selected but empty   → minimal header with coord + paint hint.
-  //   3. Selected + painted   → full property sheet (below).
-
-  if (!selected) {
-    return (
-      <div
-        ref={rootRef}
-        data-panel="cell-inspector"
-        className="h-full w-full flex items-center justify-center text-center px-2"
-      >
-        <div className="text-[11px] uppercase tracking-wider text-(--color-fg-muted)">
-          No cell selected
-        </div>
-      </div>
-    );
-  }
-
-  if (!cellData || !cell) {
-    return (
-      <div
-        ref={rootRef}
-        data-panel="cell-inspector"
-        className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
-      >
-        <header className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 flex items-baseline gap-1.5 truncate">
-            {!compactHeader && (
-              <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
-                Cell
-              </span>
-            )}
-            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none min-w-0">
-              ({selected.x}, {selected.y})
-            </span>
-          </div>
-          <Tooltip
-            stages={[
-              { delay: 1000, content: <span>Deselect cell</span> },
-              {
-                delay: 3000,
-                content: (
-                  <div className="max-w-[400px]">
-                    <div className="font-semibold">Deselect</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                      Clear the current cell selection. Equivalent to
-                      pressing Escape in the canvas.
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
-            <button
-              type="button"
-              aria-label="Deselect cell"
-              onClick={deselect}
-              className={[
-                "shrink-0 w-6 inline-flex items-center justify-center",
-                "h-5 rounded border text-(--color-fg-secondary)",
-                "border-(--color-border-strong) bg-transparent",
-                "hover:text-(--color-fg-primary) hover:border-amber-500/60",
-                "transition-colors",
-              ].join(" ")}
-            >
-              <X size={11} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        </header>
-        <div className="text-[11px] text-(--color-fg-muted) text-center px-2 mt-2">
-          Empty cell at ({selected.x}, {selected.y})
-          <div className="text-[10px] mt-1">
-            Paint a tile to begin editing properties.
-          </div>
-        </div>
-      </div>
-    );
-  }
+  //   1. No selection         → JSON spec renders "No cell selected".
+  //   2. Selected but empty   → JSON header + height + layer rows; no
+  //      tags / properties below (cellData is undefined).
+  //   3. Selected + painted   → JSON spec + full TSX tail (Type / Tags
+  //      / Properties).
 
   // Sorted property list — booleans first, then numbers, then strings.
   const sortedProperties = [...propertyEntries].sort((a, b) => {
@@ -492,101 +343,25 @@ export function CellInspectorPanel(): React.JSX.Element {
     return r !== 0 ? r : a.key.localeCompare(b.key);
   });
 
-  // Tiny-width fallback — the full property sheet is unusable below
-  // ~120px so render a minimal "resize me" prompt instead.
-  if (tiny) {
-    return (
-      <div
-        ref={rootRef}
-        data-panel="cell-inspector"
-        className="h-full w-full flex items-center justify-center text-[10px] text-(--color-fg-muted) text-center px-2"
-      >
-        Resize panel to inspect cell
-      </div>
-    );
-  }
+  // Synthesised current "type" value (the cell's preset at the active
+  // layer, or empty string). Read once per render because the JSON
+  // spec already drives all other layer-dependent UI.
+  const cellTypeValue = cellData?.layers[activeLayer] ?? "";
 
   return (
     <div
-      ref={rootRef}
       data-panel="cell-inspector"
       className="h-full w-full flex flex-col gap-1 overflow-y-auto overflow-x-hidden text-(--color-fg-primary)"
     >
-      {/* Row 1 — Compact coord inline with deselect button.
-          Keeps the header to a single line so TYPE/TAGS can stay above
-          the fold at default ~180×270 panel size. */}
-      <header className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 flex items-baseline gap-1.5 truncate">
-          {!compactHeader && (
-            <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) shrink-0">
-              Cell
-            </span>
-          )}
-          <Tooltip
-            stages={[
-              {
-                delay: 1000,
-                content: <span>{`x: ${cell.x}, y: ${cell.y}`}</span>,
-              },
-              {
-                delay: 3000,
-                content: (
-                  <div className="max-w-[400px]">
-                    <div className="font-semibold">
-                      {`(${cell.x}, ${cell.y})`}
-                    </div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                      Coordinates of the selected cell in tile-space.
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
-            <span className="font-mono text-base text-(--color-fg-primary) tabular-nums truncate leading-none min-w-0">
-              ({cell.x}, {cell.y})
-            </span>
-          </Tooltip>
-        </div>
-
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Deselect cell</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Deselect</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Clear the current cell selection. Equivalent to
-                    pressing Escape in the canvas.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <button
-            type="button"
-            aria-label="Deselect cell"
-            onClick={deselect}
-            className={[
-              "shrink-0 w-6 inline-flex items-center justify-center",
-              "h-5 rounded border text-(--color-fg-secondary)",
-              "border-(--color-border-strong) bg-transparent",
-              "hover:text-(--color-fg-primary) hover:border-amber-500/60",
-              "transition-colors",
-            ].join(" ")}
-          >
-            <X size={11} aria-hidden="true" />
-          </button>
-        </Tooltip>
-      </header>
-
-      {/* Row 2 — Type. Single label:value row. */}
-      <section className="flex flex-col">
-        <Row
-          label={
+      <PanelRenderer spec={CELL_INSPECTOR_SPEC} />
+      {/* TSX-driven tail — only renders when a cell is selected AND has
+          painted content. The JSON spec above already handles the empty
+          + selected-but-empty states. */}
+      {selected && cellData ? (
+        <>
+          {/* Type — `cells[selected].layers[<activeId>]` is a double
+              dynamic indexer the resolver doesn't support yet. */}
+          <section className="flex flex-col gap-0.5 min-w-0 px-3">
             <Tooltip
               stages={[
                 { delay: 1000, content: <span>Type</span> },
@@ -604,306 +379,173 @@ export function CellInspectorPanel(): React.JSX.Element {
                 },
               ]}
             >
-              <span className="cursor-help">Type</span>
+              <span className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+                Type
+              </span>
             </Tooltip>
-          }
-          stacked={narrow}
-        >
-          <Tooltip
-            stages={[
-              { delay: 1000, content: <span>Type</span> },
-              {
-                delay: 3000,
-                content: (
-                  <div className="max-w-[400px]">
-                    <div className="font-semibold">Type</div>
-                    <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                      The tile preset stamped on this cell (e.g.
-                      wall-brick, floor-stone).
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          >
             <TextInput
-              value={cell.type}
+              value={cellTypeValue}
               onChange={(e) => setType(e.target.value)}
               aria-label="Cell type"
             />
-          </Tooltip>
-        </Row>
-      </section>
+          </section>
 
-      {/* Row 3 — TAGS. Promoted above height/layer so tag chips are
-          visible without scrolling at default panel size. Tags drive
-          engine behavior (solid/door/trigger/spawn) so they earn the
-          prime real-estate. */}
-      <section className="flex flex-col gap-0.5">
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Tags</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Tags</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Gameplay tags applied to this cell — drive engine
-                    behavior (solid, door, trigger, etc.).
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
-            Tags
-          </div>
-        </Tooltip>
-        <div className="flex flex-wrap gap-1 items-center">
-          {cell.tags.map((tag) => (
+          {/* Tags — iteration node not yet in the renderer surface. */}
+          <section className="flex flex-col gap-0.5 px-3">
             <Tooltip
-              key={tag}
               stages={[
-                { delay: 1000, content: <span>{tag}</span> },
+                { delay: 1000, content: <span>Tags</span> },
                 {
                   delay: 3000,
                   content: (
                     <div className="max-w-[400px]">
-                      <div className="font-semibold">{tag}</div>
-                      <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
-                        {tagDescription(tag)}
-                      </div>
-                    </div>
-                  ),
-                },
-              ]}
-            >
-              <Chip
-                variant="accent"
-                pill
-                onClick={() => toggleTag(tag)}
-              >
-                {tag}
-              </Chip>
-            </Tooltip>
-          ))}
-          {addingTag ? (
-            // Inline tag entry — Enter commits, Escape cancels.
-            <input
-              ref={addTagInputRef}
-              type="text"
-              value={tagDraft}
-              placeholder="new tag…"
-              onChange={(e) => setTagDraft(e.target.value)}
-              onBlur={() => commitNewTag(tagDraft)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  commitNewTag(tagDraft);
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  setTagDraft("");
-                  setAddingTag(false);
-                }
-              }}
-              className={[
-                "min-w-0 max-w-[8rem] h-5 px-1.5",
-                "rounded-full border text-[10px] leading-none",
-                "border-amber-500/60 bg-(--color-bg-card) text-(--color-fg-primary)",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
-              ].join(" ")}
-              aria-label="New tag"
-            />
-          ) : (
-            <Tooltip
-              stages={[
-                { delay: 1000, content: <span>Add tag</span> },
-                {
-                  delay: 3000,
-                  content: (
-                    <div className="max-w-[400px]">
-                      <div className="font-semibold">Add tag</div>
+                      <div className="font-semibold">Tags</div>
                       <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                        Append a new tag to this cell. Press Enter to
-                        confirm, Escape to cancel.
+                        Gameplay tags applied to this cell — drive engine
+                        behavior (solid, door, trigger, etc.).
                       </div>
                     </div>
                   ),
                 },
               ]}
             >
-              <button
-                type="button"
-                aria-label="Add tag"
-                onClick={() => setAddingTag(true)}
-                className={[
-                  "inline-flex items-center justify-center gap-0.5",
-                  "h-5 min-w-[20px] px-1.5 rounded-full border",
-                  "border-dashed border-(--color-border-strong) text-(--color-fg-muted)",
-                  "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
-                  "transition-colors text-[10px]",
-                ].join(" ")}
-              >
-                <Plus size={10} aria-hidden="true" />
-              </button>
+              <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+                Tags
+              </div>
             </Tooltip>
-          )}
-        </div>
-      </section>
-
-      {/* Row 4 — Height. Stacked as a full-row block — the panel rarely
-          renders wider than 280px so the side-by-side layout was mostly
-          noise. */}
-      <section className="flex flex-col gap-0.5 min-w-0">
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Height</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Height</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Cell height in scene units. Used by the raycaster
-                    for partial walls.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
-            Height
-          </div>
-        </Tooltip>
-        <div className="flex items-center gap-1 min-w-0">
-          <div className="flex-1 min-w-0">
-            <NumberInput
-              value={cell.height}
-              onChange={(next) => setHeight(next)}
-              precision={2}
-              step={0.1}
-              min={0}
-              max={8}
-              showSteppers
-            />
-          </div>
-          <span className="text-[10px] font-mono uppercase tracking-wider text-(--color-fg-muted) shrink-0">
-            m
-          </span>
-        </div>
-      </section>
-
-      {/* Row 5 — Layer. Stacked full-row block; native chevron is hidden
-          by `appearance-none` so we render our own. */}
-      <section className="flex flex-col gap-0.5 min-w-0">
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Layer</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Layer</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    The render layer this cell belongs to (Floors /
-                    Walls / Doors / Sprites / Lights).
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
-            Layer
-          </div>
-        </Tooltip>
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Active Layer</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Active Layer</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Switches which layer the inspector surfaces. The
-                    Type field shows the tile preset painted on the
-                    chosen layer for this cell.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <div className="relative">
-            <select
-              value={cell.layer}
-              onChange={(e) => changeActiveLayer(e.target.value)}
-              className={[
-                "w-full appearance-none rounded-md border bg-(--color-bg-card)",
-                "border-(--color-border-strong) text-(--color-fg-primary)",
-                "pl-2 pr-5 h-6 text-xs leading-none",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400",
-              ].join(" ")}
-              aria-label="Cell layer"
-            >
-              {layerOptions.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
+            <div className="flex flex-wrap gap-1 items-center">
+              {cellData.tags.map((tag) => (
+                <Tooltip
+                  key={tag}
+                  stages={[
+                    { delay: 1000, content: <span>{tag}</span> },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div className="max-w-[400px]">
+                          <div className="font-semibold">{tag}</div>
+                          <div className="text-[10px] text-(--color-fg-muted) mt-1 whitespace-normal">
+                            {tagDescription(tag)}
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <Chip
+                    variant="accent"
+                    pill
+                    onClick={() => toggleTag(tag)}
+                  >
+                    {tag}
+                  </Chip>
+                </Tooltip>
               ))}
-            </select>
-            <ChevronDown
-              size={10}
-              aria-hidden="true"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-(--color-fg-muted)"
-            />
-          </div>
-        </Tooltip>
-      </section>
+              {addingTag ? (
+                // Inline tag entry — Enter commits, Escape cancels.
+                <input
+                  ref={addTagInputRef}
+                  type="text"
+                  value={tagDraft}
+                  placeholder="new tag…"
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onBlur={() => commitNewTag(tagDraft)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitNewTag(tagDraft);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setTagDraft("");
+                      setAddingTag(false);
+                    }
+                  }}
+                  className={[
+                    "min-w-0 max-w-[8rem] h-5 px-1.5",
+                    "rounded-full border text-[10px] leading-none",
+                    "border-amber-500/60 bg-(--color-bg-card) text-(--color-fg-primary)",
+                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
+                  ].join(" ")}
+                  aria-label="New tag"
+                />
+              ) : (
+                <Tooltip
+                  stages={[
+                    { delay: 1000, content: <span>Add tag</span> },
+                    {
+                      delay: 3000,
+                      content: (
+                        <div className="max-w-[400px]">
+                          <div className="font-semibold">Add tag</div>
+                          <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                            Append a new tag to this cell. Press Enter to
+                            confirm, Escape to cancel.
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                >
+                  <button
+                    type="button"
+                    aria-label="Add tag"
+                    onClick={() => setAddingTag(true)}
+                    className={[
+                      "inline-flex items-center justify-center gap-0.5",
+                      "h-5 min-w-[20px] px-1.5 rounded-full border",
+                      "border-dashed border-(--color-border-strong) text-(--color-fg-muted)",
+                      "hover:border-amber-500/60 hover:text-(--color-fg-primary)",
+                      "transition-colors text-[10px]",
+                    ].join(" ")}
+                  >
+                    <Plus size={10} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </section>
 
-      {/* Properties — bottom of the stack, scrolls when overflowing. */}
-      <section className="flex flex-col gap-0.5">
-        <Tooltip
-          stages={[
-            { delay: 1000, content: <span>Properties</span> },
-            {
-              delay: 3000,
-              content: (
-                <div className="max-w-[400px]">
-                  <div className="font-semibold">Properties</div>
-                  <div className="text-[10px] text-(--color-fg-muted) mt-1">
-                    Per-cell key/value overrides — fine-grained behavior
-                    tweaks beyond tags.
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        >
-          <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
-            Properties
-          </div>
-        </Tooltip>
-        <div className="flex flex-col">
-          {sortedProperties.map(({ key, value }) => (
-            <PropertyControl
-              key={key}
-              propKey={key}
-              value={value}
-              narrow={narrow}
-              onToggleBoolean={() => toggleProperty(key)}
-              onChangeValue={(v) => setPropertyValue(key, v)}
-              inputRef={(el) => {
-                propertyRefs.current[key] = el;
-              }}
-            />
-          ))}
-        </div>
-      </section>
+          {/* Properties — iteration over dynamic key set not in the
+              renderer surface yet. */}
+          <section className="flex flex-col gap-0.5 px-3">
+            <Tooltip
+              stages={[
+                { delay: 1000, content: <span>Properties</span> },
+                {
+                  delay: 3000,
+                  content: (
+                    <div className="max-w-[400px]">
+                      <div className="font-semibold">Properties</div>
+                      <div className="text-[10px] text-(--color-fg-muted) mt-1">
+                        Per-cell key/value overrides — fine-grained behavior
+                        tweaks beyond tags.
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            >
+              <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) cursor-help">
+                Properties
+              </div>
+            </Tooltip>
+            <div className="flex flex-col">
+              {sortedProperties.map(({ key, value }) => (
+                <PropertyControl
+                  key={key}
+                  propKey={key}
+                  value={value}
+                  onToggleBoolean={() => toggleProperty(key)}
+                  onChangeValue={(v) => setPropertyValue(key, v)}
+                  inputRef={(el) => {
+                    propertyRefs.current[key] = el;
+                  }}
+                />
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -912,43 +554,9 @@ export function CellInspectorPanel(): React.JSX.Element {
 /* Helper components                                                     */
 /* -------------------------------------------------------------------- */
 
-/** Inline property row — uses CSS grid in side-by-side mode and a
- *  stacked flex layout in narrow mode. Kept local because the global
- *  `PropertyRow` primitive uses a 40/60 grid that's too narrow for
- *  the values here. */
-function Row({
-  label,
-  children,
-  stacked,
-}: {
-  label: React.ReactNode;
-  children: React.ReactNode;
-  stacked: boolean;
-}) {
-  if (stacked) {
-    return (
-      <div className="flex flex-col gap-1 py-px">
-        <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted)">
-          {label}
-        </div>
-        <div className="min-w-0">{children}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-2 py-px">
-      <div className="text-[10px] uppercase tracking-wider text-(--color-fg-muted) truncate">
-        {label}
-      </div>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
 interface PropertyControlProps {
   propKey: string;
   value: unknown;
-  narrow: boolean;
   onToggleBoolean: () => void;
   onChangeValue: (next: unknown) => void;
   inputRef: (el: HTMLInputElement | null) => void;
@@ -957,7 +565,6 @@ interface PropertyControlProps {
 function PropertyControl({
   propKey,
   value,
-  narrow,
   onToggleBoolean,
   onChangeValue,
   inputRef,
@@ -1090,36 +697,17 @@ function PropertyControl({
       inputRef(input ?? null);
     };
     return (
-      <div className={narrow ? "flex flex-col gap-1 py-px" : "py-px"}>
-        {narrow ? (
-          <>
-            {labelNode}
-            <div className="min-w-0" ref={numberRefShim}>
-              {control}
-            </div>
-          </>
-        ) : (
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-2">
-            {labelNode}
-            <div className="min-w-0" ref={numberRefShim}>
-              {control}
-            </div>
+      <div className="py-px">
+        <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-2">
+          {labelNode}
+          <div className="min-w-0" ref={numberRefShim}>
+            {control}
           </div>
-        )}
+        </div>
       </div>
     );
   }
 
-  // Boolean + string rendering — boolean control is small so we keep
-  // it right-aligned on the side-by-side layout.
-  if (narrow) {
-    return (
-      <div className="flex flex-col gap-1 py-px">
-        {labelNode}
-        <div className="min-w-0 flex items-center">{control}</div>
-      </div>
-    );
-  }
   return (
     <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-2 py-px">
       {labelNode}
