@@ -46,6 +46,41 @@ built on Cardboard's engine gets these benefits without per-game
 boilerplate — not because we built a dev framework, but because
 pack-first architecture made content the source of truth.
 
+## The marketplace fallout — extension packs
+
+This naming unlocks a third-party extension ecosystem **for free**.
+Pack-chain doesn't care whether a pack came from the user's project,
+from Cardboard's own bridge package, or from a third-party developer
+extension. All three flow through the same loader.
+
+That means anyone can ship **editor extension packs** that:
+- Get installed into the editor (not the user's game).
+- Auto-inject into the chain at dev-time whenever the user opens
+  a game.
+- Tree-shake out of production exports automatically.
+
+Example: someone builds a **"Konami code" cheat pack** — `up up down
+down left right left right B A select start` enables dev-mode cheats
+in any game it's installed into. Pure dev tool, zero production
+weight, single-install activation. Game-specific creators can ship
+their own cheat packs for their playtest teams. Generic packs ship
+in a marketplace.
+
+Other examples a third party could build:
+- **AI playtest agent** — auto-explores the game, reports issues.
+- **Performance profiler** — FPS / draw-call / memory HUD.
+- **Runtime state inspector** — live entity/component dock panel.
+- **Network simulator** — latency + packet loss injection.
+- **Accessibility checker** — contrast, hit-area, text-size audits.
+- **Telemetry recorder** — capture sessions for replay analysis.
+- **AI asset generator** — Claude/OpenAI calls for variations.
+- **Localization helper** — string extraction + translation mgmt.
+
+This is **VS Code's plugin model, but for game development**, riding
+the apg pack-chain we already shipped. We didn't design a
+marketplace; we stumbled into one because pack-chain is the universal
+extension point.
+
 ## Bridge package location
 
 When implemented:
