@@ -266,6 +266,113 @@ interface PanelDndPayload {
 }
 ```
 
+## 5c. Game-as-dock + initial IDB mirror (the live test-on-device flow)
+
+**This isn't a new platform — it's the apg pack system paying off.**
+Games are already data-driven, declarative, IDB-backed by design.
+Everything in this section is just exposing what the pack
+architecture already enables.
+
+The game runner is itself a panel kind (`kind=gamePreview`). Sidecar
+mounts the existing game runner component; it reads from the
+sidecar's LOCAL IDB replica via the same `IdbAssetPack` contract
+the desktop game uses. No special-casing — it's just another
+mountable panel that happens to render a game.
+
+This unlocks **live test-on-device**: edit a script on the desktop,
+the phone game responds the moment the asset bus fires. Change a
+tile preset, the sprite updates in the running game on the phone
+instantly. No build step. No reload. No deploy cycle.
+
+Why this works without per-game effort: pack content IS the source
+of truth. The engine reads packs from IDB. Hot-reload is "the pack
+content changed, refetch." Any game built on Cardboard's engine
+gets this for free — the dev experience is a benefit of pack-first
+architecture, not a separate framework to wire up.
+
+### Three sync layers, in order of granularity
+
+1. **State layer (Zustand stores).** Multi-transport
+   (LocalStorage + BroadcastChannel + WebRTC). Small payloads,
+   frequent. Tool selection, brush state, selection, scene cell
+   deltas, layer visibility — everything the panels read.
+
+2. **Asset bus (`cardboard:assets` BroadcastChannel + WebRTC
+   bridge).** Per-id invalidations: `{kind: "changed", id}`. Sidecar
+   listens; on receipt it requests the new blob over the WebRTC
+   data channel and writes it to its local IDB. Selectors in the
+   game runner re-fire automatically.
+
+3. **Initial IDB mirror on pair.** When a new sidecar connects,
+   desktop streams a snapshot of the relevant IDB tables over the
+   data channel. Sidecar populates its local IDB. From there,
+   layers 1 and 2 keep them in sync. Snapshot scope depends on
+   what the sidecar's mounted panel kind needs:
+   - `gamePreview` → full asset + scene snapshot.
+   - `minimap` → scene cells + layers only.
+   - `tilePresets` → tile presets registry only.
+   - The handshake message includes a `requiresIdbTables: string[]`
+     hint so desktop sends only what's needed.
+
+### Granular hot-reload categorization
+
+The game runner subscribes to specific store SLICES, not the whole
+store. Each kind of editor change has its own granular handler that
+patches the runtime without restart. Fallback to restart only when
+the change can't be applied incrementally.
+
+| Change | Patch strategy | Difficulty | Game state preserved? |
+|---|---|---|---|
+| Cell painted at (x, y) | Swap mesh material on that one cell | Easy | ✅ |
+| Tile preset edited (color/sprite) | Re-tint every cell using that preset | Easy | ✅ |
+| Layer visibility toggled | Show/hide the layer's mesh group | Easy | ✅ |
+| New entity spawned (editor side) | Add to runtime entity list | Easy | ✅ |
+| Entity deleted | Remove instance, dispose mesh | Easy | ✅ |
+| Settings (ambient / fog) | Update light/material params live | Easy | ✅ |
+| Prefab schema field added | New instances use new schema; existing migrate? | Medium | ⚠️ Decision per case |
+| Script body edited | Module-cache invalidate + re-import + re-bind on tick boundary | **Hard** | ⚠️ Mostly (depends on closure state) |
+| Scene dims resized | Rebuild scene root, restart physics | **Hard / restart** | ❌ |
+| Camera setup changed | Restart camera; player pose preserved if possible | Medium | ⚠️ Partial |
+
+**The architectural enabler:** editor state lives in
+`useSceneStore` + IDB; runtime state (player position, score, NPC AI
+ticks, animation timers) lives in the GAME runtime's own data
+structures. Stores emit fine-grained changes; runtime patches its
+mesh tree but leaves its own state alone.
+
+**Script hot-reload approach:**
+- Pack scripts run in a custom sandbox/module loader (per the
+  engine architecture).
+- When a script blob changes (asset bus invalidation), the loader
+  flushes the module cache for that id, re-imports the new body,
+  and rebinds entities using that script on the next tick boundary.
+- Pre-tick swap → next tick runs new body; mid-tick edits queue
+  until end-of-tick. No half-applied states.
+- Closure state (private variables held inside the script module)
+  is reset on reload. Components store their persistent state on
+  the entity, not in the script module — design rule.
+
+**Restart-only kinds:**
+- Scene dimension changes (resize playfield).
+- Engine-version changes (rare).
+- User-requested restart from a Reset button.
+
+### Implementation order
+
+- **D10 (PeerJS wiring)** lands layers 1 + 2 minus the WebRTC
+  bridge for the asset bus — same-machine cross-window already
+  works for both.
+- **D10b** extends the asset bus with a WebRTC transport (mirrors
+  the Zustand transport pattern from §6.1).
+- **D11 (touch variants)** unchanged.
+- **NEW: D11b — Initial IDB mirror.** Handshake protocol +
+  snapshot streaming + sidecar IDB hydration. Required before
+  `gamePreview` can actually run on a sidecar.
+- **NEW: D13b — Game-as-dock.** Register the existing game runner
+  as a `DockPanelDef` with `mountable: { remote: true,
+  touchVariant: true }`. Sidecar mounts it; reads its local IDB
+  via the same `IdbAssetPack` contract the desktop game uses.
+
 ## 6. Forward-compat hooks (design NOW, implement later)
 
 The user's instinct: design the transport seams in the existing
