@@ -1,34 +1,42 @@
-// Wave 3.4 — TSX → JSON migration.
+// Phase-1b JSON-driven panel — TSX shell registers commands; the
+// visible body is rendered by the host's `<PanelRenderer/>` against
+// the bundled JSON spec.
 //
-// BrushPanel is now rendered from a JSON PanelSpec via
-// `<PanelRenderer/>`. This file is the thin TSX host that:
-//
-//   1. Imports the JSON spec from `panel-renderer/specs/brush.json`.
-//   2. Registers the static `scene.brush.sizeUp` / `sizeDown` commands
-//      that the JSON spec's +/- buttons invoke by id.
-//   3. Re-registers per-brush `scene.brush.set.<id>` commands on mount
-//      so the tile-grid's `onClick` script refs resolve. Each command
-//      sets `useBrushStore.kind` and is keyword-rich for the command
-//      palette (matches the original TSX panel's contract).
-//   4. Exports the same MANIFEST shape MapView consumes.
+// P3 batch D migration. Moved from
+// `apps/editor/src/views/scene/panels/BrushPanel.tsx` into the
+// core-editor-pack with no behavioural changes. The JSON spec moves
+// alongside the TSX file — `brush.json` now lives in this directory
+// rather than `apps/editor/src/panel-renderer/specs/`. The shell-side
+// copy stays until P4 retires it (PanelRenderer.test.ts still
+// references it).
 //
 // Width-based tiny fallback ("Resize panel" message at panel width
 // <120px) is NOT migrated — the JSON renderer has no panel-width
-// reactive context yet. Flagged in the deliverable report; the spec
-// just renders its content and lets Dockview clip when narrow.
+// reactive context yet.
 //
-// State source: Wave 3.3 — reads / writes via `useBrushStore`. The
-// JSON spec binds directly to `store.brush.kind` (tile pressed state)
-// and `store.brush.size` (slider + number input value).
+// State source: Wave 3.3 — reads / writes via `useBrushStore`
+// (externalised through `@cardboard/editor-shell`). The JSON spec
+// binds directly to `store.brush.kind` (tile pressed state) and
+// `store.brush.size` (slider + number input value).
 import React from "react";
 import { Brush } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useBrushStore } from "../../../state/useBrushStore";
-import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
-import type { PanelSpec } from "../../../panel-renderer/types";
-import { MOCK_BRUSHES, type BrushRow } from "../scene-fixtures";
-import brushSpecJson from "../../../panel-renderer/specs/brush.json";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
+// Externalised — `useBrushStore` is a Wave-3 synced store with a
+// per-key BroadcastChannel; the pack MUST read/write through the host
+// singleton or it gets an isolated copy with no cross-window sync.
+// `PanelRenderer` subscribes to host-side stores via the binding
+// resolver so it MUST run with host React + host stores too.
+import {
+  PanelRenderer,
+  registerCommand,
+  useBrushStore,
+} from "@cardboard/editor-shell";
+import { MOCK_BRUSHES, type BrushRow } from "./scene-fixtures";
+// Bun bundles JSON imports inline — the spec ships as a literal in
+// the compiled pack-script bundle.
+import brushSpecJson from "./brush.json";
 
 const BRUSH_SPEC = brushSpecJson as PanelSpec;
 

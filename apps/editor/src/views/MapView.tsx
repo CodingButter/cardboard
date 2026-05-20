@@ -10,14 +10,8 @@ import {
   type DockPanelDef,
 } from "../components/dock/DockShell";
 import { WorkspaceRail } from "../components/dock/WorkspacePanel";
-import {
-  ToolPalettePanel,
-  MANIFEST as TOOL_PALETTE_MANIFEST,
-} from "./scene/panels/ToolPalettePanel";
-import {
-  BrushPanel,
-  MANIFEST as BRUSH_MANIFEST,
-} from "./scene/panels/BrushPanel";
+// ToolPalettePanel migrated to the core-editor-pack (P3 batch D).
+// BrushPanel migrated to the core-editor-pack (P3 batch D).
 // TilePresetPanel migrated to the core-editor-pack (P3 batch B).
 import {
   MapCanvasPanel,
@@ -37,10 +31,7 @@ import {
 // (CORE_EDITOR_PACK.md §10 P3 batch A). Registered via the pack's
 // `scripts/setup.tsx` with `surface: false`.
 // SelectionInfoPanel migrated to the core-editor-pack (P3 batch B).
-import {
-  SceneSettingsPanel,
-  MANIFEST as SCENE_SETTINGS_MANIFEST,
-} from "./scene/panels/SceneSettingsPanel";
+// SceneSettingsPanel migrated to the core-editor-pack (P3 batch D).
 import {
   MinimapPanel,
   MANIFEST as MINIMAP_MANIFEST,
@@ -56,10 +47,7 @@ import {
 // `ctx.registerPanel({...NOTES_MANIFEST, component: NotesPanel})` at
 // load time; the def merges into the live registry via
 // `useEditorPackPanels()` below.
-import {
-  AssetReferencesPanel,
-  MANIFEST as ASSET_REFERENCES_MANIFEST,
-} from "./scene/panels/AssetReferencesPanel";
+// AssetReferencesPanel migrated to the core-editor-pack (P3 batch D).
 import {
   useEditorPackPanels,
   useEditorPacksLoaded,
@@ -108,8 +96,8 @@ const PANELS: readonly DockPanelDef[] = [
   // PanelSurface card unless it explicitly opts out. MapCanvas opts
   // out so the painter fills the dock content area flush (no card
   // chrome around the canvas).
-  { ...TOOL_PALETTE_MANIFEST, component: ToolPalettePanel },
-  { ...BRUSH_MANIFEST, component: BrushPanel },
+  // ToolPalettePanel — contributed via the core-editor-pack (P3 batch D).
+  // BrushPanel — contributed via the core-editor-pack (P3 batch D).
   // TilePresetPanel — contributed via the core-editor-pack (P3 batch B).
   { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false, headerless: true },
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
@@ -120,7 +108,7 @@ const PANELS: readonly DockPanelDef[] = [
   // at runtime (P3 batch A; registered with `surface: false`).
   // SelectionInfoPanel — contributed via the core-editor-pack (P3 batch
   // B; registered with `surface: false, headerless: true`).
-  { ...SCENE_SETTINGS_MANIFEST, component: SceneSettingsPanel },
+  // SceneSettingsPanel — contributed via the core-editor-pack (P3 batch D).
   // Opt-in Wave-2 panels — discoverable via the DocksModal but
   // intentionally absent from the default layout below.
   { ...MINIMAP_MANIFEST, component: MinimapPanel },
@@ -128,7 +116,7 @@ const PANELS: readonly DockPanelDef[] = [
   { ...PREFAB_BROWSER_MANIFEST, component: PrefabBrowserPanel },
   // LightingPanel — contributed via the core-editor-pack (P3 batch A).
   // NotesPanel — contributed via the core-editor-pack at runtime.
-  { ...ASSET_REFERENCES_MANIFEST, component: AssetReferencesPanel },
+  // AssetReferencesPanel — contributed via the core-editor-pack (P3 batch D).
   // Editor packs (loaded asynchronously via `useEditorPackPanels`)
   // are MERGED into this list at runtime — see the MapView component
   // body below. The dogfooding proof point: the JSON-authored

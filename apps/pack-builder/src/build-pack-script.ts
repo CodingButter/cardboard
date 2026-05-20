@@ -365,6 +365,8 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const useSceneStore = __mod.useSceneStore;
               export const cellKey = __mod.cellKey;
               export const useSelectionStore = __mod.useSelectionStore;
+              export const useBrushStore = __mod.useBrushStore;
+              export const useToolStore = __mod.useToolStore;
               export const EmptyState = __mod.EmptyState;
               export const PanelRenderer = __mod.PanelRenderer;
             `,

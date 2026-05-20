@@ -52,6 +52,11 @@ import { LayersPanel, MANIFEST as LAYERS_MANIFEST } from "../panels/LayersPanel"
 import { TilePresetPanel, MANIFEST as TILE_PRESET_MANIFEST } from "../panels/TilePresetPanel";
 import { QuickToolsPanel, MANIFEST as QUICK_TOOLS_MANIFEST } from "../panels/QuickToolsPanel";
 import { SelectionInfoPanel, MANIFEST as SELECTION_INFO_MANIFEST } from "../panels/SelectionInfoPanel";
+// P3 batch D — the remaining small Scene panels.
+import { SceneSettingsPanel, MANIFEST as SCENE_SETTINGS_MANIFEST } from "../panels/SceneSettingsPanel";
+import { AssetReferencesPanel, MANIFEST as ASSET_REFERENCES_MANIFEST } from "../panels/AssetReferencesPanel";
+import { BrushPanel, MANIFEST as BRUSH_MANIFEST } from "../panels/BrushPanel";
+import { ToolPalettePanel, MANIFEST as TOOL_PALETTE_MANIFEST } from "../panels/ToolPalettePanel";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // Compose each panel def the same way MapView's old static `PANELS`
@@ -114,6 +119,23 @@ export default function setup(ctx: EditorPackContext): () => void {
       component: SelectionInfoPanel,
       surface: false,
       headerless: true,
+    }),
+    // P3 batch D — default-surface panels in MapView.
+    ctx.registerPanel({
+      ...SCENE_SETTINGS_MANIFEST,
+      component: SceneSettingsPanel,
+    }),
+    ctx.registerPanel({
+      ...ASSET_REFERENCES_MANIFEST,
+      component: AssetReferencesPanel,
+    }),
+    ctx.registerPanel({
+      ...BRUSH_MANIFEST,
+      component: BrushPanel,
+    }),
+    ctx.registerPanel({
+      ...TOOL_PALETTE_MANIFEST,
+      component: ToolPalettePanel,
     }),
   ];
 

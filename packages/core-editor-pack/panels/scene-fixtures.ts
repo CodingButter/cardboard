@@ -174,3 +174,181 @@ export interface SelectionInfoRow {
   layer: string;
   selection: string;
 }
+
+// ---------------------------------------------------------------------------
+// Brushes — consumed by BrushPanel for chip labels + per-id command
+// registration. The JSON spec ("brush.json" alongside this file) binds
+// the tile grid to this roster by id.
+
+export interface BrushRow {
+  id: string;
+  name: string;
+  kind: string;
+  /** Long-form tooltip body. */
+  description?: string;
+}
+
+export const MOCK_BRUSHES = [
+  {
+    id: "brush-single",
+    name: "Single",
+    kind: "point",
+    description: "Single-cell point brush — paints one cell at a time.",
+  },
+  {
+    id: "brush-square-3",
+    name: "Square 3x3",
+    kind: "square",
+    description:
+      "Square footprint brush — paints an N×N block centered on the cursor (size controls N).",
+  },
+  {
+    id: "brush-circle-5",
+    name: "Circle 5",
+    kind: "circle",
+    description:
+      "Circular footprint brush — paints a disc of radius `size` centered on the cursor.",
+  },
+  {
+    id: "brush-line",
+    name: "Line",
+    kind: "line",
+    description:
+      "Line brush — click + drag to paint a straight line of cells between the press and release points.",
+  },
+  {
+    id: "brush-rect",
+    name: "Rectangle",
+    kind: "rect",
+    description:
+      "Rectangle brush — click + drag to fill an axis-aligned rectangle between the press and release points.",
+  },
+] as const satisfies readonly BrushRow[];
+
+// ---------------------------------------------------------------------------
+// Tools + sub-tools — consumed by ToolPalettePanel.
+
+export interface ToolSubRow {
+  id: string;
+  name: string;
+}
+
+export interface ToolRow {
+  id: string;
+  name: string;
+  /** Lucide icon name string — Wave 2 maps these to the icon component. */
+  icon: string;
+  /** Long-form tooltip body. */
+  description?: string;
+  subTools?: ToolSubRow[];
+}
+
+export const MOCK_TOOLS = [
+  {
+    id: "select",
+    name: "Select",
+    icon: "MousePointer2",
+    description:
+      "Pick existing cells, entities, or selection regions. Hold Shift to add to selection.",
+    subTools: [
+      { id: "select-box", name: "Box" },
+      { id: "select-polygon", name: "Polygon" },
+      { id: "select-contiguous", name: "Contiguous" },
+    ],
+  },
+  {
+    id: "paint",
+    name: "Paint",
+    icon: "Brush",
+    description:
+      "Paint the active tile preset onto the canvas. Drag to paint multiple cells.",
+  },
+  {
+    id: "eraser",
+    name: "Eraser",
+    icon: "Eraser",
+    description: "Remove content from the active layer. Drag to erase a region.",
+  },
+  {
+    id: "eye-dropper",
+    name: "Dropper",
+    icon: "Pipette",
+    description: "Sample the cell under the cursor as the active brush.",
+  },
+  {
+    id: "fill",
+    name: "Fill",
+    icon: "PaintBucket",
+    description:
+      "Flood-fill the area under the cursor with the active tile preset.",
+  },
+  {
+    id: "entity-place",
+    name: "Entity",
+    icon: "PlusSquare",
+    description: "Place the selected entity prefab on the canvas.",
+  },
+] as const satisfies readonly ToolRow[];
+
+// ---------------------------------------------------------------------------
+// Scene settings — consumed by SceneSettingsPanel for seed/reset values.
+
+export interface SceneSettingsRow {
+  name: string;
+  dimensions: { w: number; h: number };
+  /** 0..1, fog density. */
+  fog: number;
+  /** 0..1, ambient light level. */
+  ambient: number;
+}
+
+export const MOCK_SCENE_SETTINGS = {
+  name: "level-01",
+  dimensions: { w: 64, h: 64 },
+  fog: 0.25,
+  ambient: 0.35,
+} as const satisfies SceneSettingsRow;
+
+// ---------------------------------------------------------------------------
+// Asset references — consumed by AssetReferencesPanel.
+//
+// `AssetKind` here mirrors `SemanticAssetKind` from the editor's
+// `apps/editor/src/state/dnd/payload.ts`. We inline the union as a
+// pack-local type rather than reaching into the editor source — types
+// erase at compile time and the pack doesn't need any runtime symbol
+// from `payload.ts`. If the canonical union widens, this list widens
+// in lockstep (low churn).
+
+export type AssetKind =
+  | "script"
+  | "texture"
+  | "sprite"
+  | "sound"
+  | "music"
+  | "prefab"
+  | "tilePreset"
+  | "scene";
+
+export interface AssetRefRow {
+  id: string;
+  name: string;
+  kind: AssetKind;
+  path: string;
+  /** Number of references to this asset across the scene. */
+  refCount: number;
+  /** Whether the asset is missing on disk. */
+  missing: boolean;
+  description: string;
+}
+
+export const MOCK_ASSETS = [
+  { id: "tex-wall-brick", name: "wall-brick.png", kind: "texture", path: "textures/walls/brick.png", refCount: 142, missing: false, description: "Brick wall texture, 256x256." },
+  { id: "tex-wall-concrete", name: "wall-concrete.png", kind: "texture", path: "textures/walls/concrete.png", refCount: 78, missing: false, description: "Concrete wall texture." },
+  { id: "tex-wall-glass", name: "wall-glass.png", kind: "texture", path: "textures/walls/glass.png", refCount: 4, missing: true, description: "Glass wall texture. MISSING — referenced but not on disk." },
+  { id: "tex-floor-stone", name: "floor-stone.png", kind: "texture", path: "textures/floors/stone.png", refCount: 220, missing: false, description: "Stone floor tile." },
+  { id: "snd-door-open", name: "door-open.ogg", kind: "sound", path: "sounds/door/open.ogg", refCount: 12, missing: false, description: "Door opening SFX." },
+  { id: "snd-grunt-alert", name: "grunt-alert.ogg", kind: "sound", path: "sounds/enemies/grunt-alert.ogg", refCount: 8, missing: false, description: "Grunt enemy alert vocal." },
+  { id: "music-level-01", name: "level-01.mp3", kind: "music", path: "music/level-01.mp3", refCount: 1, missing: false, description: "Level 01 background music loop." },
+  { id: "prefab-barrel-ref", name: "barrel.prefab", kind: "prefab", path: "prefabs/barrel.prefab", refCount: 7, missing: false, description: "Standard barrel prop prefab." },
+  { id: "script-trigger-door", name: "trigger-door.ts", kind: "script", path: "scripts/triggers/door.ts", refCount: 3, missing: false, description: "Door trigger behavior script." },
+] as const satisfies readonly AssetRefRow[];

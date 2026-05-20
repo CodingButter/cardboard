@@ -34,6 +34,8 @@ import { useTilePresetStore } from "../state/useTilePresetStore";
 import { useTilePresetRegistryStore } from "../state/useTilePresetRegistryStore";
 import { useSceneStore, cellKey } from "../state/useSceneStore";
 import { useSelectionStore } from "../state/useSelectionStore";
+import { useBrushStore } from "../state/useBrushStore";
+import { useToolStore } from "../state/useToolStore";
 import { EmptyState } from "../components/ui/EmptyState";
 import { PanelRenderer } from "../panel-renderer/PanelRenderer";
 
@@ -98,6 +100,19 @@ export const shellSdk = {
   // ring-select, modifier-key extensions) write here. Singleton +
   // broadcast applies.
   useSelectionStore,
+  // P3 batch D — BrushPanel reads `kind`/`size`, calls `setKind` /
+  // `sizeUp` / `sizeDown`. Any pack contributing an alternate brush
+  // picker (favourite-brush palette, drag-resize brush handle,
+  // tablet-pressure-aware sizing) writes through the same store. The
+  // synced store carries cross-window updates so a popped-out brush
+  // picker stays in sync with the main window.
+  useBrushStore,
+  // P3 batch D — ToolPalettePanel reads `activeTool` / `activeSubTool`
+  // and writes via `setActiveTool` / `setActiveSubTool`. Same singleton
+  // + broadcast story as the other Wave-3 stores. Pack-shipped tool
+  // contributions (custom select sub-tools, alternate paint variants)
+  // route through this hook.
+  useToolStore,
   // P3 batch A — `EmptyState` is presentational, but it pulls in a
   // binary asset import (`logo.png with { type: "file" }`) that the
   // pack-builder's `Bun.build` can't resolve cleanly when bundling

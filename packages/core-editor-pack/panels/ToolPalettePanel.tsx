@@ -1,19 +1,14 @@
-// Wave 3.4 — TSX → JSON migration.
+// Phase-1b JSON-driven panel — TSX shell registers commands; the
+// visible body is rendered by the host's `<PanelRenderer/>` against
+// the bundled JSON spec.
 //
-// ToolPalettePanel is now rendered from a JSON PanelSpec via
-// `<PanelRenderer/>`. This file is the thin TSX host that:
-//
-//   1. Imports the JSON spec from `panel-renderer/specs/tool-palette.json`.
-//   2. Registers per-tool + per-sub-tool commands (the JSON spec's
-//      ToggleButtons invoke these by id). Each tool gets a
-//      `scene.tool.select.<id>` command + each sub-tool a
-//      `scene.tool.subTool.select.<parent>.<sub>` command.
-//   3. Mirrors the original panel's "default sub-tool" behaviour by
-//      initialising `tool.activeSubTool[activeTool]` to the first sub-
-//      tool when unset. The original TSX did this implicitly at render
-//      time via `resolveSubTool`; the JSON spec binds directly to the
-//      store record so the fallback has to live in the store now.
-//   4. Exports the same MANIFEST shape MapView consumes.
+// P3 batch D migration. Moved from
+// `apps/editor/src/views/scene/panels/ToolPalettePanel.tsx` into the
+// core-editor-pack with no behavioural changes. The JSON spec moves
+// alongside the TSX file — `tool-palette.json` now lives in this
+// directory rather than `apps/editor/src/panel-renderer/specs/`. The
+// shell-side copy stays until P4 retires it (PanelRenderer.test.ts
+// still references it).
 //
 // The visible body (tile grid + sub-tool strip + progressive tooltips)
 // is fully expressed in JSON. Sub-tools are enumerated per-tool in the
@@ -21,13 +16,21 @@
 // drop-in change when a new tool grows sub-tools.
 import React from "react";
 import { Hammer } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useToolStore } from "../../../state/useToolStore";
-import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
-import type { PanelSpec } from "../../../panel-renderer/types";
-import { MOCK_TOOLS, type ToolRow } from "../scene-fixtures";
-import toolPaletteSpecJson from "../../../panel-renderer/specs/tool-palette.json";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
+// Externalised — `useToolStore` is a Wave-3 synced store with a
+// per-key BroadcastChannel; the pack MUST read/write through the host
+// singleton or it gets an isolated copy with no cross-window sync.
+import {
+  PanelRenderer,
+  registerCommand,
+  useToolStore,
+} from "@cardboard/editor-shell";
+import { MOCK_TOOLS, type ToolRow } from "./scene-fixtures";
+// Bun bundles JSON imports inline — the spec ships as a literal in
+// the compiled pack-script bundle.
+import toolPaletteSpecJson from "./tool-palette.json";
 
 const TOOL_PALETTE_SPEC = toolPaletteSpecJson as PanelSpec;
 

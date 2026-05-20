@@ -1,3 +1,8 @@
+// P3 batch D migration. Moved from
+// `apps/editor/src/views/scene/panels/AssetReferencesPanel.tsx` into
+// the core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `scene-fixtures` and the shell-SDK
+// externals (`EmptyState` + `registerCommand`).
 import React from "react";
 import {
   Box,
@@ -11,15 +16,20 @@ import {
   Volume2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitive — safe to bundle (no singleton state).
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Externalised — `EmptyState` ships via the shell SDK because it
+// transitively imports a binary asset (`logo.png`) the pack-builder
+// can't resolve; `registerCommand` routes into the host command
+// store + palette.
+import { EmptyState, registerCommand } from "@cardboard/editor-shell";
 import {
   MOCK_ASSETS,
   type AssetKind,
   type AssetRefRow,
-} from "../scene-fixtures";
+} from "./scene-fixtures";
 
 /**
  * AssetReferencesPanel — table of every asset referenced by the

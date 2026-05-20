@@ -1,11 +1,23 @@
+// P3 batch D migration. Moved from
+// `apps/editor/src/views/scene/panels/SceneSettingsPanel.tsx` into the
+// core-editor-pack with no behavioural changes — only the import
+// paths flipped to pack-local `scene-fixtures` and the shell-SDK
+// externals (`useSceneStore` + `registerCommand`).
 import React from "react";
 import { Settings, Minus, Plus, RotateCcw } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { NumberInput } from "../../../components/ui/NumberInput";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useSceneStore } from "../../../state/useSceneStore";
-import { MOCK_SCENE_SETTINGS } from "../scene-fixtures";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+// Presentational primitives — safe to bundle into the pack (no
+// singleton state, no host-side React Context to coordinate with).
+// Relative-imported the same way the other P3 pack panels reach for
+// Tooltip.
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+import { NumberInput } from "../../../apps/editor/src/components/ui/NumberInput";
+// Externalised — `useSceneStore` is a Wave-3 synced store with a
+// per-key BroadcastChannel; the pack MUST read/write through the host
+// singleton or it gets an isolated copy with no cross-window sync.
+import { registerCommand, useSceneStore } from "@cardboard/editor-shell";
+import { MOCK_SCENE_SETTINGS } from "./scene-fixtures";
 
 /**
  * SceneSettingsPanel — per-scene render knobs.

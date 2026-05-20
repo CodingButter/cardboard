@@ -1,0 +1,342 @@
+{
+  "id": "tool-palette",
+  "title": "Tools",
+  "category": "Tools",
+  "dockKind": "dockable-window",
+  "state": {},
+  "rootOptions": {
+    "padding": 0,
+    "bare": true
+  },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 2,
+    "className": "h-full w-full min-h-0 overflow-y-auto",
+    "children": [
+      {
+        "type": "Layout",
+        "direction": "grid",
+        "gap": 1,
+        "columnsMinPx": 54,
+        "columnsMaxPx": 64,
+        "childHeightPx": 60,
+        "childFlex": "1",
+        "children": [
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Select" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Select" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Pick existing cells, entities, or selection regions. Hold Shift to add to selection."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "select",
+              "text": "Select",
+              "icon": "MousePointer2",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.select" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Paint" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Paint" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Paint the active tile preset onto the canvas. Drag to paint multiple cells."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "paint",
+              "text": "Paint",
+              "icon": "Brush",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.paint" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Eraser" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Eraser" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Remove content from the active layer. Drag to erase a region."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "eraser",
+              "text": "Eraser",
+              "icon": "Eraser",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.eraser" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Dropper" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Dropper" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Sample the cell under the cursor as the active brush."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "eye-dropper",
+              "text": "Dropper",
+              "icon": "Pipette",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.eye-dropper" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Fill" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Fill" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Flood-fill the area under the cursor with the active tile preset."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "fill",
+              "text": "Fill",
+              "icon": "PaintBucket",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.fill" }
+            }
+          },
+          {
+            "type": "Tooltip",
+            "side": "right",
+            "stages": [
+              { "delay": 1000, "content": { "type": "Text", "text": "Entity" } },
+              {
+                "delay": 3000,
+                "content": {
+                  "type": "Layout",
+                  "direction": "column",
+                  "gap": 1,
+                  "children": [
+                    { "type": "Heading", "level": 4, "text": "Entity" },
+                    {
+                      "type": "Text",
+                      "variant": "muted",
+                      "text": "Place the selected entity prefab on the canvas."
+                    }
+                  ]
+                }
+              }
+            ],
+            "child": {
+              "type": "ToggleButton",
+              "shape": "tile",
+              "bind": "store.tool.activeTool",
+              "activeValue": "entity-place",
+              "text": "Entity",
+              "icon": "PlusSquare",
+              "iconSize": 18,
+              "onClick": { "script": "scene.tool.select.entity-place" }
+            }
+          }
+        ]
+      },
+      {
+        "type": "Conditional",
+        "when": "store.tool.activeTool",
+        "equals": "select",
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 0,
+            "className": "h-7 shrink-0 pt-1",
+            "children": [
+              {
+                "type": "ScrollRow",
+                "contentClassName": "flex items-center gap-1",
+                "children": [
+                  {
+                    "type": "Tooltip",
+                    "side": "bottom",
+                    "stages": [
+                      { "delay": 1000, "content": { "type": "Text", "text": "Box" } },
+                      {
+                        "delay": 3000,
+                        "content": {
+                          "type": "Layout",
+                          "direction": "column",
+                          "gap": 1,
+                          "children": [
+                            { "type": "Heading", "level": 4, "text": "Box" },
+                            {
+                              "type": "Text",
+                              "variant": "muted",
+                              "text": "Box sub-mode of Select: Pick existing cells, entities, or selection regions. Hold Shift to add to selection."
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "child": {
+                      "type": "ToggleButton",
+                      "shape": "chip",
+                      "bind": "store.tool.activeSubTool.select",
+                      "activeValue": "select-box",
+                      "text": "Box",
+                      "onClick": { "script": "scene.tool.subTool.select.select.select-box" }
+                    }
+                  },
+                  {
+                    "type": "Tooltip",
+                    "side": "bottom",
+                    "stages": [
+                      { "delay": 1000, "content": { "type": "Text", "text": "Polygon" } },
+                      {
+                        "delay": 3000,
+                        "content": {
+                          "type": "Layout",
+                          "direction": "column",
+                          "gap": 1,
+                          "children": [
+                            { "type": "Heading", "level": 4, "text": "Polygon" },
+                            {
+                              "type": "Text",
+                              "variant": "muted",
+                              "text": "Polygon sub-mode of Select: Pick existing cells, entities, or selection regions. Hold Shift to add to selection."
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "child": {
+                      "type": "ToggleButton",
+                      "shape": "chip",
+                      "bind": "store.tool.activeSubTool.select",
+                      "activeValue": "select-polygon",
+                      "text": "Polygon",
+                      "onClick": { "script": "scene.tool.subTool.select.select.select-polygon" }
+                    }
+                  },
+                  {
+                    "type": "Tooltip",
+                    "side": "bottom",
+                    "stages": [
+                      { "delay": 1000, "content": { "type": "Text", "text": "Contiguous" } },
+                      {
+                        "delay": 3000,
+                        "content": {
+                          "type": "Layout",
+                          "direction": "column",
+                          "gap": 1,
+                          "children": [
+                            { "type": "Heading", "level": 4, "text": "Contiguous" },
+                            {
+                              "type": "Text",
+                              "variant": "muted",
+                              "text": "Contiguous sub-mode of Select: Pick existing cells, entities, or selection regions. Hold Shift to add to selection."
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "child": {
+                      "type": "ToggleButton",
+                      "shape": "chip",
+                      "bind": "store.tool.activeSubTool.select",
+                      "activeValue": "select-contiguous",
+                      "text": "Contiguous",
+                      "onClick": { "script": "scene.tool.subTool.select.select.select-contiguous" }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
