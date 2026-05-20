@@ -47,6 +47,7 @@
         "@babel/parser": "^7.29.3",
         "@babel/types": "^7.29.0",
         "@monaco-editor/react": "^4.7.0",
+        "@msgpack/msgpack": "^2.8.0",
         "@two_5_d/default-pack": "workspace:*",
         "@two_5_d/engine": "workspace:*",
         "@types/qrcode": "^1.5.6",
@@ -57,6 +58,7 @@
         "lucide-react": "^1.16.0",
         "monaco-editor": "^0.55.1",
         "peerjs": "^1.5.5",
+        "peerjs-js-binarypack": "^2.1.0",
         "qr-scanner": "^1.4.2",
         "qrcode": "^1.5.4",
         "react": "^19.1.0",
@@ -64,6 +66,7 @@
         "tailwind-merge": "^2.6.0",
         "tailwindcss": "^4.3.0",
         "three": "^0.169.0",
+        "webrtc-adapter": "^9.0.5",
         "zustand": "^5.0.13",
       },
       "devDependencies": {

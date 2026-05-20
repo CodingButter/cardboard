@@ -1,36 +1,24 @@
-// Side-effect import of the self-contained browser bundle — this avoids
-// pulling in `peerjs`'s ESM `dist/bundler.mjs`, which leaves
-// `peerjs-js-binarypack`, `webrtc-adapter`, and `@msgpack/msgpack` as
-// externals that aren't installed in this workspace. The `.min.js`
-// build inlines them and registers `window.Peer` globally.
+// Proper ESM import — uses peerjs's `dist/bundler.mjs` entry. This
+// requires the three peer-deps that `bundler.mjs` externalises to be
+// installed in this workspace (they aren't transitively visible at the
+// top of `node_modules/` under bun's hoisting): `peerjs-js-binarypack`,
+// `webrtc-adapter`, and `@msgpack/msgpack`. They were added to this
+// package's dependencies so the workspace resolves them.
 //
-// `import * as` + `void` is mandatory: a bare side-effect import gets
-// TREE-SHAKEN by `bun build` in production mode (the bundler proves
-// the module has no observable effect on its caller and drops it).
-// In production the `window.Peer` assignment then never runs and the
-// sidecar crashes with "Peer is not a constructor". The namespace
-// import + `void` reference is enough to make the bundler retain it.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error — `peerjs/dist/peerjs.min.js` is a self-contained
-// browser bundle with no .d.ts. We only need its side effects.
-import * as _peerJsSideEffect from "peerjs/dist/peerjs.min.js";
-void _peerJsSideEffect;
-// Types come from the package's `dist/types.d.ts` — they don't pull
-// the broken module path because they're erased at compile time.
+// History: previously this file did `import "peerjs/dist/peerjs.min.js"`
+// (the self-contained browser bundle that assigns `window.Peer`). That
+// worked in dev because `Bun.serve` transpiles on demand without tree-
+// shaking, but in production `bun build` tree-shook the side-effect
+// import — the 5.3 MB bundle contained ZERO peerjs symbols, and the
+// sidecar crashed with "Peer is not a constructor" on Pages. The
+// `import * as _x; void _x;` workaround was also insufficient. Using a
+// real named import anchors peerjs into the dependency graph properly,
+// so the bundler can't drop it.
+import { Peer } from "peerjs";
 import type { Peer as PeerCtor, DataConnection } from "peerjs";
 import { create } from "zustand";
 import type { SidecarIdentity } from "./identityStore";
 import type { DeviceTier } from "./deviceTier";
-
-declare global {
-  interface Window {
-    Peer: typeof PeerCtor;
-  }
-}
-
-/** Pulled off `window` so we can stub it in tests if ever needed. */
-const Peer: typeof PeerCtor = (globalThis as { Peer?: typeof PeerCtor }).Peer
-  ?? (typeof window !== "undefined" ? window.Peer : undefined as unknown as typeof PeerCtor);
 
 /**
  * SideCar PeerJS transport — wraps the `peerjs` Peer + DataConnection

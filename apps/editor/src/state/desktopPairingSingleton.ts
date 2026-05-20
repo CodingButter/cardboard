@@ -1,20 +1,13 @@
-// Side-effect import of the self-contained browser bundle — same
-// approach as `sidecar/lib/peerTransport.ts`. The `.min.js` build
-// inlines `peerjs-js-binarypack`, `webrtc-adapter`, and `@msgpack/msgpack`
-// and registers `window.Peer` globally; the ESM `dist/bundler.mjs`
-// leaves those as un-installed externals.
-//
-// `import * as` + `void` is mandatory: a bare side-effect import gets
-// tree-shaken by `bun build` in production mode → `window.Peer` is
-// never assigned → "Peer is not a constructor". The namespace import
-// + reference is enough to make the bundler retain it.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error — `peerjs/dist/peerjs.min.js` is a self-contained
-// browser bundle with no .d.ts. We only need its side effects.
-import * as _peerJsSideEffect from "peerjs/dist/peerjs.min.js";
-void _peerJsSideEffect;
-// Types are erased at compile time so this import doesn't pull the
-// broken module path.
+// Proper ESM import — see the matching JSDoc in
+// `sidecar/lib/peerTransport.ts` for the full history. Briefly:
+// previously this file used a side-effect import of
+// `peerjs/dist/peerjs.min.js` (the browser bundle that assigns
+// `window.Peer`), which got tree-shaken in production builds and
+// crashed Pages with "Peer is not a constructor". Switching to the
+// named ESM import anchors peerjs in the graph and pulls the three
+// peer-deps (`peerjs-js-binarypack`, `webrtc-adapter`,
+// `@msgpack/msgpack`) that are installed in this workspace.
+import { Peer } from "peerjs";
 import type { Peer as PeerCtor, DataConnection } from "peerjs";
 import type {
   SidecarIdentity,
@@ -43,18 +36,6 @@ import { useDesktopPairingStore } from "./useDesktopPairingStore";
  * incoming connections, runs the welcome/hello handshake, and stores
  * the identity. Store-sync over the channel is deferred to D11+.
  */
-
-declare global {
-  interface Window {
-    Peer: typeof PeerCtor;
-  }
-}
-
-const Peer: typeof PeerCtor =
-  (globalThis as { Peer?: typeof PeerCtor }).Peer ??
-  (typeof window !== "undefined"
-    ? window.Peer
-    : (undefined as unknown as typeof PeerCtor));
 
 interface PairedPeerRuntime {
   conn: DataConnection;
