@@ -239,15 +239,18 @@ The order matters. Each phase has a clear "what unblocks after this."
 |---|---|---|---|
 | **0a — Renderer wiring** | #21 | JSON schema + renderer + store-path resolver + script-ref invoker + one test spec. **No migration of existing panels.** | ✅ Shipped 2026-05-20 — `apps/editor/src/panel-renderer/` + `?renderer-demo` route. Renderer mechanism proven. |
 | **0b — Renderer-as-DockPanelDef** | #21 follow-up | Wrap the JSON renderer as a real `DockPanelDef` registered in MapView so the JSON-authored panel docks alongside hand-written panels (not a standalone route). | ✅ Shipped 2026-05-20 (`a18174c`) — `JsonDemoPanel.tsx` + Inspector category card in DocksModal. |
-| **1a — First editor pack + loader** | #19 first cut | New `packages/cardboard-editor-pack-demo/` workspace ships a manifest + `panels/selection-info.json`. Editor-side `editorPackLoader.ts` walks the manifest at startup and registers panels into the live DockPanelDef registry. In-tree `JsonDemoPanel.tsx` deleted — panel comes from the pack. This is the **dogfooding proof point**: once the panel appears in the DocksModal sourced from a pack, the platform proof-by-construction starts. | ⏳ In progress — agent dispatched 2026-05-20. |
-| **1b — Migrate existing panels (TSX → JSON)** | #22 | SelectionInfo → Tooltip → QuickTools → … → MapCanvas, one panel per commit. | Pending; unblocked by 1a. |
-| **2 — Libs + extensions** | #20 + #18 | Pack-bundled libraries with content-hash dedup; Extensions tab UI; install/enable/disable flow; real `.apg` unzip replacing the Phase-1a static-import shortcut. | Pending; foundational for marketplace. |
+| **1a — First editor pack + loader** | #19 first cut | New `packages/cardboard-editor-pack-demo/` workspace ships a manifest + `panels/selection-info.json`. Editor-side `editorPackLoader.ts` walks the manifest at startup and registers panels into the live DockPanelDef registry. In-tree `JsonDemoPanel.tsx` deleted — panel comes from the pack. This is the **dogfooding proof point**: once the panel appears in the DocksModal sourced from a pack, the platform proof-by-construction starts. | ✅ Shipped 2026-05-20 (`6d65b44` static-route; `cc90d80` swap to real .apg + JSZip). |
+| **1b — Migrate existing panels (TSX → JSON)** | #22 | SelectionInfo → Tooltip → QuickTools → … → MapCanvas, one panel per commit. | ✅ Phase halted after 5 migrations (`7682a3d` SelectionInfo, `cfa404b` ToolPalette, `c02f2b5` Brush, `c56a6c1` QuickTools, `7a44fac` CellInspector hybrid). Renderer surface proven; user halted further migrations as practice problems. |
+| **2a — Editor Settings → Extensions tab** | #18 | Per-pack enable/disable toggle with "Reload to apply" banner; LS-persisted enabled set; loader reads from store instead of hardcoded id list. | ✅ Shipped 2026-05-20 (`9cac87f`). |
+| **2b — Pack-bundled scripts** | #30 | Packs ship JS that registers commands at load time via `EditorPackContext`. **DELETED** `demo.selection.clear` registration from MapView.tsx — third-party-equivalent surface verified. The dogfooding cheat is closed. | ✅ Shipped 2026-05-20 (`39a210c`). |
+| **2c — Pack-bundled libraries with hash dedup** | #20 | `manifest.libraries[]` schema; pack-builder bundles npm modules via Bun.build; loader's `ctx.importLibrary(name)` resolves via Blob URL; SHA-256 hash dedup via `libraryCache`. | ✅ Shipped 2026-05-20 (`0c5519b` — folded into Phase 5 since the Profiler was the consumer that exercised it). |
 | **3 — Visual builder** | #23 | Drag-and-drop panel-builder UI that outputs JSON. Lives as an editor pack itself. | Pending; closes the non-coder authoring loop. |
 | **4 — Core pack extraction** | #19 full | Move current `apps/editor/src/views/` + `panels/` into `packages/core-editor-pack/`. `apps/editor/` shrinks to shell. | Pending; the big restructure. |
-| **5 — Performance Profiler demo pack** | #24 | `packages/demo-performance-profiler/` installs via Extensions, bundles chart.js, contributes a panel, renders a live chart. See §9. | Pending; the marketplace milestone. |
+| **5 — Performance Profiler demo pack** | #24 | `packages/demo-performance-profiler/` bundles chart.js, ships scripts that drive a live FPS / memory chart through the JSON renderer's new Canvas node, registers its own commands via `EditorPackContext`. Zero shell-side Profiler-specific code (verified by `grep`). | ✅ **Shipped 2026-05-20 (`0c5519b`).** All 6 sub-phases (P1–P6) landed in one commit. 101,119-byte .apg with chart.js@4.4.0 (431KB ESM bundle) + scripts + panel spec. 114 tests pass. Dogfooding review clean: a third-party author with no editor source access can ship an equivalent pack. **THE PLATFORM EXISTS.** |
 
-Phase 5 is the milestone. Until then this is internal refactor;
-after it, **the platform exists**.
+Phase 5 was the milestone. **It landed.** The remaining phases
+(3 visual builder, 4 core pack extraction) are now ergonomics +
+restructure work rather than capability gaps.
 
 ---
 
