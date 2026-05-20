@@ -1,32 +1,35 @@
 /**
- * PanelBuilderView — JSON Visual Builder VB2 (palette + canvas).
+ * PanelBuilderView — JSON Visual Builder VB3 (selection + inspector).
  *
- * VB1 shipped a three-pane shell with `EmptyState` placeholders. VB2
- * wires:
+ * VB2 shipped palette + canvas + recursive `<PanelRenderer>`. VB3 adds:
  *
- *   • Left pane (palette) — a vertical list of every NodeSpec type
- *     the renderer accepts. Each entry is a `<button draggable>` that
- *     writes a `panelBuilderNode`-kind DnD payload on dragstart.
- *   • Center pane (canvas) — a drop target that calls the
- *     panel-builder store's `appendNode` when a palette payload lands.
- *     The canvas body renders the in-progress draft through the new
- *     `RenderSpec` node type, which means the canvas is itself
- *     `<PanelRenderer>` rendering ANOTHER `<PanelRenderer>` subtree
- *     (the recursive-renderer proof per the plan §10 risk).
- *   • Right pane (inspector) — stays an `EmptyState` for VB2. VB3
- *     wires selection + per-node property forms.
+ *   • A `<NodeIdProvider>` wraps the canvas's `<PanelRenderer>`. Every
+ *     rendered NodeSpec gets `data-cardboard-node-id` attached to its
+ *     root DOM element (zero-cost when no provider is mounted — see
+ *     the `NodeIdProvider` contract in `panel-renderer/PanelRenderer.tsx`).
+ *   • A delegated click handler on the canvas wrapper resolves clicks
+ *     to node ids by walking up the DOM from the event target to the
+ *     nearest `[data-cardboard-node-id]`. The id is committed to the
+ *     panel-builder store via `selectNode(id)`.
+ *   • A CSS rule (injected via `<style>` keyed off the selected id)
+ *     paints an amber outline ring around the selected node. The rule
+ *     is regenerated on every selection change so it always targets
+ *     the live id.
+ *   • A `keydown` listener on the canvas wrapper handles Delete +
+ *     Backspace, deleting the selected node. Focus inside an input
+ *     short-circuits the handler so users can still backspace inside
+ *     the inspector forms.
+ *   • The Inspector pane (right side) renders `<NodeInspector>` when
+ *     the selection resolves to a real node; otherwise an empty state.
  *
- * Wire-protocol notes:
+ * The view is a TSX panel (not JSON) because:
+ *   • Selection + delete + inspector wiring is imperative — no
+ *     equivalent in the JSON renderer surface yet.
+ *   • The inspector forms are per-node-type bespoke React components.
  *
- *   • The palette serialises the NodeSpec template into the DnD
- *     payload's `meta.template` field. The drop handler parses it +
- *     hands it to `store.appendNode(...)` — no asset-store round-trip.
- *   • The MIME used is `application/x-cardboard-panel-builder-node`
- *     (auto-derived from the new `panelBuilderNode` SemanticAssetKind
- *     in `apps/editor/src/state/dnd/payload.ts`).
- *   • Drag-source rendering uses the native browser ghost — the
- *     palette tile contains its label + icon so the ghost reads
- *     correctly. Custom drag previews can land in VB6 polish.
+ * VB4 splits the inspector into a JSON-authored panel reading the
+ * store + a small set of `Custom` node-type inspectors. Out of scope
+ * here.
  */
 
 import React from "react";
@@ -50,6 +53,7 @@ import {
 } from "lucide-react";
 import {
   PanelRenderer,
+  NodeIdProvider,
   EmptyState,
 } from "@cardboard/editor-shell";
 import type {
@@ -68,22 +72,13 @@ import {
 } from "../components/paletteCatalog";
 import {
   getPanelBuilderStore,
+  walkSpecNodes,
+  findNodeById,
   type PanelBuilderState,
   type PanelBuilderActions,
 } from "../state/usePanelBuilderStore";
+import { NodeInspector } from "../components/NodeInspector";
 
-/**
- * The canvas pane's host spec — a PanelSpec rendered via `PanelRenderer`
- * whose only content is a `RenderSpec` pointing at the panel-builder
- * store's `root` field. The renderer resolves the binding on every
- * store update and walks the draft tree recursively. This is the
- * proof-of-recursion the plan calls out as risk #1 in §10.
- *
- * Module-scope constant: building the spec inline on every render
- * would change object identity per-render. The renderer's binding
- * subscription doesn't care (it reads `value` via getState), but
- * defensive against future memo-based gating.
- */
 const CANVAS_HOST_SPEC: PanelSpec = {
   id: "panel-builder-canvas-host",
   title: "",
@@ -96,14 +91,8 @@ const CANVAS_HOST_SPEC: PanelSpec = {
   },
 };
 
-/** Shell-side DnD origin tag — pack-side drags identify themselves so
- *  drops in other windows can tell them apart. Stable string is fine;
- *  no per-window correlation needed for VB2's same-window drags. */
 const PALETTE_DRAG_ORIGIN = "cardboard-visual-builder.palette";
 
-/** Build the DnD payload a palette tile writes on dragstart. The
- *  payload's `meta.template` carries the NodeSpec the canvas will
- *  append on drop. */
 function buildPaletteDragPayload(
   entry: PaletteEntry,
 ): DndPayload<"panelBuilderNode"> {
@@ -121,11 +110,6 @@ function buildPaletteDragPayload(
   };
 }
 
-/** Local registry of lucide icons used by the palette. Limited to the
- *  exact icon set the catalog references so the pack bundle stays
- *  small (importing `* as LucideIcons` pulled in ~200KB of icon
- *  components). Adding a new palette entry → add its icon to this map
- *  + its import above. */
 const PALETTE_ICONS: Record<
   string,
   React.ComponentType<{ size?: number }>
@@ -168,8 +152,6 @@ function PaletteTile({ entry }: PaletteTileProps): React.JSX.Element {
     (e: React.DragEvent<HTMLButtonElement>) => {
       const payload = buildPaletteDragPayload(entry);
       const body = encode(payload);
-      // Per-kind MIME — DropZone targets filter on it via `accepts`.
-      // Generic JSON fallback — debug tools / external observers.
       e.dataTransfer.setData(MIME.panelBuilderNode, body);
       e.dataTransfer.setData("application/json", body);
       e.dataTransfer.effectAllowed = "copy";
@@ -223,7 +205,7 @@ function PalettePane(): React.JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
-// Canvas pane
+// Live state subscription
 // ---------------------------------------------------------------------------
 
 /**
@@ -236,10 +218,6 @@ function PalettePane(): React.JSX.Element {
  */
 function usePanelBuilderState(): PanelBuilderState | null {
   const store = getPanelBuilderStore();
-  // Always call the hook — when the store isn't ready yet we return
-  // null below. Conditional hook calls would violate rules-of-hooks.
-  // The subscriptor delegates to `store?.subscribe` and getSnapshot
-  // returns the live state (or null when the store doesn't exist yet).
   const subscribe = React.useMemo(
     () =>
       (cb: () => void): (() => void) => {
@@ -258,15 +236,74 @@ function usePanelBuilderState(): PanelBuilderState | null {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+function getActions(): (PanelBuilderState & PanelBuilderActions) | null {
+  const store = getPanelBuilderStore();
+  if (!store) return null;
+  return store.getState() as PanelBuilderState & PanelBuilderActions;
+}
+
+// ---------------------------------------------------------------------------
+// Canvas pane
+// ---------------------------------------------------------------------------
+
+/**
+ * `getId` factory: build a reference-identity map of NodeSpec → id from
+ * the current root, then close over it for the `<NodeIdProvider>`.
+ *
+ * Rebuilt on every render of the canvas because spec mutations create
+ * fresh NodeSpec objects (the store's `appendNode` / `updateNode` /
+ * `deleteNode` return new tree slices) — the old map's keys would be
+ * stale references. The walk is O(n) where n is the spec node count,
+ * typical drafts have <50 nodes so the cost is negligible. Memoised on
+ * `root` reference so re-renders that don't change the tree don't
+ * rebuild.
+ */
+function useNodeIdMap(root: NodeSpec): (node: NodeSpec) => string | undefined {
+  const map = React.useMemo(() => {
+    const m = new WeakMap<NodeSpec, string>();
+    for (const { id, node } of walkSpecNodes(root)) {
+      m.set(node as NodeSpec, id);
+    }
+    return m;
+  }, [root]);
+  return React.useCallback(
+    (node: NodeSpec) => map.get(node),
+    [map],
+  );
+}
+
+/** Walk the DOM from a target up to the nearest ancestor that carries a
+ *  `data-cardboard-node-id` attribute. Returns the id (or null when no
+ *  such ancestor exists). `boundary` is the canvas's outer element —
+ *  the walk stops there to avoid escaping into unrelated DOM. */
+function findNodeIdFromTarget(
+  target: EventTarget | null,
+  boundary: HTMLElement | null,
+): string | null {
+  if (!(target instanceof HTMLElement)) return null;
+  let el: HTMLElement | null = target;
+  while (el && el !== boundary) {
+    const id = el.getAttribute("data-cardboard-node-id");
+    if (id) return id;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 function CanvasPane(): React.JSX.Element {
   const state = usePanelBuilderState();
   const [isOver, setIsOver] = React.useState(false);
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+
+  const root = state?.root ?? null;
+  const selectedId = state?.selectedNodeId ?? null;
+
+  // Memo'd getId — only rebuilds when the spec tree's root reference
+  // changes (every mutation through the store).
+  const getId = useNodeIdMap(root ?? makeFallbackRoot());
 
   const onDragOver = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
-      // Only react to our own MIME — other kinds blow past without
-      // claiming the drop. The `types` list is the cheapest filter
-      // available in `dragover`.
       if (e.dataTransfer.types.includes(MIME.panelBuilderNode)) {
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
@@ -288,31 +325,94 @@ function CanvasPane(): React.JSX.Element {
       e.preventDefault();
       const template = payload.meta?.template as NodeSpec | undefined;
       if (!template) return;
-      const store = getPanelBuilderStore();
-      if (!store) return;
-      const actions = store.getState() as PanelBuilderState &
-        PanelBuilderActions;
+      const actions = getActions();
+      if (!actions) return;
       actions.appendNode(template);
     },
     [],
   );
 
+  // Click → resolve nearest ancestor with `data-cardboard-node-id` →
+  // selectNode(id). Click on empty area (no id ancestor) clears
+  // selection. The handler runs in capture phase so it wins over any
+  // bubbling click handlers inside the rendered tree (e.g. Button's
+  // onClick — but we DO want clicks to select the button, so we DON'T
+  // preventDefault here).
+  const onClick = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const id = findNodeIdFromTarget(e.target, wrapperRef.current);
+    const actions = getActions();
+    if (!actions) return;
+    actions.selectNode(id);
+  }, []);
+
+  // Delete / Backspace → delete selected node. Skip when focus is
+  // inside an input/textarea/contenteditable so the inspector forms
+  // and any future inline-edit affordances can still use the keys.
+  React.useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) {
+        const tag = active.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          active.isContentEditable
+        ) {
+          return;
+        }
+      }
+      const actions = getActions();
+      if (!actions) return;
+      const id = actions.selectedNodeId;
+      if (!id || id === "root") return;
+      e.preventDefault();
+      actions.deleteNode(id);
+    };
+    // Listen on the document so the canvas doesn't need focus — the
+    // user just clicks a node and presses Delete.
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   const childCount =
     state && state.root.type === "Layout" ? state.root.children.length : 0;
   const showEmptyState = childCount === 0;
+
+  // Selection ring — a CSS rule keyed off the live selected id. The
+  // rule targets `data-cardboard-node-id="<id>"` so we don't have to
+  // mutate the rendered tree to apply styling. `outline` is used
+  // instead of `border` so it doesn't shift layout.
+  const ringCss = selectedId
+    ? `[data-cardboard-node-id="${cssAttrEscape(selectedId)}"] {
+        outline: 2px solid rgb(245 158 11 / 0.9);
+        outline-offset: 1px;
+        border-radius: 2px;
+      }`
+    : "";
 
   return (
     <div className="flex flex-col h-full">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pt-2 pb-1">
         Canvas
       </div>
+      {ringCss && <style>{ringCss}</style>}
       <div
+        ref={wrapperRef}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
+        onClick={onClick}
+        tabIndex={0}
         className={[
           "flex-1 m-2 rounded border-2 border-dashed",
           "transition-colors overflow-auto",
+          "focus:outline-none",
           isOver
             ? "border-amber-500/80 bg-amber-500/5"
             : "border-zinc-800 bg-zinc-950",
@@ -328,12 +428,10 @@ function CanvasPane(): React.JSX.Element {
             />
           </div>
         ) : (
-          // The canvas-host spec mounts a nested `<PanelRenderer>` via
-          // the new `RenderSpec` node type, which reads the binding
-          // `store.panelBuilder.root` and renders it recursively. The
-          // outer wrapper here is just for layout + scroll.
           <div className="h-full">
-            <PanelRenderer spec={CANVAS_HOST_SPEC} />
+            <NodeIdProvider getId={getId}>
+              <PanelRenderer spec={CANVAS_HOST_SPEC} />
+            </NodeIdProvider>
           </div>
         )}
       </div>
@@ -341,22 +439,65 @@ function CanvasPane(): React.JSX.Element {
   );
 }
 
+/** Escape an arbitrary string for safe use inside a CSS attribute-value
+ *  selector. Spec-tree paths only contain `[a-zA-Z0-9.]` so the worst
+ *  case is a dot — `[data-...="root.children.0"]` is already valid CSS
+ *  because the value is quoted. We still defensively escape `"` and
+ *  `\` since a future id strategy could introduce them. */
+function cssAttrEscape(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** Fallback root used while the store is initialising — keeps the
+ *  `useNodeIdMap` hook call unconditional. */
+function makeFallbackRoot(): NodeSpec {
+  return { type: "Layout", direction: "column", children: [] };
+}
+
 // ---------------------------------------------------------------------------
-// Inspector pane — VB3 placeholder
+// Inspector pane
 // ---------------------------------------------------------------------------
 
 function InspectorPane(): React.JSX.Element {
+  const state = usePanelBuilderState();
+  const selectedId = state?.selectedNodeId ?? null;
+  const selectedNode =
+    state && selectedId ? findNodeById(state.root, selectedId) : null;
+
+  const onUpdate = React.useCallback(
+    (nodeId: string, patch: Partial<NodeSpec>) => {
+      const actions = getActions();
+      if (!actions) return;
+      actions.updateNode(nodeId, patch);
+    },
+    [],
+  );
+  const onDelete = React.useCallback((nodeId: string) => {
+    const actions = getActions();
+    if (!actions) return;
+    actions.deleteNode(nodeId);
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 px-2 pt-2 pb-1">
         Inspector
       </div>
-      <div className="flex-1 flex items-center justify-center p-4">
-        <EmptyState
-          title="Inspector — VB3"
-          description="Per-node property forms appear here when a canvas node is selected. VB3 wires selection + the inspector forms."
+      {selectedNode && selectedId ? (
+        <NodeInspector
+          node={selectedNode}
+          nodeId={selectedId}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
         />
-      </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <EmptyState
+            title="No selection"
+            description="Click a node on the canvas to inspect + edit its properties."
+          />
+        </div>
+      )}
     </div>
   );
 }

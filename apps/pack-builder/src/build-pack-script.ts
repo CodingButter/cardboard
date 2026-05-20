@@ -369,6 +369,7 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const useToolStore = __mod.useToolStore;
               export const EmptyState = __mod.EmptyState;
               export const PanelRenderer = __mod.PanelRenderer;
+              export const NodeIdProvider = __mod.NodeIdProvider;
               export const undoOnce = __mod.undoOnce;
               export const redoOnce = __mod.redoOnce;
               export const loadTileTexture = __mod.loadTileTexture;

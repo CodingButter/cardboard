@@ -42,7 +42,7 @@ import {
   getTextureBitmap,
 } from "../state/tileTextureCache";
 import { EmptyState } from "../components/ui/EmptyState";
-import { PanelRenderer } from "../panel-renderer/PanelRenderer";
+import { PanelRenderer, NodeIdProvider } from "../panel-renderer/PanelRenderer";
 // P4 view-shell migration — views moving into the pack need access to
 // the DockShell primitive, the WorkspaceRail chrome, the per-tab
 // context-slot hook, the URL-hash router, and the editor-pack registry
@@ -237,6 +237,19 @@ export const shellSdk = {
   // Any third-party pack that wants JSON-authored panels reaches for
   // the same renderer.
   PanelRenderer,
+  // VB3 — `NodeIdProvider` is the opt-in context wrapper that lets a
+  // pack annotate every rendered NodeSpec with a `data-cardboard-node-
+  // id` attribute. The JSON Visual Builder's canvas wraps its
+  // `<PanelRenderer>` in one so clicks on rendered nodes map back to
+  // spec-tree ids for selection + the property inspector. Zero-cost
+  // for packs that don't mount the provider — the renderer's
+  // `useContext` returns null and the cloneElement-injection path is
+  // skipped, so non-builder JSON panels emit identical DOM to the
+  // pre-VB3 baseline. Any third-party pack that ships an inspector,
+  // debugger, or design tool over an existing rendered subtree hits
+  // the same need (per the dogfooding rubric in
+  // `docs/plans/JSON_VISUAL_BUILDER.md` §6.x).
+  NodeIdProvider,
   // P3 batch D-light — `undoOnce` / `redoOnce` walk the history store
   // cursor + replay paint/erase ops into the scene store. MapCanvas
   // wires Ctrl+Z / Ctrl+Shift+Z commands to these. Any pack that

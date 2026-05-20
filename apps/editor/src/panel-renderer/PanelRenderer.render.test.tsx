@@ -34,7 +34,7 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { PanelRenderer } from "./PanelRenderer";
+import { PanelRenderer, NodeIdProvider } from "./PanelRenderer";
 import { registerDynamicStore } from "./resolveBinding";
 import type { NodeSpec, PanelSpec } from "./types";
 
@@ -464,5 +464,104 @@ describe("PanelRenderer — RenderSpec recursive render (VB2)", () => {
       u1();
       u2();
     }
+  });
+});
+
+describe("PanelRenderer — NodeIdProvider (VB3)", () => {
+  test("omits data-cardboard-node-id when no provider is mounted (zero-cost)", () => {
+    // Verifies the zero-cost contract: a vanilla PanelRenderer with NO
+    // NodeIdProvider wrap must produce zero `data-cardboard-node-id`
+    // attributes in its rendered DOM. Any pack that doesn't opt in
+    // pays nothing for the VB3 selection plumbing.
+    const spec: PanelSpec = {
+      id: "vb3-noprovider",
+      title: "no-provider",
+      category: "Custom",
+      dockKind: "dockable-window",
+      root: {
+        type: "Layout",
+        direction: "column",
+        children: [
+          { type: "Heading", text: "Title" },
+          { type: "Text", text: "body" },
+        ],
+      },
+    };
+    const html = renderToString(React.createElement(PanelRenderer, { spec }));
+    expect(html).not.toContain("data-cardboard-node-id");
+  });
+
+  test("emits data-cardboard-node-id when wrapped in NodeIdProvider", () => {
+    // Verifies that mounting a `<NodeIdProvider>` around a renderer
+    // causes every NodeSpec whose `getId` returns a value to emit the
+    // attribute on its root DOM element.
+    const idMap = new WeakMap<NodeSpec, string>();
+    const root: NodeSpec = {
+      type: "Layout",
+      direction: "column",
+      children: [
+        { type: "Heading", text: "Title" },
+        { type: "Text", text: "body" },
+      ],
+    };
+    idMap.set(root, "root");
+    idMap.set((root as { children: NodeSpec[] }).children[0]!, "root.children.0");
+    idMap.set((root as { children: NodeSpec[] }).children[1]!, "root.children.1");
+    const spec: PanelSpec = {
+      id: "vb3-withprovider",
+      title: "with-provider",
+      category: "Custom",
+      dockKind: "dockable-window",
+      root,
+    };
+    const getId = (n: NodeSpec): string | undefined => idMap.get(n);
+    const html = renderToString(
+      React.createElement(
+        NodeIdProvider,
+        { getId, children: React.createElement(PanelRenderer, { spec }) },
+      ),
+    );
+    expect(html).toContain('data-cardboard-node-id="root"');
+    expect(html).toContain('data-cardboard-node-id="root.children.0"');
+    expect(html).toContain('data-cardboard-node-id="root.children.1"');
+  });
+
+  test("getId returning undefined skips annotation for that node", () => {
+    // Verifies the opt-out shape: a provider that returns undefined
+    // for some nodes leaves them un-annotated while still tagging the
+    // ones the map covers. Inspectors with partial coverage rely on
+    // this.
+    const idMap = new WeakMap<NodeSpec, string>();
+    const root: NodeSpec = {
+      type: "Layout",
+      direction: "column",
+      children: [
+        { type: "Heading", text: "A" },
+        { type: "Heading", text: "B" },
+      ],
+    };
+    // Tag the root + first child but NOT the second child.
+    idMap.set(root, "root");
+    idMap.set((root as { children: NodeSpec[] }).children[0]!, "first");
+    const spec: PanelSpec = {
+      id: "vb3-partial",
+      title: "partial",
+      category: "Custom",
+      dockKind: "dockable-window",
+      root,
+    };
+    const getId = (n: NodeSpec): string | undefined => idMap.get(n);
+    const html = renderToString(
+      React.createElement(
+        NodeIdProvider,
+        { getId, children: React.createElement(PanelRenderer, { spec }) },
+      ),
+    );
+    expect(html).toContain('data-cardboard-node-id="root"');
+    expect(html).toContain('data-cardboard-node-id="first"');
+    // The second heading was rendered (it's in the DOM) but lacks the
+    // attribute — verify by counting occurrences of the substring.
+    const matches = html.match(/data-cardboard-node-id="/g) ?? [];
+    expect(matches.length).toBe(2);
   });
 });

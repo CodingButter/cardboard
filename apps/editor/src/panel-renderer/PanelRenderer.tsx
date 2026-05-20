@@ -90,6 +90,85 @@ import type {
 import { PackContext } from "../packs/PackContextProvider";
 
 // ---------------------------------------------------------------------------
+// NodeIdProvider — opt-in context that lets consumers tag rendered DOM
+// nodes with a `data-cardboard-node-id` attribute mapped back to the
+// authoring-side NodeSpec. Used by the JSON Visual Builder's canvas to
+// turn a click on a rendered node into a spec-tree selection.
+//
+// Zero-cost contract: when NO `<NodeIdProvider>` wraps the renderer
+// (the default for every JSON panel the editor ships today), the
+// `useContext(NodeIdContext)` call returns `null` and the data
+// attribute is never emitted. The `cloneElement` path is only taken
+// when a provider is mounted AND it returns a non-empty id for the
+// node, so non-builder consumers pay only the cost of a `useContext`
+// lookup per render — no DOM mutation, no extra wrapping element.
+//
+// Why a context (and not a render prop / wrapper component): the
+// renderer is recursive through `NodeRenderer` calls; threading a
+// callback through every renderer prop would touch every variant.
+// A context lifts the plumbing out of the renderer's signature and
+// keeps the per-variant code untouched — the post-processing happens
+// in `NodeRenderer` itself via `React.cloneElement`.
+//
+// See `docs/plans/JSON_VISUAL_BUILDER.md` §5 + §10 (the "DOM-to-spec
+// mapping fragility" risk callout — Tooltip's trigger-wrapper anchor
+// is the only currently-known footgun, addressed in the renderer's
+// TooltipRenderer dispatch).
+// ---------------------------------------------------------------------------
+
+/**
+ * Callback returned from a NodeIdProvider — given a `NodeSpec`, returns
+ * the id (a string) to emit on that node's rendered DOM root, or
+ * `undefined` to skip annotation. Implementations typically key off
+ * reference identity (a `WeakMap<NodeSpec, string>` built at canvas
+ * render time) or off a structural address (`"root.children.0"`)
+ * computed by a sibling walk.
+ */
+export type NodeIdResolver = (node: NodeSpec) => string | undefined;
+
+/**
+ * Context payload. Pulled apart from the resolver fn so consumers can
+ * also opt into a click handler that fires when ANY rendered node in
+ * the subtree is clicked. The handler receives the resolved id of the
+ * deepest node under the pointer.
+ *
+ * `onSelect` is optional — when set, the renderer attaches a single
+ * delegated click listener at the NodeRenderer level for every node.
+ * Consumers without a click need (e.g. a pure inspector view that only
+ * reads ids) leave `onSelect` undefined and pay nothing for clicks.
+ */
+export interface NodeIdContextValue {
+  getId: NodeIdResolver;
+}
+
+export const NodeIdContext = React.createContext<NodeIdContextValue | null>(null);
+
+/**
+ * Mount a NodeIdProvider around `<PanelRenderer>` (or any subtree that
+ * renders a `<NodeRenderer>`) to opt every node into `data-cardboard-
+ * node-id` emission. The `getId` callback is called for every node in
+ * render order; returning `undefined` skips annotation for that node.
+ *
+ * The provider value is memo'd to a stable object identity per-render
+ * — if the `getId` callback changes, the wrapped subtree re-renders.
+ * Callers should memoise `getId` themselves (typically via
+ * `React.useCallback` over a stable WeakMap reference) to avoid
+ * cascading re-renders on every parent update.
+ */
+export function NodeIdProvider({
+  getId,
+  children,
+}: {
+  getId: NodeIdResolver;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const value = React.useMemo<NodeIdContextValue>(() => ({ getId }), [getId]);
+  return (
+    <NodeIdContext.Provider value={value}>{children}</NodeIdContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Icon registry — small lucide allowlist to keep the renderer's import
 // surface bounded. Add an icon to the allowlist by:
 //   1. Importing it from lucide-react at the top of this file.
@@ -1055,44 +1134,61 @@ function RenderSpecRenderer({
 // ---------------------------------------------------------------------------
 
 /**
- * Exhaustively dispatch a `NodeSpec` to its renderer. The trailing
- * `never` assertion guarantees a compile-time error if a new node type
- * is added to the `NodeSpec` union without a matching case here.
+ * Dispatch a `NodeSpec` to its renderer.
+ *
+ * Renderers are invoked as plain functions (not as `<Component>` JSX)
+ * so the returned JSX is the renderer's OWN root DOM element — not a
+ * wrapping component-element whose props go to the component. That
+ * shape is what makes `React.cloneElement(rendered, { "data-..." })`
+ * land the attribute on the actual emitted DOM node when a
+ * `<NodeIdProvider>` is mounted. Calling each renderer as a function
+ * is supported by React (it's how React's reconciler invokes function
+ * components internally); the only observable difference is that
+ * React DevTools sees one fewer stack frame per node.
+ *
+ * If NO `<NodeIdProvider>` is mounted (the default for every JSON
+ * panel the editor ships today), the `useContext` call returns null
+ * and the cloneElement path is skipped entirely — the renderer emits
+ * identical output to the pre-VB3 baseline.
+ *
+ * The dispatch switch is exhaustively checked via the trailing `never`
+ * assertion; adding a NodeSpec variant without a matching case is a
+ * compile-time error.
  */
-export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | null {
+function dispatchNodeRenderer(node: NodeSpec): React.JSX.Element | null {
   switch (node.type) {
     case "Layout":
-      return <LayoutRenderer node={node} />;
+      return LayoutRenderer({ node });
     case "Heading":
-      return <HeadingRenderer node={node} />;
+      return HeadingRenderer({ node });
     case "Text":
-      return <TextRenderer node={node} />;
+      return TextRenderer({ node });
     case "Input":
-      return <InputRenderer node={node} />;
+      return InputRenderer({ node });
     case "NumberInput":
-      return <NumberInputRenderer node={node} />;
+      return NumberInputRenderer({ node });
     case "Slider":
-      return <SliderRenderer node={node} />;
+      return SliderRenderer({ node });
     case "Button":
-      return <ButtonRenderer node={node} />;
+      return ButtonRenderer({ node });
     case "Spacer":
-      return <SpacerRenderer node={node} />;
+      return SpacerRenderer({ node });
     case "Conditional":
-      return <ConditionalRenderer node={node} />;
+      return ConditionalRenderer({ node });
     case "Tooltip":
-      return <TooltipRenderer node={node} />;
+      return TooltipRenderer({ node });
     case "Icon":
-      return <IconRenderer node={node} />;
+      return IconRenderer({ node });
     case "ToggleButton":
-      return <ToggleButtonRenderer node={node} />;
+      return ToggleButtonRenderer({ node });
     case "ScrollRow":
-      return <ScrollRowRenderer node={node} />;
+      return ScrollRowRenderer({ node });
     case "Select":
-      return <SelectRenderer node={node} />;
+      return SelectRenderer({ node });
     case "Canvas":
-      return <CanvasRenderer node={node} />;
+      return CanvasRenderer({ node });
     case "RenderSpec":
-      return <RenderSpecRenderer node={node} />;
+      return RenderSpecRenderer({ node });
     default: {
       // Exhaustiveness check — if you added a NodeSpec variant and
       // skipped a case, TS will reject this assignment.
@@ -1105,6 +1201,23 @@ export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | 
       return null;
     }
   }
+}
+
+export function NodeRenderer({ node }: { node: NodeSpec }): React.JSX.Element | null {
+  const idCtx = React.useContext(NodeIdContext);
+  const rendered = dispatchNodeRenderer(node);
+  // Fast path: no provider, no annotation — pre-VB3 behaviour.
+  if (!idCtx || !rendered || !React.isValidElement(rendered)) return rendered;
+  const id = idCtx.getId(node);
+  if (id === undefined) return rendered;
+  // `Conditional` renders a Fragment (no DOM root) — cloning a fragment
+  // with an HTML attribute is a no-op + emits a React warning. Skip the
+  // clone for fragments + ConditionalRenderer's null-return case.
+  if (rendered.type === React.Fragment) return rendered;
+  return React.cloneElement(
+    rendered as React.ReactElement<{ "data-cardboard-node-id"?: string }>,
+    { "data-cardboard-node-id": id },
+  );
 }
 
 /**

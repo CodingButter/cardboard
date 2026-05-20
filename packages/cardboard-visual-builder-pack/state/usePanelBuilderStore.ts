@@ -1,31 +1,38 @@
 /**
- * usePanelBuilderStore — JSON Visual Builder VB2 draft state.
+ * usePanelBuilderStore — JSON Visual Builder draft state.
  *
  * Backed by `ctx.createStore("panelBuilder", ...)` (see
  * `apps/editor/src/packs/editorPackLoader.ts:151`) so the renderer can
  * bind `$store.panelBuilder.<field>` from inside JSON panels and the
  * pack's own TSX views can subscribe via the returned Zustand hook.
  *
- * The hook is created lazily — `getStore()` is called from inside
- * setup.tsx which has access to the `EditorPackContext`. The View
- * component imports `usePanelBuilderStore` and gets the hook back. The
- * lazy-init pattern keeps the store creation tied to pack-lifetime
- * (createStore registers + the disposer unregisters) without leaking
- * into other packs / the global registry.
+ * The hook is created lazily — `initPanelBuilderStore` is called from
+ * inside setup.tsx which has access to the `EditorPackContext`. The
+ * View component imports `getPanelBuilderStore` and gets the hook
+ * back. The lazy-init pattern keeps the store creation tied to
+ * pack-lifetime (createStore registers + the disposer unregisters)
+ * without leaking into other packs / the global registry.
  *
- * VB2 scope:
+ * VB3 scope (this file):
  *   • `spec` — the current draft PanelSpec.
- *   • `root` — a derived alias of `spec.root` so JSON panels can
- *     bind `$store.panelBuilder.root` without traversing two
- *     levels. The renderer's `RenderSpec` node reads through this
- *     path on the builder's canvas pane.
+ *   • `root` — derived alias of `spec.root`.
+ *   • `selectedNodeId` — the id of the currently selected node, or null.
+ *     Node ids are spec-tree paths (e.g. `"root"`, `"root.children.0"`)
+ *     re-derived on every render; the store only persists the selected
+ *     id-string.
  *   • `appendNode(node)` — append to the root Layout's children.
- *     The canvas drop handler calls this on every successful drop.
- *   • `replaceRoot(root)` — bulk replace for VB6 JSON-mode sync /
- *     library load. Exposed early so the surface stabilises.
+ *   • `replaceRoot(root)` — bulk replace (VB6 JSON-mode sync / library load).
+ *   • `selectNode(id | null)` — set selection.
+ *   • `updateNode(id, patch)` — merge a partial NodeSpec into the
+ *     node addressed by `id`. Patch is shallow-merged (Object.assign)
+ *     onto a copy of the existing node; nested object fields are
+ *     replaced wholesale.
+ *   • `deleteNode(id)` — prune the node addressed by `id` from its
+ *     parent's children array. Clears selection if the deleted node was
+ *     selected.
+ *   • `resetDraft()` — reset to a fresh empty draft.
  *
- * VB3+ extends this with selection, undo/redo, save/load. Out of scope
- * here.
+ * VB4+ extends with undo/redo, save/load. Out of scope here.
  */
 
 import type { NodeSpec, PanelSpec, LayoutNode } from "../../../apps/editor/src/panel-renderer/types";
@@ -61,6 +68,9 @@ export interface PanelBuilderState {
   root: NodeSpec;
   /** Stable id for the draft session. */
   draftId: string;
+  /** Currently selected node id (spec-tree path) or null when nothing
+   *  is selected. Used by the canvas selection overlay + inspector. */
+  selectedNodeId: string | null;
 }
 
 /** Actions exposed on the same hook as the state. */
@@ -72,13 +82,198 @@ export interface PanelBuilderActions extends Record<string, unknown> {
   /** Replace the root NodeSpec wholesale. Used by VB4 load + VB6
    *  JSON-mode sync. */
   replaceRoot: (root: NodeSpec) => void;
-  /** Reset to a fresh empty draft (new draftId, empty Layout root). */
+  /** Reset to a fresh empty draft (new draftId, empty Layout root,
+   *  cleared selection). */
   resetDraft: () => void;
+  /** Set the selected node id (pass `null` to clear). */
+  selectNode: (id: string | null) => void;
+  /** Patch the node addressed by `id`. Shallow-merges the patch onto a
+   *  copy of the node; the discriminant `type` is preserved (the patch
+   *  must not change a node's discriminant — that's a delete + insert
+   *  in the existing surface). */
+  updateNode: (id: string, patch: Partial<NodeSpec>) => void;
+  /** Remove the node addressed by `id` from its parent. Clears
+   *  selection if the removed node was selected. No-op when `id` is
+   *  `"root"` (the root is not deletable — pack delete instead). */
+  deleteNode: (id: string) => void;
 }
 
 export type PanelBuilderStore = UseBoundStore<
   StoreApi<PanelBuilderState & PanelBuilderActions>
 >;
+
+// ---------------------------------------------------------------------------
+// Spec-tree path helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Node-id strategy: spec-tree path strings like
+ *   "root"
+ *   "root.children.0"
+ *   "root.children.0.children.2"
+ *   "root.child"            (Tooltip's single-child slot)
+ *   "root.stages.0.content" (Tooltip stage content)
+ *
+ * Ids are stable across re-renders as long as the spec tree structure
+ * is unchanged. Reordering siblings DOES change ids (a node at
+ * `children.1` becomes `children.0` etc.) — that's an acceptable trade
+ * for VB3 because reorder is a VB4+ feature and the inspector
+ * rebinds via `selectedNodeId` on every interaction.
+ *
+ * Walking the spec tree is cheap (linear in node count, typical drafts
+ * have < 50 nodes). Rebuilding on every render is correct + simple;
+ * a memoised WeakMap would be premature optimisation here.
+ */
+
+/** Walk the spec tree, yielding `[id, node]` for every node. */
+export function walkSpecNodes(
+  root: NodeSpec,
+): Array<{ id: string; node: NodeSpec }> {
+  const out: Array<{ id: string; node: NodeSpec }> = [];
+  walk(root, "root", out);
+  return out;
+}
+
+function walk(
+  node: NodeSpec,
+  path: string,
+  out: Array<{ id: string; node: NodeSpec }>,
+): void {
+  out.push({ id: path, node });
+  // Node types with `children: NodeSpec[]` — Layout, Conditional, ScrollRow.
+  if (
+    node.type === "Layout" ||
+    node.type === "Conditional" ||
+    node.type === "ScrollRow"
+  ) {
+    for (let i = 0; i < node.children.length; i++) {
+      walk(node.children[i]!, `${path}.children.${i}`, out);
+    }
+  }
+  // Tooltip has a single-child `child` slot + per-stage `content`.
+  if (node.type === "Tooltip") {
+    walk(node.child, `${path}.child`, out);
+    for (let i = 0; i < node.stages.length; i++) {
+      walk(node.stages[i]!.content, `${path}.stages.${i}.content`, out);
+    }
+  }
+}
+
+/** Find a node by id. Returns null when the id doesn't resolve. */
+export function findNodeById(root: NodeSpec, id: string): NodeSpec | null {
+  for (const entry of walkSpecNodes(root)) {
+    if (entry.id === id) return entry.node;
+  }
+  return null;
+}
+
+/**
+ * Apply a function to the node at `id`, returning a new root with the
+ * replaced node. `fn` receives the existing node and returns either:
+ *   • a replacement NodeSpec (which slots in at the same position), or
+ *   • `null` to delete the node from its parent's children array.
+ *
+ * Returns the original root unchanged when `id` doesn't resolve.
+ * Returns `null` if `id === "root"` and `fn` returns null (the root
+ * isn't a parent's child — caller decides what to do).
+ */
+function transformAt(
+  root: NodeSpec,
+  id: string,
+  fn: (node: NodeSpec) => NodeSpec | null,
+): NodeSpec | null {
+  if (id === "root") {
+    return fn(root);
+  }
+  // Walk + rebuild on the way back up. id segments after "root." are
+  // alternating field-names + indices.
+  const segs = id.split(".").slice(1); // drop the leading "root"
+  return rebuild(root, segs, fn);
+}
+
+function rebuild(
+  node: NodeSpec,
+  segs: string[],
+  fn: (node: NodeSpec) => NodeSpec | null,
+): NodeSpec | null {
+  if (segs.length === 0) {
+    return fn(node);
+  }
+  const [head, ...rest] = segs;
+  // Layout / Conditional / ScrollRow → "children" + index
+  if (
+    (node.type === "Layout" ||
+      node.type === "Conditional" ||
+      node.type === "ScrollRow") &&
+    head === "children"
+  ) {
+    const idxStr = rest[0];
+    if (idxStr === undefined) return node;
+    const idx = Number(idxStr);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= node.children.length) {
+      return node;
+    }
+    const childRest = rest.slice(1);
+    const newChild = rebuild(node.children[idx]!, childRest, fn);
+    const newChildren = [...node.children];
+    if (newChild === null) {
+      // Only "delete the addressed node itself" lands here when
+      // childRest is empty. Splice the entry out.
+      if (childRest.length === 0) {
+        newChildren.splice(idx, 1);
+      } else {
+        // Deeper delete returned null — propagate by setting the slot.
+        // This shouldn't happen with the public API (delete addresses
+        // a specific id at any depth), but guard defensively.
+        newChildren.splice(idx, 1);
+      }
+    } else {
+      newChildren[idx] = newChild;
+    }
+    return { ...node, children: newChildren };
+  }
+  // Tooltip → "child" (single) or "stages.<i>.content"
+  if (node.type === "Tooltip" && head === "child") {
+    const newChild = rebuild(node.child, rest, fn);
+    if (newChild === null) {
+      // Deleting Tooltip.child is conceptually deleting the trigger —
+      // the Tooltip becomes invalid. We keep the original to avoid
+      // producing an unrenderable spec; users should delete the
+      // tooltip itself instead.
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[panelBuilder] refusing to delete Tooltip.child — delete the Tooltip itself",
+      );
+      return node;
+    }
+    return { ...node, child: newChild };
+  }
+  if (node.type === "Tooltip" && head === "stages") {
+    const idxStr = rest[0];
+    const field = rest[1];
+    if (idxStr === undefined || field !== "content") return node;
+    const idx = Number(idxStr);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= node.stages.length) {
+      return node;
+    }
+    const contentRest = rest.slice(2);
+    const stage = node.stages[idx]!;
+    const newContent = rebuild(stage.content, contentRest, fn);
+    if (newContent === null) {
+      // Deleting a stage content — same defensive choice as Tooltip.child.
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[panelBuilder] refusing to delete Tooltip stage content — delete the Tooltip itself",
+      );
+      return node;
+    }
+    const newStages = [...node.stages];
+    newStages[idx] = { ...stage, content: newContent };
+    return { ...node, stages: newStages };
+  }
+  // Unknown path segment — return the node unchanged.
+  return node;
+}
 
 // ---------------------------------------------------------------------------
 // Lazy-init singleton
@@ -107,6 +302,7 @@ export function initPanelBuilderStore(
       spec: initialSpec,
       root: initialSpec.root,
       draftId: makeDraftId(),
+      selectedNodeId: null,
     },
     (set, get) => ({
       appendNode: (node: NodeSpec): void => {
@@ -135,7 +331,12 @@ export function initPanelBuilderStore(
       replaceRoot: (root: NodeSpec): void => {
         const current = get().spec;
         const nextSpec: PanelSpec = { ...current, root };
-        set({ spec: nextSpec, root } as Partial<PanelBuilderState>);
+        set({
+          spec: nextSpec,
+          root,
+          // A replaceRoot may invalidate the current selection — drop it.
+          selectedNodeId: null,
+        } as Partial<PanelBuilderState>);
       },
       resetDraft: (): void => {
         const nextSpec = makeEmptyDraftSpec();
@@ -143,6 +344,49 @@ export function initPanelBuilderStore(
           spec: nextSpec,
           root: nextSpec.root,
           draftId: makeDraftId(),
+          selectedNodeId: null,
+        } as Partial<PanelBuilderState>);
+      },
+      selectNode: (id: string | null): void => {
+        set({ selectedNodeId: id } as Partial<PanelBuilderState>);
+      },
+      updateNode: (id: string, patch: Partial<NodeSpec>): void => {
+        const current = get().spec;
+        const newRoot = transformAt(current.root, id, (existing) => {
+          // Shallow merge — copy the existing node + overlay the patch.
+          // The patch's `type` is ignored (preserve the discriminant).
+          // Cast to a record to merge safely without TS choking on the
+          // discriminated-union shape.
+          const merged = {
+            ...(existing as Record<string, unknown>),
+            ...(patch as Record<string, unknown>),
+            type: existing.type,
+          } as unknown as NodeSpec;
+          return merged;
+        });
+        if (newRoot == null) return;
+        const nextSpec: PanelSpec = { ...current, root: newRoot };
+        set({ spec: nextSpec, root: newRoot } as Partial<PanelBuilderState>);
+      },
+      deleteNode: (id: string): void => {
+        if (id === "root") return; // refuse — see semantics in interface.
+        const current = get().spec;
+        const newRoot = transformAt(current.root, id, () => null);
+        if (newRoot == null) return;
+        const nextSpec: PanelSpec = { ...current, root: newRoot };
+        const wasSelected = get().selectedNodeId === id;
+        // Also clear selection if the selected node is a DESCENDANT of
+        // the deleted one (its id no longer exists in the new tree).
+        const stillExists =
+          get().selectedNodeId != null
+            ? findNodeById(newRoot, get().selectedNodeId!) !== null
+            : false;
+        const nextSelectedId =
+          wasSelected || !stillExists ? null : get().selectedNodeId;
+        set({
+          spec: nextSpec,
+          root: newRoot,
+          selectedNodeId: nextSelectedId,
         } as Partial<PanelBuilderState>);
       },
     }),
