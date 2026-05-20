@@ -211,6 +211,27 @@ export async function buildDevPackBytes(packId: string): Promise<Uint8Array | nu
     }
   }
 
+  // Copy every `manifest.tutorials[]` JSON file verbatim (T2). Mirrors
+  // editorPanels[] — the runtime loader reads each path via
+  // `pack.textBody(path)` and registers the parsed TutorialDef with the
+  // tutorial registry.
+  const tutorialPaths = Array.isArray(manifest.tutorials)
+    ? (manifest.tutorials as unknown[]).filter(
+        (x): x is string => typeof x === "string",
+      )
+    : [];
+  for (const tutorialPath of tutorialPaths) {
+    try {
+      const bytes = await Bun.file(join(packRoot, tutorialPath)).bytes();
+      zip.file(tutorialPath, bytes);
+    } catch (err) {
+      console.warn(
+        `[dev-pack] ${packId}: failed to read ${tutorialPath}:`,
+        err,
+      );
+    }
+  }
+
   // Emit the manifest with rewritten script paths (.tsx → .js) so the
   // runtime loader's `manifest.scripts[]` lines up with what's in the zip.
   const manifestOut = { ...manifest, scripts: rewrittenScripts };

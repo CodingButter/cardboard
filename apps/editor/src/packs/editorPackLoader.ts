@@ -84,6 +84,8 @@ import {
   type RendererPackContextSlice,
 } from "./PackContextProvider";
 import { removePanelFromAllDockApis } from "./activeDockApis";
+import { tutorialsApi } from "../tutorials/runtime";
+import type { TutorialDef } from "../tutorials/types";
 
 /**
  * Callback registered via `ctx.onPanelMount(panelId, cb)`. The loader
@@ -562,6 +564,55 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
       continue;
     }
     defs.push(buildDockPanelDef(spec, packId, rendererCtx));
+  }
+
+  // ── Tutorial registration (T2) ──────────────────────────────────
+  // Walk `manifest.tutorials[]` — for each path, read the JSON via
+  // `pack.textBody`, parse + validate via `tutorialsApi._register`,
+  // and stash the unregister fn in the pack's cleanup ring so a
+  // toggle-off via the Extensions tab removes the tutorial from the
+  // runtime registry without a reload. See `docs/plans/TUTORIALS.md`
+  // §3 T2 + §4.1.
+  const tutorialPaths = manifest.tutorials ?? [];
+  const tutorialUnregistrars: Array<() => void> = [];
+  for (const tutorialPath of tutorialPaths) {
+    let def: TutorialDef;
+    try {
+      const text = await pack.textBody(tutorialPath);
+      def = JSON.parse(text) as TutorialDef;
+    } catch (err) {
+      console.warn(
+        `[editorPackLoader] ${packId}/${tutorialPath} → tutorial read/parse failed:`,
+        err,
+      );
+      continue;
+    }
+    const ok = tutorialsApi._register(def);
+    if (!ok) {
+      // _register already logged the validation error — skip onward.
+      continue;
+    }
+    // Build an unregister fn — `tutorialsApi._unregister(id)` deletes
+    // the registry entry (and stops the active session if it's the
+    // one being removed). See `runtime.ts:unregisterTutorial`.
+    const id = def.id;
+    tutorialUnregistrars.push(() => {
+      tutorialsApi._unregister(id);
+    });
+    console.debug(
+      `[editorPackLoader] ${packId}/${tutorialPath}: tutorial "${id}" registered`,
+    );
+  }
+  // Stash tutorial unregistrars in the cleanup ring immediately so
+  // `disposeEditorPackScripts` rips them out on pack-disable, even
+  // when the pack ships no scripts (a tutorial-only pack is legal).
+  if (tutorialUnregistrars.length > 0) {
+    let cleanups = packScriptCleanups.get(packId);
+    if (!cleanups) {
+      cleanups = [];
+      packScriptCleanups.set(packId, cleanups);
+    }
+    cleanups.push(...tutorialUnregistrars);
   }
 
   // ── Script execution ────────────────────────────────────────────

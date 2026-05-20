@@ -113,6 +113,24 @@ export function registerTutorial(def: TutorialDef): boolean {
   return true;
 }
 
+/**
+ * Remove a tutorial from the registry. Used by the editor pack loader's
+ * pack-disable path (T2) so toggling a pack off via the Extensions tab
+ * rips its `manifest.tutorials[]` contributions out of the runtime
+ * registry without a reload. Safe to call when the id is not present
+ * (no-op). If the tutorial being unregistered is currently active,
+ * the active session is stopped first so the overlay doesn't render
+ * stale step content.
+ */
+export function unregisterTutorial(id: string): boolean {
+  if (!registry.has(id)) return false;
+  if (session && session.tutorial.id === id) {
+    stopTutorial();
+  }
+  registry.delete(id);
+  return true;
+}
+
 export function hasTutorial(id: string): boolean {
   return registry.has(id);
 }
@@ -453,6 +471,7 @@ export const tutorialsApi = Object.freeze({
   subscribe,
   getState: getRuntimeState,
   _register: registerTutorial,
+  _unregister: unregisterTutorial,
   _resolveSelector: resolveSelector,
   /** LS key for completion — exposed for tests + Settings tab. */
   _completionKey: COMPLETION_LS_KEY,

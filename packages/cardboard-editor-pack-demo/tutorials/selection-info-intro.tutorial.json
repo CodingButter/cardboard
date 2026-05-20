@@ -1,0 +1,30 @@
+{
+  "$schema": "tutorial/1",
+  "id": "editor-pack-demo.selection-info-intro",
+  "title": "Editor Pack Demo — Selection Info",
+  "description": "A quick tour of the JSON-loaded Selection Info panel shipped by the demo pack.",
+  "estimatedSeconds": 30,
+  "steps": [
+    {
+      "id": "welcome",
+      "target": null,
+      "hint": "Welcome! This tutorial ships INSIDE the cardboard-editor-pack-demo .apg — it registered itself the moment the editor loaded the pack.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    },
+    {
+      "id": "panel",
+      "target": null,
+      "hint": "The pack contributes a Selection Info panel via manifest.editorPanels[]. Open it from the Docks modal to see a JSON-authored inspector form with bound inputs and a Conditional reveal.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    },
+    {
+      "id": "done",
+      "target": null,
+      "hint": "That's the demo. Pack-authored tutorials follow the same pack-chain semantics as panels: last-pack-wins on slug collision, live unregister on pack disable.",
+      "advance": { "kind": "next" },
+      "placement": "center"
+    }
+  ]
+}

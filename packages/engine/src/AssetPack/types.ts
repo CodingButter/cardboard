@@ -492,6 +492,19 @@ export interface PackManifest {
    */
   editorPanels?: ReadonlyArray<string>;
   /**
+   * Editor-scope: list of `.tutorial.json` files (paths relative to
+   * the pack root). The editor's pack loader fetches each file at
+   * startup, parses it as a `TutorialDef`, and registers it with the
+   * runtime tutorial registry via `api.tutorials._register`. Pack
+   * tutorials follow the same pack-chain semantics as the rest of the
+   * editor-scope catalog — last-pack-wins on slug collision and live
+   * unregister-on-disable via the per-pack cleanup ring.
+   *
+   * Ignored on the runtime engine side (the engine never reads this
+   * field). See `docs/plans/TUTORIALS.md` §3 T2 + §4.1.
+   */
+  tutorials?: ReadonlyArray<string>;
+  /**
    * Editor-scope pack scripts. Each path is a `.js` (or `.ts` at
    * source-time; the pack-builder transpiles to `.js`) module inside
    * the pack root that the editor loads AFTER panel registration. The
