@@ -124,6 +124,34 @@ export type SyncedSetters<T, A> = (
 // ---------------------------------------------------------------------------
 
 /**
+ * createSyncedStore wraps a Zustand store with a TRANSPORT LAYER that
+ * keeps replicas in sync across browser contexts.
+ *
+ * Today's transports are local-only:
+ *   - localStorage + `storage` event listener — durable cross-window
+ *     sync, same machine.
+ *   - Optional BroadcastChannel — low-latency ephemeral fanout.
+ *
+ * The transport layer is an INTERFACE, not a single implementation.
+ * Future PeerJS / WebRTC transports satisfy the same shape (see
+ * docs/plans/REMOTE_DOCK_QR.md §6.1):
+ *   - Read writes from the store (subscribe via zustand's
+ *     `useStore.subscribe` or the persist middleware).
+ *   - Apply remote writes back via `useStore.setState(partial)`. Any
+ *     incoming-write path MUST disambiguate itself from a locally
+ *     originated write to avoid echo loops. The cross-window
+ *     `storage` event already gives this for free (it doesn't fire in
+ *     the writer's own window). PeerJS/WebRTC handlers will mark
+ *     applied writes with `applyRemote()` below.
+ *
+ * Multi-transport-per-store is the architecture: local + network
+ * transports subscribe simultaneously, each broadcasting on its own
+ * channel. Stores stay agnostic to who's connected.
+ *
+ * D8+ guidance: don't poke localStorage directly anywhere in D4-D13
+ * code. Go through this module. If something is missing, extend the
+ * API rather than bypassing it.
+ *
  * Build a zustand store that synchronizes across same-origin windows.
  *
  * @param name           Logical store name. Used for the default
@@ -391,4 +419,114 @@ export function throttle<F extends (...args: any[]) => void>(
       }
     }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Origin convention (local vs remote writes)
+// ---------------------------------------------------------------------------
+
+/**
+ * ORIGIN CONVENTION — how this module distinguishes local writes from
+ * writes applied by a transport (storage event, BroadcastChannel,
+ * future PeerJS / WebRTC channel).
+ *
+ * Today the disambiguation is implicit and free:
+ *   - A local setter calls `set(...)` directly on the zustand store.
+ *     The persist middleware writes to localStorage, which fires a
+ *     `storage` event in OTHER same-origin windows (NOT the writer).
+ *     This is the platform's "remote" path.
+ *   - The storage-event listener in `createSyncedStore` calls
+ *     `useStore.setState(parsed.state)` — a write that ALSO happens
+ *     to flow through the persist middleware, but the echo guard
+ *     above (subset deep-equal vs `parsed.state`) short-circuits
+ *     before any actual change, preventing a re-broadcast loop.
+ *
+ * For D9-D13, transports that DON'T have free origin disambiguation
+ * (PeerJS data channels echo your own posts back; WebRTC mesh fanout
+ * may bounce a write through multiple peers) need to mark inbound
+ * writes explicitly. Use `applyRemote()` below from any inbound
+ * message handler. Subscribers (`useStore.subscribe`) that want to
+ * suppress re-broadcast on remote-applied writes can consult
+ * `isApplyingRemote()` from inside the subscribe callback.
+ *
+ * Rule of thumb for D10+ inbound handlers:
+ *
+ *   peer.on("data", (msg) => {
+ *     applyRemote(() => {
+ *       useFooStore.setState(msg.state);
+ *     });
+ *   });
+ *
+ * And on the broadcast side (the part that pushes local writes onto
+ * the wire):
+ *
+ *   useFooStore.subscribe((state, prev) => {
+ *     if (isApplyingRemote()) return;   // skip echo
+ *     peer.send({ state });
+ *   });
+ */
+
+/**
+ * Tracks whether the current synchronous code path is inside an
+ * `applyRemote` scope. A module-level counter supports nested calls
+ * (e.g. one remote write triggers a derived setter) without flipping
+ * the flag back to "local" too early.
+ *
+ * Synchronous-only by design: zustand's subscribers fire synchronously
+ * inside `setState`, so the flag is valid for the duration of the
+ * write. If a future transport needs to span an async boundary it
+ * should wrap each synchronous setState batch in its own
+ * `applyRemote()` rather than holding the flag across an `await`.
+ */
+let remoteApplyDepth = 0;
+
+/**
+ * Mark a synchronous block as applying a write that originated on a
+ * remote transport (storage event, BroadcastChannel, PeerJS data
+ * channel, WebRTC, etc.). Subscribers consulting `isApplyingRemote()`
+ * will see `true` for the duration of `fn`.
+ *
+ * Always synchronous. The returned value matches `fn`'s return value
+ * for ergonomics.
+ *
+ * @example
+ *   peer.on("data", (msg) => {
+ *     applyRemote(() => {
+ *       useFooStore.setState(msg.state);
+ *     });
+ *   });
+ */
+export function applyRemote<R>(fn: () => R): R {
+  remoteApplyDepth++;
+  try {
+    return fn();
+  } finally {
+    remoteApplyDepth--;
+  }
+}
+
+/**
+ * Returns `true` when the current synchronous code path is inside an
+ * `applyRemote` scope — i.e. the write being processed came from a
+ * transport, not a local user action. Use this from `useStore.subscribe`
+ * callbacks to skip re-broadcasting an inbound write and avoid echo
+ * loops in multi-transport configurations.
+ *
+ * @example
+ *   useFooStore.subscribe(() => {
+ *     if (isApplyingRemote()) return;
+ *     peer.send({ state: useFooStore.getState() });
+ *   });
+ */
+export function isApplyingRemote(): boolean {
+  return remoteApplyDepth > 0;
+}
+
+/**
+ * Inverse of `isApplyingRemote()`. Reads as "this write came from the
+ * local user / local setter, broadcast it." Aliased for readability at
+ * the broadcast callsite — both names point at the same predicate.
+ */
+export function originatesLocal(): boolean {
+  return remoteApplyDepth === 0;
 }

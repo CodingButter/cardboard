@@ -105,6 +105,24 @@ export interface DockPanelDef {
    *  Tooltip (stage-2 body). When set, the dock panel's title bar
    *  surfaces a progressive Tooltip on hover. */
   readonly description?: string;
+  /**
+   * Capability flags for cross-device popout. Drives the
+   * "send to phone" UX and the sidecar's panel registry.
+   * See docs/plans/REMOTE_DOCK_QR.md §6.3.
+   *
+   * Forward-compat hook for D9-D13 (sidecar PWA + PeerJS wiring +
+   * drag-to-device-icon UX). Pure additive — when unset, current
+   * behavior is preserved: panel works locally, never mounts remotely.
+   */
+  readonly mountable?: {
+    /** Show in the regular dock-add modal. Default `true`. */
+    readonly local?: boolean;
+    /** Opt-in: panel can be sent to a paired sidecar device. Default `false`. */
+    readonly remote?: boolean;
+    /** Set when a touch-friendly variant exists. Sidecar mounts the
+     *  variant on mobile/tablet tiers. Default `false`. */
+    readonly touchVariant?: boolean;
+  };
 }
 
 export interface DockShellProps {
