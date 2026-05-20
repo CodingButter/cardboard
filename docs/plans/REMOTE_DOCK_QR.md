@@ -135,6 +135,71 @@ in the URL. URL stays ~120-150 chars, well under QR size limits.
   }
   ```
 
+## 5b. Device tiers + drag-to-device sidebar UX
+
+Three device classes; classification done on the sidecar's
+cold-launch and reported in the peer-handshake metadata so desktop
+knows what each paired device can do:
+
+| Tier | Heuristic | Capability |
+|---|---|---|
+| **mobile** | viewport `< 768px` OR (touch-only AND viewport `< 900px`) | Single dockview with groups-as-tabs only. No multi-pane. Touch-variant panels mandatory. |
+| **tablet** | touch device AND viewport `768–1366px` | Full layouts with light constraints (max ~2-3 dockviews). Touch-variant panels preferred. Slightly less bandwidth assumed. |
+| **laptop/desktop** | non-touch OR viewport `≥ 1366px` | Unconstrained. Full layouts, hover tooltips, mouse-grade interactions. |
+
+Detection logic lives in `apps/editor/src/sidecar/deviceTier.ts` (new
+file when D9 lands). The sidecar evaluates on cold-launch and
+includes the tier in the WebRTC peer-handshake metadata under a
+`deviceTier` field on its `usePairedPeersStore` entry.
+
+### Drag-to-device-icon sidebar UX
+
+When the user drags a panel header tab in the editor, the left
+sidebar (already home to trash) reveals an icon per paired device.
+Drop on a device icon → panel sent to that device.
+
+- Each paired peer renders a `<DropZone accepts={["panel"]}>` chip
+  in the sidebar's left rail.
+- Icon style matches the trash treatment — visible only while a
+  drag is in flight, dimmed otherwise.
+- Drop payload: `DndPayload<"panel">` with the panel id, current
+  state snapshot (optional), and the source dockview group id.
+- Drop handler routes via the existing WebRTC control channel:
+  - `tier === "mobile"` → `{kind: "addPanelToGroup", panelKind, asTab: true}`
+  - `tier === "tablet" | "desktop"` → `{kind: "addPanelToLayout", panelKind, hint?: "left|right|bottom"}`
+- Mobile sidecar adds the new panel as a tab in its single group.
+  Tablet/desktop sidecar adds the panel to its layout per its
+  dockview rules.
+- Symmetry: sidecar tablet/desktop can also drag their own panels
+  back to the orchestrator desktop — same mechanism, sidecar's
+  sidebar shows desktop and other-device icons. Phone-side mostly
+  one-way for now; we can revisit if real use cases emerge.
+
+This makes "send panel to phone" a one-gesture interaction — no
+menu, no rescan, no controller-dock visit (the Controller dock
+remains useful for batch / overview, but isn't required for
+day-to-day handoff).
+
+### A new SemanticAssetKind
+
+Adds `"panel"` to the `SemanticAssetKind` union in
+`apps/editor/src/state/dnd/payload.ts`. New MIME type:
+`application/x-cardboard-panel`. Payload shape:
+
+```ts
+interface PanelDndPayload {
+  v: 1;
+  kind: "panel";
+  id: string;               // panel kind id, e.g. "minimap"
+  label: string;             // header label for sidecar
+  origin: string;            // source window/peer id
+  meta?: {
+    groupId?: string;        // sourcing dockview group, for "move" semantics
+    state?: unknown;         // optional state snapshot to seed remote panel
+  };
+}
+```
+
 ## 6. Forward-compat hooks (design NOW, implement later)
 
 The user's instinct: design the transport seams in the existing
