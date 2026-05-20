@@ -606,10 +606,17 @@ export interface PackManifest {
   audio?: Record<string, SoundDef>;
   /**
    * Editor-authored declarative prefabs — see `DeclarativePrefab`.
-   * Keys are the prefab ids passed to `api.spawn("id", opts)`. Walked
-   * AFTER `runPackScripts()` so JS scripts have a chance to register
-   * any pack-defined components the declarative shapes reference.
-   * See `docs/plans/EDITOR.md` §6.3.
+   * Keys are stable prefab ids referenced by editor tooling (the
+   * Prefabs view, scene-spawner controllers, drag-from-browser
+   * inserts). The engine no longer exposes a runtime spawn API for
+   * these — `api.spawn(name)` was removed when prefabs became
+   * editor-only authoring assets (verified against `types.ts` 2026-05-20).
+   * Instead, the editor flattens every prefab reference into
+   * `scene.entities[]` at scene-save time; the engine boots those
+   * entities directly. Walked AFTER `runPackScripts()` so JS scripts
+   * have a chance to register any pack-defined components the
+   * declarative shapes reference. See `docs/plans/EDITOR.md` §6.3 +
+   * `.claude/memory/project_prefabs_declarative_assets.md`.
    */
   prefabs?: Record<string, DeclarativePrefab>;
   /**
