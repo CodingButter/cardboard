@@ -492,6 +492,23 @@ export interface PackManifest {
    */
   editorPanels?: ReadonlyArray<string>;
   /**
+   * Editor-scope pack scripts. Each path is a `.js` (or `.ts` at
+   * source-time; the pack-builder transpiles to `.js`) module inside
+   * the pack root that the editor loads AFTER panel registration. The
+   * loader fetches the source via `pack.textBody(path)`, wraps it in a
+   * Blob URL, and dynamically imports the module as ESM. The default
+   * export is invoked with an `EditorPackContext` exposing the same
+   * `registerCommand` API the editor app uses itself — the script can
+   * register commands, settings, etc. that its declarative panels then
+   * reference by id (e.g. `{ onClick: { script: "demo.selection.clear" } }`).
+   *
+   * Scope rules mirror `editorPanels`: this field is ignored on the
+   * runtime engine side; runtime-scope pack code lives in
+   * `world.json.scripts[]` and `Scripts` components. See
+   * `docs/plans/EDITOR_ENGINE.md` §8 Phase 2a (pack-bundled scripts).
+   */
+  scripts?: ReadonlyArray<string>;
+  /**
    * Declared dependencies. The chain resolver walks every entry,
    * fetches the referenced pack, verifies integrity, and inserts
    * dependencies before the dependent in the resulting chain. P1 of

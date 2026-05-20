@@ -795,6 +795,16 @@ async function buildPack(
   if (worldJson?.scripts) {
     for (const p of worldJson.scripts) if (typeof p === "string") referencedScripts.add(p);
   }
+  // Editor-scope pack scripts — declared at `manifest.scripts[]` (Phase
+  // 2a of editor-pack-bundled scripts). Walked through the same
+  // compile-and-rewrite pipeline as world-scope scripts so a pack
+  // author can ship `scripts/setup.ts` and the loader reads
+  // `scripts/setup.js` from the .apg at runtime.
+  if (manifest && Array.isArray((manifest as unknown as { scripts?: unknown[] }).scripts)) {
+    for (const p of (manifest as unknown as { scripts?: unknown[] }).scripts!) {
+      if (typeof p === "string") referencedScripts.add(p);
+    }
+  }
   if (worldJson?.entities) {
     for (const e of worldJson.entities) collectFromScripts(e.components ?? {});
   }
@@ -1014,8 +1024,17 @@ async function buildPack(
     let manifestForZip: Record<string, unknown> | null = null;
     if (manifest) {
       manifestForZip = { ...(manifest as unknown as Record<string, unknown>) };
-      if ((manifestForZip as { scripts?: unknown }).scripts !== undefined) {
-        delete manifestForZip.scripts;
+      // `manifest.scripts[]` is the editor-scope script-load list
+      // (Phase 2a). Source paths may be `.ts` on disk but the
+      // pack-builder transpiles to `.js`; rewrite each entry here so
+      // the on-disk path lines up with the runtime loader's read.
+      // When no rewrites apply the field round-trips verbatim — the
+      // legacy "strip scripts" behaviour is no longer correct.
+      const manifestScriptsRaw = (manifestForZip as { scripts?: unknown }).scripts;
+      if (Array.isArray(manifestScriptsRaw)) {
+        manifestForZip.scripts = manifestScriptsRaw.map((p) =>
+          typeof p === "string" ? scriptPathRewrites.get(p) ?? p : p,
+        );
       }
       if (audioPathRewrites.size > 0 && manifestForZip.audio && typeof manifestForZip.audio === "object") {
         const sounds = manifestForZip.audio as Record<string, { file?: string }>;

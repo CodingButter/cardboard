@@ -83,8 +83,6 @@ import {
   MANIFEST as ASSET_REFERENCES_MANIFEST,
 } from "./scene/panels/AssetReferencesPanel";
 import { useEditorPackPanels } from "../packs/editorPackLoader";
-import { registerCommand } from "../state/useCommandStore";
-import { useSelectionStore } from "../state/useSelectionStore";
 
 /**
  * MapView — Scene page shell.
@@ -399,22 +397,10 @@ export function MapView(_props: MapViewProps = {}): React.JSX.Element {
     [editorPackPanels],
   );
 
-  // Register the demo's `demo.selection.clear` command — formerly
-  // owned by the in-tree JSON-demo panel's in-component useEffect.
-  // The editor-pack-loaded panel references this command id by name;
-  // the ownership migrates here (Phase 1) and ultimately moves into
-  // the editor pack itself (Phase 2, once packs can contribute
-  // scripts alongside panels).
-  React.useEffect(() => {
-    return registerCommand({
-      id: "demo.selection.clear",
-      title: "Demo: Clear Selection",
-      category: "View",
-      run: () => {
-        useSelectionStore.getState().select(null);
-      },
-    });
-  }, []);
+  // `demo.selection.clear` is now owned by the editor-pack-demo's
+  // pack-bundled `scripts/setup.ts` (Phase 2a, task #30). The editor
+  // app no longer holds any first-party registration on a third-party
+  // pack's behalf — the dogfooding loop is honest.
 
   // Guard rail: if for some reason there's no project (e.g. someone
   // navigates here without one), render a polite empty state rather

@@ -38,6 +38,51 @@ import {
   getEnabledEditorPackIds,
   useEditorPacksStore,
 } from "../state/useEditorPacksStore";
+import { registerCommand } from "../state/useCommandStore";
+import { useSelectionStore } from "../state/useSelectionStore";
+
+/**
+ * Phase 2a — context handed to pack-bundled editor scripts.
+ *
+ * Pack scripts default-export a function that receives this context
+ * and registers commands (and, in future, settings / store hooks /
+ * keybindings) against the same APIs the editor app uses itself. The
+ * goal is total parity: a pack author can call `registerCommand` the
+ * exact same way `MapView.tsx` does — no editor-only hooks.
+ *
+ * Scripts may return an optional cleanup function. The loader holds
+ * the reference so a future Extensions-tab "disable" action can tear
+ * down the registrations. Phase 2a wires this only at page-unload
+ * time (cleanup runs naturally when the window closes); the runtime
+ * unload hook is deferred.
+ */
+export interface EditorPackContext {
+  /** Stable id of the loading pack — surfaced for logging / scoping. */
+  packId: string;
+  /** Same API the editor uses for first-party command registration. */
+  registerCommand: typeof registerCommand;
+  /**
+   * Shell-store accessors. Today: just the selection store, so the
+   * demo pack's `selection.clear` command can drive the same surface
+   * MapView.tsx mutates. Widened on demand as scripts express needs
+   * for additional stores (tool, brush, scene, layers, …).
+   *
+   * Each entry returns the live Zustand store hook — pack scripts
+   * read via `stores.selection.getState()` exactly the way the
+   * editor app does. Same import path semantics, no editor-only API.
+   */
+  stores: {
+    selection: typeof useSelectionStore;
+  };
+}
+
+/** Optional cleanup returned by a pack script's default export. */
+export type EditorPackScriptCleanup = () => void;
+
+/** Shape of the default export a pack script ships. */
+export type EditorPackScriptModule = (
+  ctx: EditorPackContext,
+) => EditorPackScriptCleanup | void | Promise<EditorPackScriptCleanup | void>;
 
 /** Base path the editor dev server serves editor packs from. Each
  *  id resolves to `<EDITOR_PACKS_BASE>/<id>.apg`, served by the
@@ -162,7 +207,125 @@ async function loadOneEditorPack(packId: string): Promise<DockPanelDef[]> {
     }
     defs.push(buildDockPanelDef(spec, packId));
   }
+
+  // Phase 2a — pack-bundled scripts. Scripts run AFTER panels register
+  // so script-defined commands are guaranteed to exist by the time
+  // any panel mounts. The loader reads each script's source via
+  // `pack.textBody(path)`, builds a Blob URL, and dynamic-imports the
+  // module as ESM. The default export is invoked with an
+  // `EditorPackContext` exposing the same `registerCommand` API the
+  // editor app uses itself — same trust model as a VS Code extension.
+  // A thrown script is caught + logged + skipped; editor boots
+  // regardless. See `docs/plans/EDITOR_ENGINE.md` §8 Phase 2a.
+  const scriptPaths = manifest.scripts ?? [];
+  for (const scriptPath of scriptPaths) {
+    await runEditorPackScript(pack, packId, scriptPath);
+  }
   return defs;
+}
+
+/**
+ * Read one pack-bundled script, import it as ESM via a Blob URL, and
+ * invoke its default export with the {@link EditorPackContext}. Errors
+ * are caught + logged; the calling loader continues with subsequent
+ * scripts and packs. Cleanup functions returned by the script are
+ * stashed in {@link packScriptCleanups} so a future Extensions-tab
+ * disable hook (deferred) can tear them down.
+ */
+async function runEditorPackScript(
+  pack: ZipAssetPack,
+  packId: string,
+  scriptPath: string,
+): Promise<void> {
+  let source: string;
+  try {
+    source = await pack.textBody(scriptPath);
+  } catch (err) {
+    console.warn(
+      `[editorPackLoader] ${packId}/${scriptPath} → read failed:`,
+      err,
+    );
+    return;
+  }
+  // The browser's `URL.createObjectURL(new Blob(...))` returns a `blob:`
+  // URL that's safe to pass to dynamic `import()`. The blob holds the
+  // source bytes; we revoke the URL inside `finally` so the blob is
+  // freed once the import resolves (or throws).
+  const blob = new Blob([source], { type: "application/javascript" });
+  const url = URL.createObjectURL(blob);
+  try {
+    // `/* @vite-ignore */` mirrors the engine's pack-script loader in
+    // `Game.runPackScripts` — keeps any future Vite-style scanner from
+    // trying to statically resolve the blob URL at build time.
+    const mod = (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
+    const setup = (mod.default ?? mod.setup) as EditorPackScriptModule | undefined;
+    if (typeof setup !== "function") {
+      console.warn(
+        `[editorPackLoader] ${packId}/${scriptPath}: no default export ` +
+          `or setup() function — nothing to run`,
+      );
+      return;
+    }
+    const ctx: EditorPackContext = {
+      packId,
+      registerCommand,
+      stores: {
+        selection: useSelectionStore,
+      },
+    };
+    const result = await Promise.resolve(setup(ctx));
+    if (typeof result === "function") {
+      let cleanups = packScriptCleanups.get(packId);
+      if (!cleanups) {
+        cleanups = [];
+        packScriptCleanups.set(packId, cleanups);
+      }
+      cleanups.push(result);
+    }
+    console.debug(
+      `[editorPackLoader] ${packId}/${scriptPath}: loaded`,
+    );
+  } catch (err) {
+    // A thrown script is contained — neither this pack's remaining
+    // scripts nor any other pack should be affected.
+    console.error(
+      `[editorPackLoader] ${packId}/${scriptPath}: failed to run —`,
+      err,
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Per-pack cleanup ring. Populated by {@link runEditorPackScript} when
+ * a script's default export returns a cleanup function. A future
+ * Extensions-tab disable handler (deferred to Phase 2b) will call
+ * {@link disposeEditorPackScripts} with the pack id to unwind the
+ * registrations. Today the ring lives for the page session — page
+ * unload tears the registrations down naturally.
+ */
+const packScriptCleanups = new Map<string, EditorPackScriptCleanup[]>();
+
+/**
+ * Run every cleanup callback collected for a given pack id and clear
+ * the entry. Safe to call when the pack has no cleanups (no-op).
+ * Exported for the future Extensions-tab disable path.
+ */
+export function disposeEditorPackScripts(packId: string): void {
+  const cleanups = packScriptCleanups.get(packId);
+  if (!cleanups) return;
+  for (const fn of cleanups) {
+    try {
+      fn();
+    } catch (err) {
+      console.warn(
+        `[editorPackLoader] ${packId}: cleanup threw —`,
+        err,
+      );
+    }
+  }
+  packScriptCleanups.delete(packId);
 }
 
 /**

@@ -11,5 +11,6 @@
     "panels/brush-migrated.json",
     "panels/quick-tools-migrated.json",
     "panels/cell-inspector-migrated.json"
-  ]
+  ],
+  "scripts": ["scripts/setup.ts"]
 }
