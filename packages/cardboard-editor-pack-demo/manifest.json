@@ -1,6 +1,6 @@
 {
   "id": "cardboard-editor-pack-demo",
-  "name": "Cardboard Editor Pack Demo",
+  "name": "cardboard-editor-pack-demo",
   "version": "0.0.1",
   "engine": "two_5_d@0.1",
   "scope": ["editor"],

@@ -113,9 +113,26 @@ function emptyPublishStats(): PublishStats {
 
 const root = new URL("../../../", import.meta.url).pathname;
 const sourceRoot = join(root, "packages");
-const outDir = join(root, "apps", "game", "public", "packs");
+const gameOutDir = join(root, "apps", "game", "public", "packs");
+const editorOutDir = join(root, "apps", "editor", "public", "packs");
 
-await Bun.$`mkdir -p ${outDir}`.quiet();
+await Bun.$`mkdir -p ${gameOutDir} ${editorOutDir}`.quiet();
+
+/**
+ * Pick the `.apg` output directory by manifest `scope`. Editor-only
+ * packs (scope contains "editor" but NOT "game") land in the editor
+ * app's public dir so the editor server can serve them at
+ * `/packs/<name>.apg`. Everything else (game-scope, dual-scope, or
+ * legacy scope-less packs) lands in the game app's public dir,
+ * preserving the existing default-pack pipeline.
+ */
+function pickOutDir(manifest: PackManifest | null): string {
+  const scope = (manifest as unknown as { scope?: string[] } | null)?.scope;
+  if (Array.isArray(scope) && scope.includes("editor") && !scope.includes("game")) {
+    return editorOutDir;
+  }
+  return gameOutDir;
+}
 
 // Top-level directory entries skipped by the pack walker. `types/`
 // holds the generated `pack.d.ts` declaration file (see
@@ -571,7 +588,7 @@ async function validatePackShaders(
 async function buildPack(
   dirName: string,
   publish: PublishConfig,
-): Promise<{ size: number; files: number; outName: string; stats: PublishStats }> {
+): Promise<{ size: number; files: number; outName: string; stats: PublishStats; outDir: string }> {
   const packRoot = join(sourceRoot, dirName);
   const zip = new JSZip();
   const publishStats = emptyPublishStats();
@@ -1040,9 +1057,10 @@ async function buildPack(
     type: "uint8array",
     compression: "DEFLATE",
   });
+  const outDir = pickOutDir(manifest);
   const outFile = join(outDir, `${outName}.apg`);
   await Bun.write(outFile, buffer);
-  return { size: buffer.byteLength, files: fileCount, outName, stats: publishStats };
+  return { size: buffer.byteLength, files: fileCount, outName, stats: publishStats, outDir };
 }
 
 // A "pack" is any workspace package under `packages/` whose root has
@@ -1086,7 +1104,8 @@ function fmtBytes(n: number): string {
 console.log(`Building ${subdirs.length} pack(s) from ${relative(root, sourceRoot)}/`);
 for (const name of subdirs) {
   try {
-    const { size, files, outName, stats } = await buildPack(name, publish);
+    const { size, files, outName, stats, outDir } = await buildPack(name, publish);
+    const outRel = relative(root, outDir);
     if (publish.mode === "production") {
       const parts: string[] = [];
       const imgTotal = stats.imagesOptimized + stats.tilesheetsOptimized;
@@ -1108,12 +1127,12 @@ for (const name of subdirs) {
         parts.push("ffmpeg missing — audio passed through");
       }
       console.log(
-        `  ${outName} — ${files} files, ${fmtBytes(size)} bytes` +
+        `  ${outName} → ${outRel}/${outName}.apg — ${files} files, ${fmtBytes(size)} bytes` +
           (parts.length > 0 ? `\n    optimized: ${parts.join(", ")}` : ""),
       );
     } else {
       console.log(
-        `  ${outName} — ${files} files, ${fmtBytes(size)} bytes (pass-through)`,
+        `  ${outName} → ${outRel}/${outName}.apg — ${files} files, ${fmtBytes(size)} bytes (pass-through)`,
       );
     }
   } catch (err) {

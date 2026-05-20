@@ -10,17 +10,17 @@ const SIDECAR_DIR = `${import.meta.dir}/sidecar`;
 // in apps/game). The previous staged-copy at `public/play/` rotted
 // every time the engine changed.
 const GAME_DIST_DIR = `${import.meta.dir}/../game/dist`;
-// Proxy `/packs/*` to apps/game/public/packs/ so HomeScreen's
-// "Create Project" templates (e.g. Cardboard.apg) resolve from the
-// editor origin without needing a duplicate copy in apps/editor/public/.
+// `/packs/*` resolves from TWO locations, checked in order:
+//   1. apps/editor/public/packs/ — editor-scope packs (e.g.
+//      cardboard-editor-pack-demo.apg). Loaded by the editor's
+//      runtime pack loader (`src/packs/editorPackLoader.ts`) — single
+//      `.apg` fetch, decoded via `ZipAssetPack.loadFromBytes`.
+//   2. apps/game/public/packs/ — authored game packs (e.g.
+//      Cardboard.apg). Referenced by HomeScreen's "Create Project"
+//      templates; shared via the editor origin so the iframe inherits
+//      the bytes without a duplicate copy.
+const EDITOR_PACKS_DIR = `${import.meta.dir}/public/packs`;
 const GAME_PACKS_DIR = `${import.meta.dir}/../game/public/packs`;
-// Serve `/_packs/<pack-id>/<rel>` from the editor-pack workspace
-// packages so the editor's pack loader can fetch manifest.json +
-// panel JSON specs over HTTP (mirrors how a future .apg unzip would
-// expose pack contents over a virtual filesystem). Phase 1 ships one
-// editor pack: `cardboard-editor-pack-demo`. See
-// `apps/editor/src/packs/editorPackLoader.ts` + EDITOR_ENGINE.md §8.
-const EDITOR_PACKS_DIR = `${import.meta.dir}/../../packages`;
 
 /**
  * Resolve content-type / cache headers for files Bun.file might not
@@ -110,41 +110,17 @@ const server = Bun.serve({
     "/*": async (req) => {
       const { pathname } = new URL(req.url);
 
-      // Proxy /packs/* to apps/game/public/packs/ so authored pack
-      // templates referenced by HomeScreen (e.g. /packs/Cardboard.apg)
-      // resolve from the editor origin.
+      // Resolve `/packs/*` against the editor's own public/packs/
+      // first (editor-scope `.apg` files emitted by `bun run
+      // build-packs`), then fall back to apps/game/public/packs/ so
+      // HomeScreen's "Create Project" templates (e.g. Cardboard.apg)
+      // still resolve from the editor origin.
       if (pathname.startsWith("/packs/")) {
         const rel = pathname.slice("/packs".length);
-        const file = Bun.file(`${GAME_PACKS_DIR}${rel}`);
-        if (await file.exists()) return new Response(file);
-        return new Response("Not Found", { status: 404 });
-      }
-
-      // Serve /_packs/<pack-id>/<rel> from packages/<pack-id>/<rel>.
-      // Used by the editor's pack loader at startup to fetch the
-      // editor-pack demo's manifest + panel specs. Restricted to the
-      // explicit allowlist below so a malicious URL can't escape into
-      // arbitrary workspace package contents.
-      if (pathname.startsWith("/_packs/")) {
-        const rel = pathname.slice("/_packs/".length);
-        const firstSegment = rel.split("/")[0];
-        const EDITOR_PACK_ALLOWLIST = new Set([
-          "cardboard-editor-pack-demo",
-        ]);
-        if (!firstSegment || !EDITOR_PACK_ALLOWLIST.has(firstSegment)) {
-          return new Response("Not Found", { status: 404 });
-        }
-        // Reject `..` traversal — defence-in-depth even though the
-        // allowlist already pins the pack root.
-        if (rel.includes("..")) {
-          return new Response("Forbidden", { status: 403 });
-        }
-        const file = Bun.file(`${EDITOR_PACKS_DIR}/${rel}`);
-        if (await file.exists()) {
-          return new Response(file, {
-            headers: { "cache-control": "no-cache" },
-          });
-        }
+        const editorFile = Bun.file(`${EDITOR_PACKS_DIR}${rel}`);
+        if (await editorFile.exists()) return new Response(editorFile);
+        const gameFile = Bun.file(`${GAME_PACKS_DIR}${rel}`);
+        if (await gameFile.exists()) return new Response(gameFile);
         return new Response("Not Found", { status: 404 });
       }
 
