@@ -1,0 +1,9 @@
+{
+  "name": "@two_5_d/demo-scene-stats",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Editor demo pack: a second consumer of chart.js, intentionally identical to the Performance Profiler's bundled chart.js@4.4.0. Proves the libraryCache content-hash dedup actually shares one Blob URL across two packs. See docs/plans/PERFORMANCE_PROFILER.md §5.1 + §10 R3.",
+  "devDependencies": {
+    "chart.js": "4.4.0"
+  }
+}

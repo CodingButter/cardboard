@@ -1,0 +1,78 @@
+{
+  "id": "scene-stats",
+  "title": "Scene Stats",
+  "category": "Diagnostics",
+  "dockKind": "dockable-window",
+  "rootOptions": { "padding": 2 },
+  "root": {
+    "type": "Layout",
+    "direction": "column",
+    "gap": 2,
+    "children": [
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 2,
+        "align": "center",
+        "children": [
+          { "type": "Heading", "text": "Scene Stats", "level": 3 },
+          { "type": "Spacer", "size": 2 },
+          {
+            "type": "Button",
+            "text": "Reshuffle",
+            "onClick": { "script": "scene-stats.reshuffle" },
+            "variant": "secondary"
+          }
+        ]
+      },
+      {
+        "type": "Layout",
+        "direction": "row",
+        "gap": 3,
+        "children": [
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "WALLS", "variant": "label" },
+              { "type": "Text", "text": "$store.sceneStats.walls", "variant": "value" }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "FLOORS", "variant": "label" },
+              { "type": "Text", "text": "$store.sceneStats.floors", "variant": "value" }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "CEILINGS", "variant": "label" },
+              { "type": "Text", "text": "$store.sceneStats.ceilings", "variant": "value" }
+            ]
+          },
+          {
+            "type": "Layout",
+            "direction": "column",
+            "gap": 1,
+            "children": [
+              { "type": "Text", "text": "EMPTY", "variant": "label" },
+              { "type": "Text", "text": "$store.sceneStats.empty", "variant": "value" }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Canvas",
+        "refName": "scene-stats-chart",
+        "heightPx": 220
+      }
+    ]
+  }
+}

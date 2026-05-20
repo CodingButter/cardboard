@@ -120,6 +120,13 @@
         "chart.js": "4.4.0",
       },
     },
+    "packages/demo-scene-stats": {
+      "name": "@two_5_d/demo-scene-stats",
+      "version": "0.1.0",
+      "devDependencies": {
+        "chart.js": "4.4.0",
+      },
+    },
     "packages/engine": {
       "name": "@two_5_d/engine",
       "version": "0.0.0",
@@ -482,6 +489,8 @@
     "@two_5_d/default-pack": ["@two_5_d/default-pack@workspace:packages/default-pack"],
 
     "@two_5_d/demo-performance-profiler": ["@two_5_d/demo-performance-profiler@workspace:packages/demo-performance-profiler"],
+
+    "@two_5_d/demo-scene-stats": ["@two_5_d/demo-scene-stats@workspace:packages/demo-scene-stats"],
 
     "@two_5_d/docs": ["@two_5_d/docs@workspace:apps/docs"],
 

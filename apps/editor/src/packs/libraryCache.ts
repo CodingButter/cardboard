@@ -71,35 +71,70 @@ export async function sha256Sri(bytes: Uint8Array): Promise<string> {
  * before any caching), so a pack with a manifest-vs-bytes disagreement
  * can't poison the cache for a subsequent honest pack.
  */
-export async function resolveLibrary(
+export function resolveLibrary(
   declaredHash: string,
   bytes: Uint8Array,
 ): Promise<unknown> {
   const cached = LIBRARY_CACHE.get(declaredHash);
-  if (cached) return cached.module;
-  // Verify the bytes match the declared hash BEFORE we touch the
-  // cache or create a Blob URL — a mismatch is fatal.
-  const actualHash = await sha256Sri(bytes);
-  if (actualHash !== declaredHash) {
-    throw new Error(
-      `[libraryCache] hash mismatch: declared ${declaredHash}, ` +
-        `actual ${actualHash}`,
+  if (cached) {
+    // Observable dedup signal. The first pack to ship a given hash
+    // logs MISS (below); every subsequent pack that ships the same
+    // bytes logs HIT here. Two packs declaring chart.js@4.4.0 → one
+    // MISS + one HIT. This is the verification mechanism — if a
+    // future change accidentally reinstantiates the cache per pack
+    // (e.g. moving LIBRARY_CACHE into a function scope), the HIT
+    // line disappears and the test below catches it.
+    // eslint-disable-next-line no-console
+    console.info(
+      `[libraryCache] cache HIT (dedup): ${declaredHash.slice(0, 24)}…`,
     );
+    return cached.module;
   }
-  const blob = new Blob([bytes as BlobPart], {
-    type: "application/javascript",
-  });
-  const url = URL.createObjectURL(blob);
-  // String-indirection to defeat any static-analysis dynamic-import
-  // scanner Bun's bundler (or a future plugin) might apply. The
-  // `@vite-ignore` is documentation only — Bun doesn't honour it,
-  // and a raw `import(url)` with a variable URL is currently
-  // treated as runtime in Bun's bundler too. The indirection is
-  // belt-and-braces. See `docs/plans/PERFORMANCE_PROFILER.md` §10 R3.
-  const importDynamic: (specifier: string) => Promise<unknown> = (s) =>
-    import(/* @vite-ignore */ s);
-  const module = importDynamic(url);
-  LIBRARY_CACHE.set(declaredHash, { url, module });
+  // Race-safe: insert the cache entry SYNCHRONOUSLY before we await
+  // the hash verification. Two concurrent calls for the same bytes
+  // both fall into the `if (cached)` branch above on the second
+  // call's synchronous entry — without this, two `loadEditorPacks()`
+  // racing on the same chart.js would both miss the cache and parse
+  // chart.js twice. The hash verification still runs (inside the
+  // module-resolution Promise) and a mismatch turns the Promise
+  // rejection-final + the loader handles it as a load failure.
+  //
+  // eslint-disable-next-line no-console
+  console.info(
+    `[libraryCache] cache MISS (first load): ${declaredHash.slice(0, 24)}… ` +
+      `(${bytes.byteLength.toLocaleString()} B)`,
+  );
+  const module = (async (): Promise<unknown> => {
+    const actualHash = await sha256Sri(bytes);
+    if (actualHash !== declaredHash) {
+      // Drop the cache entry so a subsequent call with the same
+      // declared hash but the correct bytes can succeed.
+      LIBRARY_CACHE.delete(declaredHash);
+      throw new Error(
+        `[libraryCache] hash mismatch: declared ${declaredHash}, ` +
+          `actual ${actualHash}`,
+      );
+    }
+    const blob = new Blob([bytes as BlobPart], {
+      type: "application/javascript",
+    });
+    const url = URL.createObjectURL(blob);
+    // Patch the entry's `url` once the Blob exists (we inserted a
+    // placeholder above so concurrent callers could dedup).
+    const entry = LIBRARY_CACHE.get(declaredHash);
+    if (entry) entry.url = url;
+    // String-indirection to defeat any static-analysis dynamic-import
+    // scanner Bun's bundler (or a future plugin) might apply. The
+    // `@vite-ignore` is documentation only — Bun doesn't honour it,
+    // and a raw `import(url)` with a variable URL is currently
+    // treated as runtime in Bun's bundler too. The indirection is
+    // belt-and-braces. See `docs/plans/PERFORMANCE_PROFILER.md` §10 R3.
+    const importDynamic: (specifier: string) => Promise<unknown> = (s) =>
+      import(/* @vite-ignore */ s);
+    return importDynamic(url);
+  })();
+  // Placeholder `url` is replaced once the Blob is created above.
+  LIBRARY_CACHE.set(declaredHash, { url: "", module });
   return module;
 }
 
@@ -113,4 +148,20 @@ export function _clearLibraryCacheForTests(): void {
     URL.revokeObjectURL(url);
   }
   LIBRARY_CACHE.clear();
+}
+
+/**
+ * Snapshot the current cache as a list of `{ hash, url }`. Test-only —
+ * production code MUST NOT depend on cache contents. Used by the
+ * dedup-verification test to assert that two packs which resolve the
+ * same hash produce exactly one cache entry.
+ */
+export function _libraryCacheSnapshotForTests(): Array<{
+  hash: string;
+  url: string;
+}> {
+  return Array.from(LIBRARY_CACHE.entries()).map(([hash, entry]) => ({
+    hash,
+    url: entry.url,
+  }));
 }

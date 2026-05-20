@@ -76,12 +76,16 @@ export interface EditorPacksStateActions {
 
 export type EditorPacksState = EditorPacksStateData & EditorPacksStateActions;
 
-/** Initial state — ships with the demo pack + the performance profiler
- *  installed + enabled. The Profiler is the marketplace-milestone canary
- *  pack (EDITOR_ENGINE §9 / PERFORMANCE_PROFILER.md §1); shipping it
- *  enabled by default means a fresh clone gets a live FPS chart in the
- *  DocksModal under Diagnostics without any user action. Users can
- *  disable either pack from the Extensions tab. */
+/** Initial state — ships with the demo pack, the performance profiler,
+ *  and the scene-stats pack installed + enabled. The Profiler is the
+ *  marketplace-milestone canary (EDITOR_ENGINE §9 /
+ *  PERFORMANCE_PROFILER.md §1); shipping it enabled by default means a
+ *  fresh clone gets a live FPS chart in the DocksModal under
+ *  Diagnostics without any user action. Scene Stats is a second
+ *  chart.js consumer that exists explicitly to verify the libraryCache
+ *  content-hash dedup — two packs declaring the same chart.js@4.4.0
+ *  bytes share one Blob URL across both pack loads. Users can disable
+ *  any pack from the Extensions tab. */
 const INITIAL_STATE: EditorPacksStateData = {
   packs: {
     "cardboard-editor-pack-demo": {
@@ -91,6 +95,11 @@ const INITIAL_STATE: EditorPacksStateData = {
     },
     "demo-performance-profiler": {
       id: "demo-performance-profiler",
+      enabled: true,
+      meta: null,
+    },
+    "demo-scene-stats": {
+      id: "demo-scene-stats",
       enabled: true,
       meta: null,
     },
