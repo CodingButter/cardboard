@@ -8,18 +8,34 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { registerCommand } from "../../../state/useCommandStore";
-import {
-  useLayerStore,
-  type CustomLayer,
-} from "../../../state/useLayerStore";
-import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
+// Type-only — pack-builder erases at compile time. Same pattern as the
+// other P2 + P3-A migrated panels (`NotesPanel`, `OutputPanel`,
+// `HistoryPanel`, `LightingPanel`).
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Value-import for the CustomLayer type — type-only so the bundler
+// erases it. The store hook itself is shell-SDK externalised below so
+// the pack writes through the host singleton.
+import type { CustomLayer } from "../../../apps/editor/src/state/useLayerStore";
+import { MOCK_LAYERS, type LayerRow } from "./scene-fixtures";
+// Externalised — the layer store is a Wave-3 synced store with a
+// per-key BroadcastChannel; the pack MUST read/write through the host
+// singleton or it gets an isolated copy with no cross-window sync.
+// `registerCommand` routes into the host's command store + palette.
+// See `apps/editor/src/packs/shellSdkRuntime.ts`.
+import { registerCommand, useLayerStore } from "@cardboard/editor-shell";
 
 /**
  * LayersPanel — scene-layer visibility + active-target + reorder
  * surface.
+ *
+ * P3 batch B migration. Moved from
+ * `apps/editor/src/views/scene/panels/LayersPanel.tsx` into the
+ * core-editor-pack with no behavioural changes — only the import
+ * paths flipped to:
+ *   - pack-local `scene-fixtures` for `MOCK_LAYERS` + `LayerRow`;
+ *   - `@cardboard/editor-shell` for `useLayerStore` + `registerCommand`
+ *     so the panel runs against the host's singletons.
  *
  * Visual target: the LAYERS section in `Editor Design/Map.png` — a
  * vertical list of rows, each with an eye visibility toggle, a color
@@ -31,9 +47,9 @@ import { MOCK_LAYERS, type LayerRow } from "../scene-fixtures";
  * synced store handles persistence (`cardboard.sync.layer`) and
  * cross-window propagation, so this panel owns no localStorage logic
  * of its own. The built-in layer catalog (`MOCK_LAYERS`) still lives
- * in `scene-fixtures.ts` since the built-in roster is panel
- * presentation data; user-added layers live in `customLayers` on the
- * store and are merged in at render time.
+ * in the pack's `scene-fixtures.ts` since the built-in roster is
+ * panel presentation data; user-added layers live in `customLayers`
+ * on the store and are merged in at render time.
  *
  * Command-registry contract: every clickable affordance ALSO exists
  * as a runtime-registered command so the command palette + global

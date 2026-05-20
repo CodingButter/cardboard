@@ -9,20 +9,43 @@ import {
   Package,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { Tooltip } from "../../../components/ui/Tooltip";
-import { EmptyState } from "../../../components/ui";
-import { registerCommand } from "../../../state/useCommandStore";
+// Type-only — see other migrated panels for the pack-relative pattern.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import { Tooltip } from "../../../apps/editor/src/components/ui/Tooltip";
+// Type-only on `TilePresetCategoryFilter` — pack-relative is fine because
+// erased at compile time.
+import type { TilePresetCategoryFilter } from "../../../apps/editor/src/state/useTilePresetStore";
+import type { TilePresetRow } from "./scene-fixtures";
+// Externalised — both stores are synced singletons:
+//   - `useTilePresetStore` writes `activeId` + `activeCategory`,
+//     broadcast via `cardboard.sync.tile-preset` so popped-out panels
+//     stay in lockstep with the host.
+//   - `useTilePresetRegistryStore` holds the per-project preset
+//     registry that hydrates from IDB; a duplicate inside the pack
+//     would render zero entries.
+//   - `EmptyState` is pulled in for the empty-category surface; it
+//     can't be bundled because its `logo.png` asset import doesn't
+//     resolve cleanly from a pack-side `Bun.build`.
+//   - `registerCommand` routes into the host's command store.
 import {
+  EmptyState,
+  registerCommand,
   useTilePresetStore,
-  type TilePresetCategoryFilter,
-} from "../../../state/useTilePresetStore";
-import { useTilePresetRegistryStore } from "../../../state/useTilePresetRegistryStore";
-import type { TilePresetRow } from "../scene-fixtures";
+  useTilePresetRegistryStore,
+} from "@cardboard/editor-shell";
 
 /**
  * TilePresetPanel — categorised tile preset picker (walls / floors /
  * ceilings / decor).
+ *
+ * P3 batch B migration. Moved from
+ * `apps/editor/src/views/scene/panels/TilePresetPanel.tsx` into the
+ * core-editor-pack with no behavioural changes — only the import
+ * paths flipped to:
+ *   - pack-local `scene-fixtures` for the `TilePresetRow` type;
+ *   - `@cardboard/editor-shell` for the synced stores +
+ *     `registerCommand` + `EmptyState` so the panel runs against the
+ *     host singletons.
  *
  * Visual target: the TILE PRESETS section from `Editor Design/Map.png`
  * — a vertical scrolling list of rows where each row pairs a small
@@ -31,26 +54,17 @@ import type { TilePresetRow } from "../scene-fixtures";
  * so the picker has to surface 5–6 tiles at a glance at the default
  * panel size (~230×190px) and scroll the rest.
  *
- * Chips follow the same canonical pattern as OutputPanel and
- * ProblemsPanel: a small coloured dot prefix + uppercase label +
- * count badge, sized at `px-2 py-1` with `text-[10px]`. The category
- * strip uses `flex flex-wrap` (never a horizontal scroller) so chips
- * stay glanceable at any panel width — category filtering is primary
- * navigation, not a secondary control. Chips wrap to a second row
- * when the panel is narrow.
- *
  * State source: Wave 3.3 — reads / writes via `useTilePresetStore`.
  * The synced store handles persistence (`cardboard.sync.tile-preset`)
- * and cross-window propagation, so this panel owns no localStorage
- * logic of its own. The preset catalog itself (`MOCK_TILE_PRESETS`)
- * still lives in `scene-fixtures.ts` since the catalog is panel
- * presentation data, not synced runtime state.
+ * and cross-window propagation. The preset catalog itself is sourced
+ * from `useTilePresetRegistryStore` (the IDB-hydrated registry the
+ * active project's pack chain populates).
  *
  * Command registry contract — every interactive control here ALSO
  * registers a command via `registerCommand`. Dynamic per-preset +
  * per-category registrations live in `useEffect`s keyed on the
- * underlying list so the palette stays in sync with whatever
- * `MOCK_TILE_PRESETS` resolves to. Each command body calls
+ * underlying list so the palette stays in sync with whatever the
+ * registry resolves to. Each command body calls
  * `useTilePresetStore.getState()` directly — no closure-ref dance.
  */
 
@@ -120,11 +134,7 @@ function findCategoryMeta(id: CategoryFilter): CategoryMeta {
  * Live preset list — adapter from `useTilePresetRegistryStore` (the
  * IDB-hydrated registry) to the panel's `TilePresetRow` shape. Reads
  * the registry's `presets` record, returns a stable insertion-ordered
- * array of rows. Wave 3.5 critical #2 — replaces the previous
- * `MOCK_TILE_PRESETS` feed which produced ids (`wall-brick`) the
- * registry didn't know about, causing paints to write unknown ids
- * with no texture/colour mapping. The shape adapter keeps PresetList
- * + PresetRow unchanged.
+ * array of rows.
  */
 function useLivePresets(): readonly TilePresetRow[] {
   const presets = useTilePresetRegistryStore((s) => s.presets);

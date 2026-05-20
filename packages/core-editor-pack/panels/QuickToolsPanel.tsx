@@ -1,48 +1,43 @@
-// Wave 3.4 — TSX → JSON migration.
+// Phase-1b JSON-driven panel — TSX shell registers commands; the
+// visible body is rendered by the host's `<PanelRenderer/>` against
+// the bundled JSON spec.
 //
-// QuickToolsPanel is now rendered from a JSON PanelSpec via
-// `<PanelRenderer/>`. This file is the thin TSX host that:
-//
-//   1. Imports the JSON spec from `panel-renderer/specs/quick-tools.json`.
-//   2. Registers the static `scene.quickTools.clear` command + a
-//      `scene.quickTools.tag.toggle.<id>` per MOCK_QUICK_TOOLS entry.
-//   3. Exports the same MANIFEST shape MapView consumes.
-//
-// The visible body (eyebrow header + applied-count badge + Clear button
-// + chip wrap) is fully expressed in JSON. Active state is computed by
-// the renderer's `ToggleButton.activeWhenContains` discriminant against
-// `store.scene.cells[selected].tags`; disabled state by
-// `disabledWhen.isNullish` against `store.selection.selected`. The
-// header conditionally swaps between "Quick Tools (N)" and "Quick
-// Tools — select a cell" via two `Conditional` nodes gated on
-// `selected` and `equals: null` respectively.
-//
-// Width-based tiny "Resize panel" fallback (<110px) is NOT migrated —
-// the JSON renderer has no panel-width reactive context yet. Same gap
-// as BrushPanel — flagged in the deliverable report. The chip wrap
-// uses `flex-wrap` so chips reflow naturally at narrow widths instead
-// of forcing a horizontal scrollbar.
-//
-// State source: Wave 3.3 — reads tags from `useSceneStore.cells[key]`
-// keyed by the selected coord, writes via `toggleCellTag` from inside
-// the registered commands.
+// P3 batch B migration. Moved from
+// `apps/editor/src/views/scene/panels/QuickToolsPanel.tsx` into the
+// core-editor-pack with no behavioural changes. The JSON spec moves
+// alongside the TSX file — `quick-tools.json` now lives in this
+// directory rather than `apps/editor/src/panel-renderer/specs/`.
+// Subsequent P4 work will see the shell's `specs/` directory empty
+// out as every JSON spec migrates with its TSX counterpart.
 import React from "react";
 import { Wrench } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useSelectionStore } from "../../../state/useSelectionStore";
-import { useSceneStore, cellKey } from "../../../state/useSceneStore";
-import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
-import type { PanelSpec } from "../../../panel-renderer/types";
-import { MOCK_QUICK_TOOLS, type QuickToolRow } from "../scene-fixtures";
-import quickToolsSpecJson from "../../../panel-renderer/specs/quick-tools.json";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
+// Externalised — same singleton story as the other Wave-3 stores. The
+// renderer reads/writes them via the binding resolver, so the pack
+// MUST run against the host's React + the host's store instances.
+// `cellKey` is the canonical coord-key format the scene store uses;
+// using the helper rather than hand-formatting `${x},${y}` shields the
+// pack from any future format change in a single shared place.
+import {
+  PanelRenderer,
+  cellKey,
+  registerCommand,
+  useSceneStore,
+  useSelectionStore,
+} from "@cardboard/editor-shell";
+import { MOCK_QUICK_TOOLS, type QuickToolRow } from "./scene-fixtures";
+// Bun bundles JSON imports inline — the spec ships as a literal in
+// the compiled pack-script bundle.
+import quickToolsSpecJson from "./quick-tools.json";
 
 const QUICK_TOOLS_SPEC = quickToolsSpecJson as PanelSpec;
 
 /**
  * JSON-driven quick-tools panel — TSX shell only owns command
  * registration. Everything visible lives in the imported JSON spec,
- * rendered through `<PanelRenderer/>`.
+ * rendered through the host's `<PanelRenderer/>`.
  */
 export function QuickToolsPanel(): React.JSX.Element {
   // Static "clear all" command. Registered once on mount. Reads the

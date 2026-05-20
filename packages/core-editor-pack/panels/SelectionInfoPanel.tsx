@@ -1,30 +1,32 @@
-// Wave 3.4 — TSX → JSON migration.
+// Phase-1b JSON-driven panel — TSX shell registers commands; the
+// visible body is rendered by the host's `<PanelRenderer/>` against
+// the bundled JSON spec.
 //
-// SelectionInfoPanel is now rendered from a JSON PanelSpec via
-// `<PanelRenderer/>`. This file is the thin TSX host that:
-//
-//   1. Imports the JSON spec from `panel-renderer/specs/selection-info.json`.
-//   2. Registers the four Selection commands (copy / clear / invert /
-//      select-all) on mount. The JSON spec invokes the Clear command
-//      via `{ script: "scene.selection.clear" }`; the others stay
-//      reserved in the palette for keybindings + future wiring.
-//   3. Exports the same MANIFEST shape MapView consumes.
-//
-// The panel BODY (label/value status-bar tiles + progressive tooltips)
-// is fully expressed in JSON. The dynamic readout — cursor, hover,
-// active layer, selection count — is driven by store bindings +
-// named formatters wired into PanelRenderer. See
-// `docs/plans/EDITOR_ENGINE.md` §4 for the spec model.
+// P3 batch B migration. Moved from
+// `apps/editor/src/views/scene/panels/SelectionInfoPanel.tsx` into the
+// core-editor-pack with no behavioural changes. The JSON spec
+// (`selection-info.json`) moves alongside the TSX file.
 import React from "react";
 import { Crosshair } from "lucide-react";
-import type { DockPanelDef } from "../../../components/dock/DockShell";
-import { registerCommand } from "../../../state/useCommandStore";
-import { useSelectionStore } from "../../../state/useSelectionStore";
-import { useLayerStore } from "../../../state/useLayerStore";
-import { PanelRenderer } from "../../../panel-renderer/PanelRenderer";
-import type { PanelSpec } from "../../../panel-renderer/types";
-import { MOCK_LAYERS, type SelectionInfoRow } from "../scene-fixtures";
-import selectionInfoSpecJson from "../../../panel-renderer/specs/selection-info.json";
+// Type-only — pack-builder erases at compile time.
+import type { DockPanelDef } from "../../../apps/editor/src/components/dock/DockShell";
+import type { PanelSpec } from "../../../apps/editor/src/panel-renderer/types";
+// Externalised — selection + layer stores are synced singletons with
+// BroadcastChannel cross-window sync. Bundling duplicates would write
+// to a private copy that never reaches the host's MapCanvas / palette.
+import {
+  PanelRenderer,
+  registerCommand,
+  useLayerStore,
+  useSelectionStore,
+} from "@cardboard/editor-shell";
+import {
+  MOCK_LAYERS,
+  type SelectionInfoRow,
+} from "./scene-fixtures";
+// Bun bundles JSON imports inline — the spec ships as a literal in
+// the compiled pack-script bundle.
+import selectionInfoSpecJson from "./selection-info.json";
 
 const SELECTION_INFO_SPEC = selectionInfoSpecJson as PanelSpec;
 
@@ -83,10 +85,10 @@ function formatClipboard(info: SelectionInfoRow): string {
 
 /**
  * Status-bar Selection Info panel — JSON-driven body, TSX-driven
- * command registrations. The visible content is rendered through
- * `<PanelRenderer/>` from the imported spec; the commands the panel
- * contributes to the registry stay in TSX until the editor command
- * model supports declarative registration from JSON.
+ * command registrations. The visible content is rendered through the
+ * host's `<PanelRenderer/>` from the imported spec; the commands the
+ * panel contributes to the registry stay in TSX until the editor
+ * command model supports declarative registration from JSON.
  */
 export function SelectionInfoPanel(): React.JSX.Element {
   // Each command's `run` is a small closure over the live store

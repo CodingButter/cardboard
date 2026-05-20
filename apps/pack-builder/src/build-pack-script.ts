@@ -359,7 +359,14 @@ export async function buildPackScript(absSourcePath: string): Promise<string> {
               export const useActiveScene = __mod.useActiveScene;
               export const useDiagnosticsStore = __mod.useDiagnosticsStore;
               export const useHistoryStore = __mod.useHistoryStore;
+              export const useLayerStore = __mod.useLayerStore;
+              export const useTilePresetStore = __mod.useTilePresetStore;
+              export const useTilePresetRegistryStore = __mod.useTilePresetRegistryStore;
+              export const useSceneStore = __mod.useSceneStore;
+              export const cellKey = __mod.cellKey;
+              export const useSelectionStore = __mod.useSelectionStore;
               export const EmptyState = __mod.EmptyState;
+              export const PanelRenderer = __mod.PanelRenderer;
             `,
           }));
         },

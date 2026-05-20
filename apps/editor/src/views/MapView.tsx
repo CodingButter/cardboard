@@ -18,10 +18,7 @@ import {
   BrushPanel,
   MANIFEST as BRUSH_MANIFEST,
 } from "./scene/panels/BrushPanel";
-import {
-  TilePresetPanel,
-  MANIFEST as TILE_PRESET_MANIFEST,
-} from "./scene/panels/TilePresetPanel";
+// TilePresetPanel migrated to the core-editor-pack (P3 batch B).
 import {
   MapCanvasPanel,
   MANIFEST as MAP_CANVAS_MANIFEST,
@@ -30,25 +27,16 @@ import {
   PreviewPanel,
   MANIFEST as PREVIEW_MANIFEST,
 } from "./scene/panels/PreviewPanel";
-import {
-  LayersPanel,
-  MANIFEST as LAYERS_MANIFEST,
-} from "./scene/panels/LayersPanel";
+// LayersPanel migrated to the core-editor-pack (P3 batch B).
 import {
   CellInspectorPanel,
   MANIFEST as CELL_INSPECTOR_MANIFEST,
 } from "./scene/panels/CellInspectorPanel";
-import {
-  QuickToolsPanel,
-  MANIFEST as QUICK_TOOLS_MANIFEST,
-} from "./scene/panels/QuickToolsPanel";
+// QuickToolsPanel migrated to the core-editor-pack (P3 batch B).
 // OutputPanel + ProblemsPanel migrated to the core-editor-pack
 // (CORE_EDITOR_PACK.md §10 P3 batch A). Registered via the pack's
 // `scripts/setup.tsx` with `surface: false`.
-import {
-  SelectionInfoPanel,
-  MANIFEST as SELECTION_INFO_MANIFEST,
-} from "./scene/panels/SelectionInfoPanel";
+// SelectionInfoPanel migrated to the core-editor-pack (P3 batch B).
 import {
   SceneSettingsPanel,
   MANIFEST as SCENE_SETTINGS_MANIFEST,
@@ -122,15 +110,16 @@ const PANELS: readonly DockPanelDef[] = [
   // chrome around the canvas).
   { ...TOOL_PALETTE_MANIFEST, component: ToolPalettePanel },
   { ...BRUSH_MANIFEST, component: BrushPanel },
-  { ...TILE_PRESET_MANIFEST, component: TilePresetPanel },
+  // TilePresetPanel — contributed via the core-editor-pack (P3 batch B).
   { ...MAP_CANVAS_MANIFEST, component: MapCanvasPanel, surface: false, headerless: true },
   { ...PREVIEW_MANIFEST, component: PreviewPanel },
-  { ...LAYERS_MANIFEST, component: LayersPanel },
+  // LayersPanel — contributed via the core-editor-pack (P3 batch B).
   { ...CELL_INSPECTOR_MANIFEST, component: CellInspectorPanel },
-  { ...QUICK_TOOLS_MANIFEST, component: QuickToolsPanel },
+  // QuickToolsPanel — contributed via the core-editor-pack (P3 batch B).
   // OutputPanel + ProblemsPanel — contributed via the core-editor-pack
   // at runtime (P3 batch A; registered with `surface: false`).
-  { ...SELECTION_INFO_MANIFEST, component: SelectionInfoPanel, surface: false, headerless: true },
+  // SelectionInfoPanel — contributed via the core-editor-pack (P3 batch
+  // B; registered with `surface: false, headerless: true`).
   { ...SCENE_SETTINGS_MANIFEST, component: SceneSettingsPanel },
   // Opt-in Wave-2 panels — discoverable via the DocksModal but
   // intentionally absent from the default layout below.

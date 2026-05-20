@@ -1,14 +1,27 @@
 /**
- * core-editor-pack — P2 + P3 batch A setup script.
+ * core-editor-pack — P2 + P3 batches A/B setup script.
  *
  * P2 migrated `NotesPanel` out of the editor shell into this pack via
  * the `ctx.registerPanel(...)` API on `EditorPackContext`. P3 batch A
- * extends the same pattern to four more leaf panels:
+ * extended the pattern to four more leaf panels:
  *
  *   - `OutputPanel`     (Diagnostics — bottom strip log surface)
  *   - `ProblemsPanel`   (Diagnostics — warn/error subset)
  *   - `HistoryPanel`    (Diagnostics — undo/redo stack visualisation)
  *   - `LightingPanel`   (Scene — opt-in light list)
+ *
+ * P3 batch B (this commit) migrates the next four panels — the
+ * store-WRITER set:
+ *
+ *   - `LayersPanel`        (writes `useLayerStore` — order /
+ *                           visibility / active / custom-layer roster)
+ *   - `TilePresetPanel`    (writes `useTilePresetStore` activeId +
+ *                           activeCategory; reads the IDB-hydrated
+ *                           `useTilePresetRegistryStore`)
+ *   - `QuickToolsPanel`    (JSON-driven; commands write
+ *                           `useSceneStore.toggleCellTag`)
+ *   - `SelectionInfoPanel` (JSON-driven; commands write
+ *                           `useSelectionStore.select`)
  *
  * Surface flags (`surface`, `headerless`) preserve the registration
  * semantics MapView previously used in its static `PANELS` array.
@@ -22,7 +35,7 @@
  * Returns a cleanup that fires every per-contribution unregister so
  * a future Extensions-tab live-disable can drop the pack's panels
  * out of the DocksModal without a reload. See
- * `docs/plans/CORE_EDITOR_PACK.md` §10 P2 / P3 batch A.
+ * `docs/plans/CORE_EDITOR_PACK.md` §10 P2 / P3 batches A & B.
  */
 
 // Type-only — Bun erases this. Runtime `ctx` is constructed by the
@@ -34,6 +47,11 @@ import { OutputPanel, MANIFEST as OUTPUT_MANIFEST } from "../panels/OutputPanel"
 import { ProblemsPanel, MANIFEST as PROBLEMS_MANIFEST } from "../panels/ProblemsPanel";
 import { HistoryPanel, MANIFEST as HISTORY_MANIFEST } from "../panels/HistoryPanel";
 import { LightingPanel, MANIFEST as LIGHTING_MANIFEST } from "../panels/LightingPanel";
+// P3 batch B — store-writer panels.
+import { LayersPanel, MANIFEST as LAYERS_MANIFEST } from "../panels/LayersPanel";
+import { TilePresetPanel, MANIFEST as TILE_PRESET_MANIFEST } from "../panels/TilePresetPanel";
+import { QuickToolsPanel, MANIFEST as QUICK_TOOLS_MANIFEST } from "../panels/QuickToolsPanel";
+import { SelectionInfoPanel, MANIFEST as SELECTION_INFO_MANIFEST } from "../panels/SelectionInfoPanel";
 
 export default function setup(ctx: EditorPackContext): () => void {
   // Compose each panel def the same way MapView's old static `PANELS`
@@ -70,6 +88,32 @@ export default function setup(ctx: EditorPackContext): () => void {
     ctx.registerPanel({
       ...LIGHTING_MANIFEST,
       component: LightingPanel,
+    }),
+    // P3 batch B — LayersPanel was a default-surface panel in MapView.
+    ctx.registerPanel({
+      ...LAYERS_MANIFEST,
+      component: LayersPanel,
+    }),
+    // P3 batch B — TilePresetPanel was a default-surface panel.
+    ctx.registerPanel({
+      ...TILE_PRESET_MANIFEST,
+      component: TilePresetPanel,
+    }),
+    // P3 batch B — QuickToolsPanel was registered with default
+    // surface flags in MapView; the JSON spec controls its own
+    // chrome.
+    ctx.registerPanel({
+      ...QUICK_TOOLS_MANIFEST,
+      component: QuickToolsPanel,
+    }),
+    // P3 batch B — SelectionInfoPanel was the only `surface: false,
+    // headerless: true` panel besides MapCanvas. The status-bar
+    // tile look depends on those flags, so they're preserved here.
+    ctx.registerPanel({
+      ...SELECTION_INFO_MANIFEST,
+      component: SelectionInfoPanel,
+      surface: false,
+      headerless: true,
     }),
   ];
 

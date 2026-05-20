@@ -29,7 +29,13 @@ import { registerCommand, useCommandStore } from "../state/useCommandStore";
 import { useActiveScene } from "../shell/ActiveSceneContext";
 import { useDiagnosticsStore } from "../state/useDiagnosticsStore";
 import { useHistoryStore } from "../state/useHistoryStore";
+import { useLayerStore } from "../state/useLayerStore";
+import { useTilePresetStore } from "../state/useTilePresetStore";
+import { useTilePresetRegistryStore } from "../state/useTilePresetRegistryStore";
+import { useSceneStore, cellKey } from "../state/useSceneStore";
+import { useSelectionStore } from "../state/useSelectionStore";
 import { EmptyState } from "../components/ui/EmptyState";
+import { PanelRenderer } from "../panel-renderer/PanelRenderer";
 
 /**
  * The runtime surface published into the `globalThis` slot. Pack-shipped
@@ -60,6 +66,38 @@ export const shellSdk = {
   useDiagnosticsStore,
   // P3 batch A — HistoryPanel reads + mutates the undo/redo stack.
   useHistoryStore,
+  // P3 batch B — LayersPanel reads + writes layer order/visibility/
+  // active id + custom-layer roster. Any pack that contributes a
+  // layer-aware surface (mini-layers picker, layer-scoped tool,
+  // per-layer visibility automation) reaches for the same hook —
+  // the synced store's BroadcastChannel makes shared host-side
+  // identity mandatory rather than cosmetic.
+  useLayerStore,
+  // P3 batch B — TilePresetPanel writes activeId/activeCategory.
+  // Any pack that contributes a tile-picker (alternate layout,
+  // categorised by tag, search-driven) needs to drive the same
+  // selection so the painter writes the right preset.
+  useTilePresetStore,
+  // P3 batch B — TilePresetPanel reads the per-project preset
+  // registry. The registry is hydrated from IDB at project-switch
+  // time; only one identity can stay in sync with that hydration.
+  useTilePresetRegistryStore,
+  // P3 batch B — QuickToolsPanel reads cells/tags and writes via
+  // `toggleCellTag`. Same singleton+broadcast story as the other
+  // Wave-3 stores — bundling a duplicate would write to a private
+  // copy and the painter would never see the tag.
+  useSceneStore,
+  // P3 batch B — `cellKey(x, y)` is the canonical key format the
+  // scene store uses internally. Exposing the helper avoids a pack
+  // hard-coding `${x},${y}` and silently drifting if the format
+  // changes (the helper has been the single source of truth since
+  // Wave 3.2). Any pack that addresses cells by coord needs this.
+  cellKey,
+  // P3 batch B — QuickToolsPanel + SelectionInfoPanel read selection
+  // + write `select(null)`. Pack-shipped selection tools (lasso,
+  // ring-select, modifier-key extensions) write here. Singleton +
+  // broadcast applies.
+  useSelectionStore,
   // P3 batch A — `EmptyState` is presentational, but it pulls in a
   // binary asset import (`logo.png with { type: "file" }`) that the
   // pack-builder's `Bun.build` can't resolve cleanly when bundling
@@ -69,6 +107,17 @@ export const shellSdk = {
   // hits the same need; routing through the SDK is the
   // dogfooding-correct shape.
   EmptyState,
+  // P3 batch B — `PanelRenderer` is the JSON-spec → React renderer
+  // that powers Phase-1b's `selection-info`/`quick-tools`/`brush`/
+  // `tool-palette`/`cell-inspector` specs. The thin TSX wrappers that
+  // ship them as panels mount `<PanelRenderer spec={...}/>` directly;
+  // the renderer subscribes to host-side Wave-3 stores via
+  // `resolveBinding` so it MUST run with host React + host stores.
+  // Bundling a duplicate copy into a pack would give that copy its
+  // own (empty) dynamic-store registry and zero binding fan-in.
+  // Any third-party pack that wants JSON-authored panels reaches for
+  // the same renderer.
+  PanelRenderer,
 } as const;
 
 export type ShellSdk = typeof shellSdk;
